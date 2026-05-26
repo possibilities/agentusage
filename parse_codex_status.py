@@ -26,11 +26,6 @@ FIVE_HOUR_RE = re.compile(
 WEEKLY_RE = re.compile(
     r"Weekly limit:.*?(\d+)%\s+left\s+\(resets\s+(\d{1,2}):(\d{2})\s+on\s+(\d{1,2})\s+([A-Za-z]+)\)"
 )
-# │  Account:   mikebannister@gmail.com (Plus)
-ACCOUNT_RE = re.compile(r"Account:\s+(\S+)\s+\(([^)]+)\)")
-# │  Model:     gpt-5.5 (reasoning high, summaries auto)
-MODEL_RE = re.compile(r"Model:\s+(\S+)")
-
 MONTHS = {
     m: i
     for i, m in enumerate(
@@ -70,15 +65,6 @@ def parse(text: str, *, now: datetime | None = None) -> dict:
 
     now = now or datetime.now().astimezone()
     out: dict = {}
-
-    m = ACCOUNT_RE.search(text)
-    if m:
-        out["account"] = m.group(1)
-        out["plan"] = m.group(2)
-
-    m = MODEL_RE.search(text)
-    if m:
-        out["model"] = m.group(1)
 
     m = FIVE_HOUR_RE.search(text)
     if not m:
