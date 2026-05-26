@@ -49,5 +49,5 @@ Conventions to follow (per repo-scout): flat layout (no `src/`), Python ≥3.11,
 - [ ] `dump_plans.py`'s `TIER_LABELS` knowledge is captured as a one-line comment in `scrape.py` (or staged for task 2's `daemon.py`) so the 1/5/20 → tier-string mapping isn't lost.
 
 ## Done summary
-
+Deleted spike orchestration (run_all.py, dump_plans.py); refactored scrape.scrape() to return rendered text via try/finally cleanup with no tmpfile or main CLI; renamed project tuiuse -> agentuse and regenerated uv.lock; preserved TIER_LABELS knowledge as a tier-mapping comment in scrape.py for task 2's ACCOUNTS registry.
 ## Evidence
