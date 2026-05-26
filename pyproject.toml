@@ -1,7 +1,7 @@
 [project]
-name = "tuiuse"
+name = "agentuse"
 version = "0.1.0"
-description = "Drive a TUI through a PTY, scrape a screen, and exit"
+description = "Poll Claude and Codex usage per account and write structured JSON state"
 requires-python = ">=3.11"
 dependencies = [
     "pexpect>=4.9",

@@ -1,15 +1,14 @@
-"""Drive a TUI through a PTY, scrape a screen, and exit.
+"""Drive a TUI through a PTY, scrape a screen, and return rendered text.
 
-Usage:
-    uv run python scrape.py <target> [-- <flags passed to the TUI>...]
+Public API:
+    scrape(target_name: str, passthrough_args: list[str]) -> str
 
 Targets:
     claude   spawn `claude`, navigate to /usage, scrape the panel
     codex    spawn `codex`,  navigate to /status, scrape the panel
 """
-import argparse
+
 import sys
-import tempfile
 import time
 
 import pexpect
@@ -18,6 +17,11 @@ import pyte
 COLS, ROWS = 300, 100
 QUIET_SECONDS = 0.6
 SENTINEL_TIMEOUT = 15.0
+
+# Plan tier source-of-truth (was dump_plans.py:13-17 before task 1 demolition).
+# `~/.claude-profiles/<p>/.claude.json:oauthAccount.organizationRateLimitTier`
+# maps as: default_claude_ai -> Pro (1x), default_claude_max_5x -> Max (5x),
+# default_claude_max_20x -> Max (20x). Codex has no tier field; treat as 1x.
 
 
 # ---------- Target definitions ---------------------------------------------
@@ -52,6 +56,7 @@ TARGETS = {
 
 
 # ---------- PTY / pyte helpers ---------------------------------------------
+
 
 def _on_screen(screen, needle):
     return any(needle in line for line in screen.display)
@@ -94,7 +99,8 @@ def pump_while_text(child, screen, stream, needle, max_seconds=SENTINEL_TIMEOUT)
 
 # ---------- Core scrape flow -----------------------------------------------
 
-def scrape(target_name, passthrough_args):
+
+def scrape(target_name: str, passthrough_args: list[str]) -> str:
     target = TARGETS[target_name]
 
     screen = pyte.Screen(COLS, ROWS)
@@ -108,64 +114,37 @@ def scrape(target_name, passthrough_args):
         timeout=10,
     )
 
-    pump_until_idle(child, stream, quiet_seconds=target.get("ready_wait", QUIET_SECONDS))
-
-    child.send(target["slash"])
-    pump_until_idle(child, stream)
-
-    child.send("\r")
-
-    if target["appear"]:
-        if not pump_until_text(child, screen, stream, target["appear"]):
-            print(f"warning: sentinel {target['appear']!r} never appeared", file=sys.stderr)
-    if target["gone"]:
-        if not pump_while_text(child, screen, stream, target["gone"]):
-            print(f"warning: sentinel {target['gone']!r} never cleared", file=sys.stderr)
-    if not target["appear"] and not target["gone"]:
-        # No sentinels known yet — fall back to a generous idle window.
-        pump_until_idle(child, stream, quiet_seconds=4.0)
-
-    rendered = "\n".join(line.rstrip() for line in screen.display)
-    slash_slug = target["slash"].lstrip("/").replace("/", "-")
-    with tempfile.NamedTemporaryFile(
-        "w",
-        prefix=f"tuiuse-{target_name}-{slash_slug}-",
-        suffix=".txt",
-        dir="/tmp",
-        delete=False,
-    ) as f:
-        f.write(rendered + "\n")
-        path = f.name
-    print(path)
-
-    child.sendcontrol("c")
-    child.sendcontrol("c")
     try:
-        child.expect(pexpect.EOF, timeout=5)
-    except pexpect.TIMEOUT:
-        child.terminate(force=True)
+        pump_until_idle(
+            child, stream, quiet_seconds=target.get("ready_wait", QUIET_SECONDS)
+        )
 
+        child.send(target["slash"])
+        pump_until_idle(child, stream)
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Drive a TUI through a PTY, scrape a screen, and exit.",
-        usage="scrape.py <target> [-- <flags passed to the TUI>...]",
-    )
-    parser.add_argument("target", choices=sorted(TARGETS.keys()))
-    parser.add_argument(
-        "passthrough",
-        nargs=argparse.REMAINDER,
-        help="After '--', flags forwarded to the underlying TUI binary.",
-    )
-    ns = parser.parse_args()
+        child.send("\r")
 
-    # argparse.REMAINDER keeps the literal '--' if present; strip it.
-    passthrough = ns.passthrough
-    if passthrough and passthrough[0] == "--":
-        passthrough = passthrough[1:]
+        if target["appear"]:
+            if not pump_until_text(child, screen, stream, target["appear"]):
+                print(
+                    f"warning: sentinel {target['appear']!r} never appeared",
+                    file=sys.stderr,
+                )
+        if target["gone"]:
+            if not pump_while_text(child, screen, stream, target["gone"]):
+                print(
+                    f"warning: sentinel {target['gone']!r} never cleared",
+                    file=sys.stderr,
+                )
+        if not target["appear"] and not target["gone"]:
+            # No sentinels known yet — fall back to a generous idle window.
+            pump_until_idle(child, stream, quiet_seconds=4.0)
 
-    scrape(ns.target, passthrough)
-
-
-if __name__ == "__main__":
-    main()
+        return "\n".join(line.rstrip() for line in screen.display)
+    finally:
+        child.sendcontrol("c")
+        child.sendcontrol("c")
+        try:
+            child.expect(pexpect.EOF, timeout=5)
+        except pexpect.TIMEOUT:
+            child.terminate(force=True)
