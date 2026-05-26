@@ -1,0 +1,20 @@
+{
+  "branch_name": "fn-1-agentuse-daemon-rebuild",
+  "bundles": [
+    "sketch/agentuse-daemon"
+  ],
+  "created_at": "2026-05-26T15:51:29.688393Z",
+  "depends_on_epics": [],
+  "id": "fn-1-agentuse-daemon-rebuild",
+  "last_validated_at": "2026-05-26T15:51:29.699256Z",
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "primary_repo": "/Users/mike/code/tuiuse",
+  "snippets": [],
+  "status": "open",
+  "title": "agentuse daemon rebuild",
+  "touched_repos": [
+    "/Users/mike/code/tuiuse"
+  ],
+  "updated_at": "2026-05-26T15:51:29.688393Z"
+}
