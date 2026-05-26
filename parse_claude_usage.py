@@ -127,7 +127,6 @@ def _parse_block(lines, key, label, *, optional, now, out):
     out[key] = {
         "percent_used": percent,
         "resets_at": resolved.astimezone().isoformat(),
-        "resets_raw": f"{raw_when} ({tz_name})",
     }
 
 

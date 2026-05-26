@@ -75,7 +75,6 @@ def parse(text: str, *, now: datetime | None = None) -> dict:
     out["five_hour"] = {
         "percent_used": 100 - pct_left,
         "resets_at": resets_at.isoformat(),
-        "resets_raw": f"{h:02d}:{mi:02d}",
     }
 
     m = WEEKLY_RE.search(text)
@@ -88,7 +87,6 @@ def parse(text: str, *, now: datetime | None = None) -> dict:
     out["week"] = {
         "percent_used": 100 - pct_left,
         "resets_at": resets_at.isoformat(),
-        "resets_raw": f"{h:02d}:{mi:02d} on {day} {month_name}",
     }
 
     return out
