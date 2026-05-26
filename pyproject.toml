@@ -1,0 +1,12 @@
+[project]
+name = "tuiuse"
+version = "0.1.0"
+description = "Drive a TUI through a PTY, scrape a screen, and exit"
+requires-python = ">=3.11"
+dependencies = [
+    "pexpect>=4.9",
+    "pyte>=0.8.2",
+]
+
+[tool.uv]
+package = false
