@@ -1,5 +1,5 @@
-"""Run all five scrape jobs sequentially, parse the claude /usage panels,
-and dump the aggregate to a stable /tmp JSON path.
+"""Run all five scrape jobs sequentially, parse the results, and dump the
+aggregate to a stable /tmp JSON path.
 
 Four claude scrapes across arthack profiles, then one codex scrape.
 """
@@ -8,7 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from parse_claude_usage import ClaudeUsageParseError, parse
+from parse_claude_usage import ClaudeUsageParseError, parse as parse_claude
+from parse_codex_status import CodexStatusParseError, parse as parse_codex
 
 HERE = Path(__file__).parent
 SCRAPE = HERE / "scrape.py"
@@ -42,14 +43,19 @@ def main():
     for target, profile, passthrough in JOBS:
         path = run_job(target, passthrough)
         paths.append(path)
+        text = Path(path).read_text()
         if target == "claude":
-            text = Path(path).read_text()
             try:
-                usage[profile] = parse(text)
+                usage[profile] = parse_claude(text)
             except ClaudeUsageParseError as err:
                 raise SystemExit(
                     f"parse failed for profile {profile!r}: {err}\nfile: {path}"
                 )
+        elif target == "codex":
+            try:
+                usage["codex"] = parse_codex(text)
+            except CodexStatusParseError as err:
+                raise SystemExit(f"parse failed for codex: {err}\nfile: {path}")
 
     USAGE_OUTPUT.write_text(json.dumps(usage, indent=2) + "\n")
 
