@@ -88,5 +88,5 @@ Shape:
 - [ ] Restart-cheap smoke passes: a daemon restart within `uniform(60, 180)s` of the prior scrape sleeps the remainder rather than firing a synchronized pulse.
 
 ## Done summary
-
+Added daemon.py at repo root: 5-account asyncio supervisor with per-loop 1-3min jitter, restart-cheap state via prior next_fetch_at, atomic JSON writes under ~/.local/state/agentuse/, separate <id>.error.json on failure, and SIGINT/SIGTERM clean shutdown.
 ## Evidence
