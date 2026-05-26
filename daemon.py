@@ -174,7 +174,7 @@ async def account_loop(acct: Account, executor: ThreadPoolExecutor) -> None:
                 loop.run_in_executor(
                     executor, scrape, acct["target"], acct["passthrough"]
                 ),
-                timeout=60,
+                timeout=120,
             )
             usage = parser(rendered)
             next_fetch_at = fetched_at + timedelta(seconds=delay)
