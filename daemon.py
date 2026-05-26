@@ -93,6 +93,16 @@ EVENTS_LOG = STATE_DIR / "events.jsonl"
 # only on session start/end. 15 min covers think-pauses and brief breaks.
 IDLE_THRESHOLD_S = 15 * 60
 
+# Be conservative with upstream agent processes. This also reduces local
+# contention: on a slow machine, queued account loops otherwise fire back to
+# back as soon as the target lock opens.
+MIN_PROFILE_USE_INTERVAL_S = 60.0
+
+# Slow boots and long-loading status panels are expected when the system is
+# under pressure. The scrape implementation has its own sentinel deadline; this
+# outer cap is just the daemon's guardrail for a wedged child.
+SCRAPE_TIMEOUT_S = 240.0
+
 PARSERS = {
     "claude": parse_claude_usage.parse,
     "codex": parse_codex_status.parse,
@@ -169,6 +179,34 @@ def _append_event(payload: dict, log: logging.Logger) -> None:
             f.write(json.dumps(payload) + "\n")
     except OSError as exc:
         log.warning("failed to append event: %s", exc)
+
+
+def _screen_excerpt(rendered: str, *, max_lines: int = 24) -> list[str]:
+    """Compact nonblank rendered screen lines for diagnosing parse failures."""
+    lines = [line.rstrip()[:240] for line in rendered.splitlines() if line.strip()]
+    if len(lines) <= max_lines:
+        return lines
+    head = max_lines // 2
+    tail = max_lines - head - 1
+    omitted = len(lines) - head - tail
+    return lines[:head] + [f"... {omitted} lines omitted ..."] + lines[-tail:]
+
+
+async def _wait_for_profile_gate(
+    gate_state: dict[str, float],
+    log: logging.Logger,
+) -> None:
+    """Keep profile launches at least 60s apart.
+
+    Call while holding profile_gate_lock, which also serializes live TUI
+    processes globally.
+    """
+    now = time.monotonic()
+    wait_for = gate_state["next_allowed_at"] - now
+    if wait_for > 0:
+        log.info("profile gate sleeping %.1fs", wait_for)
+        await asyncio.sleep(wait_for)
+    gate_state["next_allowed_at"] = time.monotonic() + MIN_PROFILE_USE_INTERVAL_S
 
 
 # ---------- Per-account scheduling loop ------------------------------------
@@ -248,6 +286,8 @@ async def account_loop(
     acct: Account,
     executor: ThreadPoolExecutor,
     target_lock: asyncio.Lock,
+    profile_gate_lock: asyncio.Lock,
+    profile_gate_state: dict[str, float],
     events_lock: asyncio.Lock,
 ) -> None:
     log = logging.getLogger(f"agentuse.{acct['id']}")
@@ -268,11 +308,7 @@ async def account_loop(
 
     while True:
         try:
-            # Jitter at the start of the cycle so the measured interval is
-            # uniform-random and not uniform-random-plus-scrape-duration.
-            delay = random.uniform(60, 180)
             now = datetime.now().astimezone()
-            next_fetch_at = now + timedelta(seconds=delay)
 
             # Skip the scrape when no agent has touched its log within the idle
             # window — the prior envelope's `usage` values are still current,
@@ -281,6 +317,8 @@ async def account_loop(
             if state_path.exists():
                 idle_for = time.time() - _latest_agent_activity()
                 if idle_for > IDLE_THRESHOLD_S:
+                    delay = random.uniform(60, 180)
+                    next_fetch_at = now + timedelta(seconds=delay)
                     log.info(
                         "idle %.0fs (>%ds) — skipping scrape",
                         idle_for,
@@ -321,17 +359,26 @@ async def account_loop(
             # don't starve each other (multiple Ink processes booting in
             # parallel race for terminal/CPU and lose slash-command keystrokes).
             async with target_lock:
-                # pexpect is blocking and runs in a thread. asyncio.wait_for caps
-                # the await, but the underlying executor thread cannot be cancelled
-                # by Python — a wedged scrape finishes naturally on its own.
-                rendered = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        executor, scrape, acct["target"], acct["passthrough"]
-                    ),
-                    timeout=120,
-                )
-            usage = parser(rendered)
-            fetched_at = now
+                async with profile_gate_lock:
+                    await _wait_for_profile_gate(profile_gate_state, log)
+                    # pexpect is blocking and runs in a thread. asyncio.wait_for caps
+                    # the await, but the underlying executor thread cannot be cancelled
+                    # by Python — a wedged scrape finishes naturally on its own.
+                    rendered = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            executor, scrape, acct["target"], acct["passthrough"]
+                        ),
+                        timeout=SCRAPE_TIMEOUT_S,
+                    )
+            try:
+                usage = parser(rendered)
+            except Exception as exc:
+                setattr(exc, "screen_excerpt", _screen_excerpt(rendered))
+                raise
+
+            fetched_at = datetime.now().astimezone()
+            delay = random.uniform(60, 180)
+            next_fetch_at = fetched_at + timedelta(seconds=delay)
 
             prior = _load_envelope(state_path)
             envelope = {
@@ -375,6 +422,9 @@ async def account_loop(
                 "error_type": type(exc).__name__,
                 "message": str(exc),
             }
+            screen_excerpt = getattr(exc, "screen_excerpt", None)
+            if screen_excerpt:
+                error_envelope["screen_excerpt"] = screen_excerpt
             try:
                 write_atomic(error_path, error_envelope)
             except Exception as write_exc:
@@ -391,6 +441,11 @@ async def account_loop(
                         "error_type": type(exc).__name__,
                         "message": str(exc),
                         "consecutive_failures": consecutive_failures,
+                        **(
+                            {"screen_excerpt": screen_excerpt}
+                            if screen_excerpt
+                            else {}
+                        ),
                     },
                     log,
                 )
@@ -429,6 +484,8 @@ async def main() -> None:
     target_locks: dict[str, asyncio.Lock] = {
         t: asyncio.Lock() for t in {a["target"] for a in ACCOUNTS}
     }
+    profile_gate_lock = asyncio.Lock()
+    profile_gate_state = {"next_allowed_at": 0.0}
 
     # Single shared lock for events.jsonl appends. POSIX guarantees atomic
     # appends < PIPE_BUF; the lock keeps semantics explicit and tidies up
@@ -438,7 +495,14 @@ async def main() -> None:
     # Strong refs — the event loop only holds weak refs to tasks otherwise.
     tasks = {
         asyncio.create_task(
-            account_loop(acct, executor, target_locks[acct["target"]], events_lock),
+            account_loop(
+                acct,
+                executor,
+                target_locks[acct["target"]],
+                profile_gate_lock,
+                profile_gate_state,
+                events_lock,
+            ),
             name=acct["id"],
         )
         for acct in ACCOUNTS

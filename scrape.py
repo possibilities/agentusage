@@ -20,7 +20,8 @@ import pyte
 
 COLS, ROWS = 300, 100
 QUIET_SECONDS = 0.6
-SENTINEL_TIMEOUT = 60.0
+SENTINEL_TIMEOUT = 90.0
+SLASH_RETRIES = 2
 
 # Plan tier source-of-truth (was dump_plans.py:13-17 before task 1 demolition).
 # `~/.claude-profiles/<p>/.claude.json:oauthAccount.organizationRateLimitTier`
@@ -168,8 +169,10 @@ def pump_until_text(child, screen, stream, needle, max_seconds=SENTINEL_TIMEOUT)
         try:
             chunk = child.read_nonblocking(size=8192, timeout=0.2)
             stream.feed(chunk)
-        except (pexpect.TIMEOUT, pexpect.EOF):
+        except pexpect.TIMEOUT:
             continue
+        except pexpect.EOF:
+            return _on_screen(screen, needle)
     return _on_screen(screen, needle)
 
 
@@ -181,9 +184,21 @@ def pump_while_text(child, screen, stream, needle, max_seconds=SENTINEL_TIMEOUT)
         try:
             chunk = child.read_nonblocking(size=8192, timeout=0.2)
             stream.feed(chunk)
-        except (pexpect.TIMEOUT, pexpect.EOF):
+        except pexpect.TIMEOUT:
             continue
+        except pexpect.EOF:
+            return not _on_screen(screen, needle)
     return not _on_screen(screen, needle)
+
+
+def send_slash_command(child, stream, slash: str) -> None:
+    # Clear any partially typed input from an earlier swallowed send, then type
+    # the slash command with a quiet pump before Enter so Ink can render matches.
+    child.sendcontrol("u")
+    pump_until_idle(child, stream)
+    child.send(slash)
+    pump_until_idle(child, stream)
+    child.send("\r")
 
 
 # ---------- Core scrape flow -----------------------------------------------
@@ -238,17 +253,24 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
                 child, stream, quiet_seconds=target.get("ready_wait", QUIET_SECONDS)
             )
 
-            child.send(target["slash"])
-            pump_until_idle(child, stream)
-
-            child.send("\r")
-
             if target["appear"]:
-                if not pump_until_text(child, screen, stream, target["appear"]):
+                appeared = False
+                for attempt in range(SLASH_RETRIES):
+                    send_slash_command(child, stream, target["slash"])
+                    appeared = pump_until_text(
+                        child, screen, stream, target["appear"]
+                    )
+                    if appeared:
+                        break
+                    if attempt + 1 < SLASH_RETRIES:
+                        pump_until_idle(child, stream, quiet_seconds=2.0)
+                if not appeared:
                     print(
                         f"warning: sentinel {target['appear']!r} never appeared",
                         file=sys.stderr,
                     )
+            else:
+                send_slash_command(child, stream, target["slash"])
             if target["gone"]:
                 if not pump_while_text(child, screen, stream, target["gone"]):
                     print(
