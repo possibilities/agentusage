@@ -83,6 +83,10 @@ assert len({a["id"] for a in ACCOUNTS}) == len(ACCOUNTS), "ACCOUNTS ids must be 
 
 STATE_DIR = Path.home() / ".local" / "state" / "agentuse"
 
+# One-line-per-event audit log of every scrape and every idle-skip across all
+# accounts. Unbounded growth; rotation is a future concern when it matters.
+EVENTS_LOG = STATE_DIR / "events.jsonl"
+
 # Pause scraping when no agent has written to its session log within this window.
 # Appended jsonl mtimes are the signal — parent dir mtimes don't update on appends,
 # only on session start/end. 15 min covers think-pauses and brief breaks.
@@ -141,6 +145,31 @@ def write_atomic(path: Path, payload: dict) -> None:
         raise
 
 
+def _load_envelope(path: Path) -> dict:
+    """Read prior envelope JSON; empty dict on missing/corrupt."""
+    if not path.exists():
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+# ---------- Events audit log -----------------------------------------------
+
+
+def _append_event(payload: dict, log: logging.Logger) -> None:
+    """Append one event line to EVENTS_LOG. Failures are logged, not raised —
+    the audit trail should never block the scrape pipeline.
+    """
+    try:
+        with open(EVENTS_LOG, "a") as f:
+            f.write(json.dumps(payload) + "\n")
+    except OSError as exc:
+        log.warning("failed to append event: %s", exc)
+
+
 # ---------- Per-account scheduling loop ------------------------------------
 
 
@@ -183,7 +212,10 @@ def _initial_delay(acct: Account, log: logging.Logger) -> float:
 
 
 async def account_loop(
-    acct: Account, executor: ThreadPoolExecutor, target_lock: asyncio.Lock
+    acct: Account,
+    executor: ThreadPoolExecutor,
+    target_lock: asyncio.Lock,
+    events_lock: asyncio.Lock,
 ) -> None:
     log = logging.getLogger(f"agentuse.{acct['id']}")
     loop = asyncio.get_running_loop()
@@ -200,7 +232,8 @@ async def account_loop(
             # Jitter at the start of the cycle so the measured interval is
             # uniform-random and not uniform-random-plus-scrape-duration.
             delay = random.uniform(60, 180)
-            fetched_at = datetime.now().astimezone()
+            now = datetime.now().astimezone()
+            next_fetch_at = now + timedelta(seconds=delay)
 
             # Skip the scrape when no agent has touched its log within the idle
             # window — the prior envelope's `usage` values are still current,
@@ -214,6 +247,34 @@ async def account_loop(
                         idle_for,
                         IDLE_THRESHOLD_S,
                     )
+                    # Refresh envelope with skip stamp + next attempt so the
+                    # file acts as a liveness heartbeat even when we're idle.
+                    prior = _load_envelope(state_path)
+                    prior.update(
+                        {
+                            "id": acct["id"],
+                            "target": acct["target"],
+                            "multiplier": acct["multiplier"],
+                            "last_skipped_fetch_at": now.isoformat(),
+                            "next_fetch_at": next_fetch_at.isoformat(),
+                        }
+                    )
+                    try:
+                        write_atomic(state_path, prior)
+                    except OSError as exc:
+                        log.warning("failed to write skip envelope: %s", exc)
+                    async with events_lock:
+                        _append_event(
+                            {
+                                "ts": now.isoformat(),
+                                "id": acct["id"],
+                                "target": acct["target"],
+                                "event": "idle_skipped",
+                                "idle_for_s": round(idle_for, 1),
+                                "next_fetch_at": next_fetch_at.isoformat(),
+                            },
+                            log,
+                        )
                     await asyncio.sleep(delay)
                     continue
 
@@ -231,19 +292,33 @@ async def account_loop(
                     timeout=120,
                 )
             usage = parser(rendered)
-            next_fetch_at = fetched_at + timedelta(seconds=delay)
+            fetched_at = now
 
+            prior = _load_envelope(state_path)
             envelope = {
                 "id": acct["id"],
                 "target": acct["target"],
                 "multiplier": acct["multiplier"],
-                "fetched_at": fetched_at.isoformat(),
+                "last_successful_fetch_at": fetched_at.isoformat(),
+                "last_skipped_fetch_at": prior.get("last_skipped_fetch_at"),
                 "next_fetch_at": next_fetch_at.isoformat(),
                 "usage": usage,
             }
             write_atomic(state_path, envelope)
             error_path.unlink(missing_ok=True)
             log.info("wrote, next_fetch_at=%s", next_fetch_at.isoformat())
+            async with events_lock:
+                _append_event(
+                    {
+                        "ts": fetched_at.isoformat(),
+                        "id": acct["id"],
+                        "target": acct["target"],
+                        "event": "scraped",
+                        "next_fetch_at": next_fetch_at.isoformat(),
+                        "usage": usage,
+                    },
+                    log,
+                )
 
             sleep_for = (next_fetch_at - datetime.now().astimezone()).total_seconds()
             if sleep_for > 0:
@@ -265,6 +340,18 @@ async def account_loop(
             except Exception as write_exc:
                 log.error("failed to write error file: %s", write_exc)
             log.error("error: %s", exc)
+            async with events_lock:
+                _append_event(
+                    {
+                        "ts": failed_at.isoformat(),
+                        "id": acct["id"],
+                        "target": acct["target"],
+                        "event": "scrape_failed",
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    },
+                    log,
+                )
             await asyncio.sleep(random.uniform(60, 180))
 
 
@@ -296,10 +383,15 @@ async def main() -> None:
         t: asyncio.Lock() for t in {a["target"] for a in ACCOUNTS}
     }
 
+    # Single shared lock for events.jsonl appends. POSIX guarantees atomic
+    # appends < PIPE_BUF; the lock keeps semantics explicit and tidies up
+    # ordering when multiple loops want to write at the same instant.
+    events_lock = asyncio.Lock()
+
     # Strong refs — the event loop only holds weak refs to tasks otherwise.
     tasks = {
         asyncio.create_task(
-            account_loop(acct, executor, target_locks[acct["target"]]),
+            account_loop(acct, executor, target_locks[acct["target"]], events_lock),
             name=acct["id"],
         )
         for acct in ACCOUNTS
