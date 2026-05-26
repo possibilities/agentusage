@@ -1,0 +1,20 @@
+{
+  "branch_name": "fn-2-raise-agentuse-scrape-timeout",
+  "bundles": [],
+  "created_at": "2026-05-26T16:23:54.333482Z",
+  "depends_on_epics": [
+    "fn-1-agentuse-daemon-rebuild"
+  ],
+  "id": "fn-2-raise-agentuse-scrape-timeout",
+  "last_validated_at": "2026-05-26T16:23:54.343153Z",
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "primary_repo": "/Users/mike/code/tuiuse",
+  "snippets": [],
+  "status": "open",
+  "title": "raise agentuse scrape timeout",
+  "touched_repos": [
+    "/Users/mike/code/tuiuse"
+  ],
+  "updated_at": "2026-05-26T16:23:54.333482Z"
+}
