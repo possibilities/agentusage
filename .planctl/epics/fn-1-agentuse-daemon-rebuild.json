@@ -1,4 +1,5 @@
 {
+  "approval": "approved",
   "branch_name": "fn-1-agentuse-daemon-rebuild",
   "bundles": [
     "sketch/agentuse-daemon"
@@ -10,12 +11,12 @@
   "last_validated_at": "2026-05-26T15:51:29.699256Z",
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
-  "primary_repo": "/Users/mike/code/tuiuse",
+  "primary_repo": "/Users/mike/code/agentuse",
   "snippets": [],
   "status": "done",
   "title": "agentuse daemon rebuild",
   "touched_repos": [
-    "/Users/mike/code/tuiuse"
+    "/Users/mike/code/agentuse"
   ],
   "updated_at": "2026-05-26T16:24:00.543421Z"
 }

@@ -50,10 +50,10 @@ Shape:
 ### Investigation targets
 
 **Required**:
-- `/Users/mike/code/tuiuse/scrape.py:28-51` — `TARGETS` dict (post-task-1 still). The daemon dispatches `scrape()` against `target` keys here.
-- `/Users/mike/code/tuiuse/scrape.py` (post-task-1 refactor) — `scrape(target, passthrough) -> str` is the executor entrypoint.
-- `/Users/mike/code/tuiuse/parse_claude_usage.py:133` — `parse(text, *, now=None) -> dict`. Output goes verbatim under `"usage"` key.
-- `/Users/mike/code/tuiuse/parse_codex_status.py:60` — same shape, for codex.
+- `/Users/mike/code/agentuse/scrape.py:28-51` — `TARGETS` dict (post-task-1 still). The daemon dispatches `scrape()` against `target` keys here.
+- `/Users/mike/code/agentuse/scrape.py` (post-task-1 refactor) — `scrape(target, passthrough) -> str` is the executor entrypoint.
+- `/Users/mike/code/agentuse/parse_claude_usage.py:133` — `parse(text, *, now=None) -> dict`. Output goes verbatim under `"usage"` key.
+- `/Users/mike/code/agentuse/parse_codex_status.py:60` — same shape, for codex.
 
 **Optional**:
 - `/Users/mike/code/CLAUDE.md` — state-dir parallel naming convention (`~/.local/state/<name>/`).

@@ -16,12 +16,12 @@ Conventions to follow (per repo-scout): flat layout (no `src/`), Python ≥3.11,
 ### Investigation targets
 
 **Required**:
-- `/Users/mike/code/tuiuse/scrape.py:97-147` — `scrape()` function. Line 128 returns the rendered text; lines 129-139 are the tmp-file write to delete; lines 141-146 are the cleanup to move into `try/finally`.
-- `/Users/mike/code/tuiuse/scrape.py:149-167` — `main()` CLI wrapper to delete.
-- `/Users/mike/code/tuiuse/scrape.py:28-51` — `TARGETS` dict; keep verbatim (daemon imports it).
-- `/Users/mike/code/tuiuse/run_all.py` — delete in full.
-- `/Users/mike/code/tuiuse/dump_plans.py:13-17` — `TIER_LABELS` mapping. Capture the knowledge as a comment near task 2's ACCOUNTS registry, then delete the file.
-- `/Users/mike/code/tuiuse/pyproject.toml` — update `name` and `description`. Keep `[tool.uv] package = false`.
+- `/Users/mike/code/agentuse/scrape.py:97-147` — `scrape()` function. Line 128 returns the rendered text; lines 129-139 are the tmp-file write to delete; lines 141-146 are the cleanup to move into `try/finally`.
+- `/Users/mike/code/agentuse/scrape.py:149-167` — `main()` CLI wrapper to delete.
+- `/Users/mike/code/agentuse/scrape.py:28-51` — `TARGETS` dict; keep verbatim (daemon imports it).
+- `/Users/mike/code/agentuse/run_all.py` — delete in full.
+- `/Users/mike/code/agentuse/dump_plans.py:13-17` — `TIER_LABELS` mapping. Capture the knowledge as a comment near task 2's ACCOUNTS registry, then delete the file.
+- `/Users/mike/code/agentuse/pyproject.toml` — update `name` and `description`. Keep `[tool.uv] package = false`.
 
 **Optional**:
 - `/Users/mike/code/CLAUDE.md` — compound-word naming + verb-phrase description convention.

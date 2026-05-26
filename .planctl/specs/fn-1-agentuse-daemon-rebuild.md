@@ -31,8 +31,8 @@ Task that proves the approach: `<epic_id>.1`. If demolition + scrape refactor + 
 - [Python os.replace](https://docs.python.org/3/library/os.html#os.replace) — atomic rename semantics (same filesystem required).
 - [Hynek — Waiting in asyncio](https://hynek.me/articles/waiting-in-asyncio/) — task GC gotcha (event loop holds weak refs).
 - [roguelynn — Graceful Shutdowns](https://roguelynn.com/words/asyncio-graceful-shutdowns/) — signal handler + cancel + gather pattern.
-- `/Users/mike/code/tuiuse/scrape.py:97-147` — current scrape primitive.
-- `/Users/mike/code/tuiuse/dump_plans.py:13-17` — tier-string source-of-truth (file is deleted in task 1).
+- `/Users/mike/code/agentuse/scrape.py:97-147` — current scrape primitive.
+- `/Users/mike/code/agentuse/dump_plans.py:13-17` — tier-string source-of-truth (file is deleted in task 1).
 
 ## Docs gaps
 

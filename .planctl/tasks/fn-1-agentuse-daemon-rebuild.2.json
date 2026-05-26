@@ -10,7 +10,7 @@
   "preferred_backend": null,
   "priority": null,
   "snippets": [],
-  "target_repo": "/Users/mike/code/tuiuse",
+  "target_repo": "/Users/mike/code/agentuse",
   "tier": "xhigh",
   "title": "build agentuse daemon with per-account scheduler",
   "updated_at": "2026-05-26T16:09:43.905380Z",

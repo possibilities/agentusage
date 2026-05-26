@@ -1,4 +1,5 @@
 {
+  "approval": "approved",
   "branch_name": "fn-2-raise-agentuse-scrape-timeout",
   "bundles": [],
   "closer_done_at": "2026-05-26T16:32:08.565701Z",
@@ -10,12 +11,12 @@
   "last_validated_at": "2026-05-26T16:23:54.343153Z",
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
-  "primary_repo": "/Users/mike/code/tuiuse",
+  "primary_repo": "/Users/mike/code/agentuse",
   "snippets": [],
   "status": "done",
   "title": "raise agentuse scrape timeout",
   "touched_repos": [
-    "/Users/mike/code/tuiuse"
+    "/Users/mike/code/agentuse"
   ],
   "updated_at": "2026-05-26T16:32:08.565701Z"
 }
