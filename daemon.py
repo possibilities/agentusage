@@ -22,6 +22,7 @@ import random
 import signal
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -82,10 +83,42 @@ assert len({a["id"] for a in ACCOUNTS}) == len(ACCOUNTS), "ACCOUNTS ids must be 
 
 STATE_DIR = Path.home() / ".local" / "state" / "agentuse"
 
+# Pause scraping when no agent has written to its session log within this window.
+# Appended jsonl mtimes are the signal — parent dir mtimes don't update on appends,
+# only on session start/end. 15 min covers think-pauses and brief breaks.
+IDLE_THRESHOLD_S = 15 * 60
+
 PARSERS = {
     "claude": parse_claude_usage.parse,
     "codex": parse_codex_status.parse,
 }
+
+
+def _latest_agent_activity() -> float:
+    """Newest mtime across claude + codex session logs; 0.0 if none.
+
+    Claude profiles all symlink projects/ to ~/.claude/projects, so one walk
+    covers every claude account. Codex writes per-session rollouts under
+    sessions/YYYY/MM/DD/. Paths containing 'agentuse-scrape-' are filtered as
+    a defensive measure — empirically /usage and /status don't materialize
+    session files, but a future scrape change shouldn't accidentally keep the
+    daemon awake.
+    """
+    newest = 0.0
+    for root in (
+        Path.home() / ".claude" / "projects",
+        Path.home() / ".codex" / "sessions",
+    ):
+        if not root.exists():
+            continue
+        for p in root.rglob("*.jsonl"):
+            if "agentuse-scrape-" in str(p):
+                continue
+            try:
+                newest = max(newest, p.stat().st_mtime)
+            except OSError:
+                continue
+    return newest
 
 
 # ---------- Atomic write ----------------------------------------------------
@@ -149,7 +182,9 @@ def _initial_delay(acct: Account, log: logging.Logger) -> float:
     return random.uniform(0, 60)
 
 
-async def account_loop(acct: Account, executor: ThreadPoolExecutor) -> None:
+async def account_loop(
+    acct: Account, executor: ThreadPoolExecutor, target_lock: asyncio.Lock
+) -> None:
     log = logging.getLogger(f"agentuse.{acct['id']}")
     loop = asyncio.get_running_loop()
     parser = PARSERS[acct["target"]]
@@ -167,15 +202,34 @@ async def account_loop(acct: Account, executor: ThreadPoolExecutor) -> None:
             delay = random.uniform(60, 180)
             fetched_at = datetime.now().astimezone()
 
-            # pexpect is blocking and runs in a thread. asyncio.wait_for caps
-            # the await, but the underlying executor thread cannot be cancelled
-            # by Python — a wedged scrape finishes naturally on its own.
-            rendered = await asyncio.wait_for(
-                loop.run_in_executor(
-                    executor, scrape, acct["target"], acct["passthrough"]
-                ),
-                timeout=120,
-            )
+            # Skip the scrape when no agent has touched its log within the idle
+            # window — the prior envelope's `usage` values are still current,
+            # since no agent has burned quota since. Bootstrap by always
+            # scraping when no envelope exists yet.
+            if state_path.exists():
+                idle_for = time.time() - _latest_agent_activity()
+                if idle_for > IDLE_THRESHOLD_S:
+                    log.info(
+                        "idle %.0fs (>%ds) — skipping scrape",
+                        idle_for,
+                        IDLE_THRESHOLD_S,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+            # Serialize scrapes per target so concurrent claude TUI spawns
+            # don't starve each other (multiple Ink processes booting in
+            # parallel race for terminal/CPU and lose slash-command keystrokes).
+            async with target_lock:
+                # pexpect is blocking and runs in a thread. asyncio.wait_for caps
+                # the await, but the underlying executor thread cannot be cancelled
+                # by Python — a wedged scrape finishes naturally on its own.
+                rendered = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        executor, scrape, acct["target"], acct["passthrough"]
+                    ),
+                    timeout=120,
+                )
             usage = parser(rendered)
             next_fetch_at = fetched_at + timedelta(seconds=delay)
 
@@ -236,9 +290,18 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_shutdown, sig)
 
+    # One lock per target ("claude", "codex", ...) so same-target scrapes
+    # serialize but different targets run in parallel.
+    target_locks: dict[str, asyncio.Lock] = {
+        t: asyncio.Lock() for t in {a["target"] for a in ACCOUNTS}
+    }
+
     # Strong refs — the event loop only holds weak refs to tasks otherwise.
     tasks = {
-        asyncio.create_task(account_loop(acct, executor), name=acct["id"])
+        asyncio.create_task(
+            account_loop(acct, executor, target_locks[acct["target"]]),
+            name=acct["id"],
+        )
         for acct in ACCOUNTS
     }
 
