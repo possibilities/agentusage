@@ -35,5 +35,5 @@ risk; absorbs realistic cold-start slowness without poisoning the loop.
       fresh `<id>.json` with no `<id>.error.json` left behind.
 
 ## Done summary
-
+Raised asyncio.wait_for timeout in account_loop from 60s to 120s at daemon.py:177 to absorb claude cold-start slowness without orphaning executor threads.
 ## Evidence

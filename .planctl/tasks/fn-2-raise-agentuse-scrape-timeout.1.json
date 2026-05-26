@@ -11,8 +11,8 @@
   "target_repo": "/Users/mike/code/tuiuse",
   "tier": "medium",
   "title": "bump scrape timeout to 120s",
-  "updated_at": "2026-05-26T16:25:36.488522Z",
+  "updated_at": "2026-05-26T16:27:41.193047Z",
   "work_review_status": "unknown",
   "work_reviewed_at": null,
-  "worker_done_at": null
+  "worker_done_at": "2026-05-26T16:27:41.193047Z"
 }
