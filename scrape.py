@@ -20,7 +20,7 @@ import pyte
 
 COLS, ROWS = 300, 100
 QUIET_SECONDS = 0.6
-SENTINEL_TIMEOUT = 30.0
+SENTINEL_TIMEOUT = 60.0
 
 # Plan tier source-of-truth (was dump_plans.py:13-17 before task 1 demolition).
 # `~/.claude-profiles/<p>/.claude.json:oauthAccount.organizationRateLimitTier`
@@ -69,9 +69,11 @@ TARGETS = {
         # earlier sends get swallowed as placeholder-clearing keystrokes
         # in the input field rather than firing the slash command.
         "ready_wait": 5.0,
-        # /status has no scan phase — the panel paints once and stays. Use a
-        # row that only appears after the panel renders.
-        "appear": "5h limit",
+        # Wait for the LAST line of the panel ("Weekly limit:") rather than
+        # the first ("5h limit:"). The panel paints top-down, so waiting on
+        # the first line can return mid-render — leaving the Weekly line
+        # half-drawn for the parser regex to miss.
+        "appear": "Weekly limit:",
         "gone": None,
     },
 }
