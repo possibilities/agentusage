@@ -20,6 +20,7 @@ import logging
 import os
 import random
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -211,6 +212,38 @@ def _initial_delay(acct: Account, log: logging.Logger) -> float:
     return random.uniform(0, 60)
 
 
+NOTIFYCTL = "/Users/mike/.local/bin/notifyctl"
+
+
+def _notify_consecutive_failure(
+    acct: Account, exc: Exception, log: logging.Logger
+) -> None:
+    """Fire a desktop notification on the 2nd consecutive scrape failure.
+
+    Fire-and-forget — we Popen without wait. If notifyctl is missing or
+    fails the daemon keeps going; we log and move on.
+    """
+    title = f"agentuse: {acct['id']} failing"
+    message = f"{type(exc).__name__}: {exc}"
+    try:
+        subprocess.Popen(
+            [
+                NOTIFYCTL,
+                "show-message",
+                "-t",
+                title,
+                "-m",
+                message,
+                "--sound",
+                "Ping",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, OSError) as notify_exc:
+        log.warning("notifyctl unavailable: %s", notify_exc)
+
+
 async def account_loop(
     acct: Account,
     executor: ThreadPoolExecutor,
@@ -222,6 +255,12 @@ async def account_loop(
     parser = PARSERS[acct["target"]]
     state_path = _state_path(acct)
     error_path = _error_path(acct)
+
+    # Count of consecutive scrape failures for this account. Reset on success;
+    # we fire a notifyctl exactly once per streak when this hits 2 — so a
+    # one-off transient failure stays quiet, but a real outage gets a desktop
+    # notification on the SECOND consecutive miss.
+    consecutive_failures = 0
 
     initial = _initial_delay(acct, log)
     log.info("startup sleep %.1fs", initial)
@@ -306,6 +345,7 @@ async def account_loop(
             }
             write_atomic(state_path, envelope)
             error_path.unlink(missing_ok=True)
+            consecutive_failures = 0
             log.info("wrote, next_fetch_at=%s", next_fetch_at.isoformat())
             async with events_lock:
                 _append_event(
@@ -340,6 +380,7 @@ async def account_loop(
             except Exception as write_exc:
                 log.error("failed to write error file: %s", write_exc)
             log.error("error: %s", exc)
+            consecutive_failures += 1
             async with events_lock:
                 _append_event(
                     {
@@ -349,9 +390,15 @@ async def account_loop(
                         "event": "scrape_failed",
                         "error_type": type(exc).__name__,
                         "message": str(exc),
+                        "consecutive_failures": consecutive_failures,
                     },
                     log,
                 )
+            # Notify exactly once per failure streak — when we hit the 2nd
+            # consecutive miss, not on every subsequent miss, so a sustained
+            # outage doesn't spam the desktop.
+            if consecutive_failures == 2:
+                _notify_consecutive_failure(acct, exc, log)
             await asyncio.sleep(random.uniform(60, 180))
 
 
