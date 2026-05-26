@@ -72,7 +72,7 @@ def parse(text: str, *, now: datetime | None = None) -> dict:
     pct_left = int(m.group(1))
     h, mi = int(m.group(2)), int(m.group(3))
     resets_at = _resolve_today_time(h, mi, now)
-    out["five_hour"] = {
+    out["session"] = {
         "percent_used": 100 - pct_left,
         "resets_at": resets_at.isoformat(),
     }
