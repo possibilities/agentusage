@@ -18,10 +18,16 @@ from pathlib import Path
 import pexpect
 import pyte
 
-COLS, ROWS = 300, 100
+COLS, ROWS = 300, 200
 QUIET_SECONDS = 0.6
 SENTINEL_TIMEOUT = 90.0
 SLASH_RETRIES = 2
+
+# Best-effort wait for an optional follow-up row that paints after the
+# primary appear sentinel (e.g. claude's conditional "Current week (Sonnet
+# only)" bar, which is only present when Sonnet usage > 0%). Short enough
+# that a Sonnet-absent account doesn't slow the scrape noticeably.
+OPTIONAL_FOLLOW_TIMEOUT = 2.5
 
 # Plan tier source-of-truth (was dump_plans.py:13-17 before task 1 demolition).
 # `~/.claude-profiles/<p>/.claude.json:oauthAccount.organizationRateLimitTier`
@@ -46,11 +52,12 @@ TARGETS = {
         # quiet window can fire while Ink is still mounting — keystrokes
         # then land before the input box is ready. Hold longer.
         "ready_wait": 4.0,
-        # Wait for the exact required-label line the parser needs. Older
-        # versions had a "Scanning local sessions…" loading phase, but
-        # /usage in claude 2.1.150+ renders the data directly with no
-        # scan indicator, so the loading sentinel never fires.
+        # Primary appear sentinel: the all-models weekly bar — present on
+        # every claude account, deterministic, fast. We also do a
+        # best-effort follow-up wait for the conditional Sonnet bar so
+        # accounts with Sonnet usage > 0% capture it before we snapshot.
         "appear": "Current week (all models)",
+        "appear_optional": "Current week (Sonnet only)",
         "gone": None,
     },
     "codex": {
@@ -261,13 +268,6 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
                     send_slash_command(child, stream, slash)
                     appeared = pump_until_text(child, screen, stream, target["appear"])
                     if appeared:
-                        # Settle: panels paint top-down, and conditional rows
-                        # below the sentinel (e.g. claude's "Current week
-                        # (Sonnet only)") arrive after the sentinel matches.
-                        # Keep this short — pumping too long lets the "What's
-                        # contributing" breakdown render and push the bars
-                        # off pyte's fixed-row buffer.
-                        pump_until_idle(child, stream, quiet_seconds=0.3)
                         break
                     if attempt + 1 < SLASH_RETRIES:
                         pump_until_idle(child, stream, quiet_seconds=2.0)
@@ -276,6 +276,33 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
                         f"warning: sentinel {target['appear']!r} never appeared",
                         file=sys.stderr,
                     )
+                # Best-effort wait for a conditional follow-up row that
+                # paints after `appear` (e.g. claude's "Current week
+                # (Sonnet only)" bar, present only when Sonnet usage > 0%).
+                # Timing out here is expected and silent — it just means
+                # the row isn't on this account's panel.
+                appear_optional = target.get("appear_optional")
+                if appeared and appear_optional:
+                    matched = pump_until_text(
+                        child,
+                        screen,
+                        stream,
+                        appear_optional,
+                        max_seconds=OPTIONAL_FOLLOW_TIMEOUT,
+                    )
+                    if matched:
+                        # The sentinel matched the row's label, but the
+                        # bar and Resets lines below it render a moment
+                        # later. Bounded settle so they land before we
+                        # snapshot, without letting the breakdown phase
+                        # scroll bars off pyte's buffer.
+                        deadline = time.monotonic() + 1.0
+                        while time.monotonic() < deadline:
+                            try:
+                                chunk = child.read_nonblocking(size=8192, timeout=0.2)
+                                stream.feed(chunk)
+                            except (pexpect.TIMEOUT, pexpect.EOF):
+                                break
             else:
                 send_slash_command(child, stream, slash)
             if target["gone"]:
