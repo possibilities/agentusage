@@ -209,6 +209,8 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
 
     extra_args = target.get("extra_args", [])
     assert isinstance(extra_args, list)
+    slash = target["slash"]
+    assert isinstance(slash, str)
     args = list(extra_args) + list(passthrough_args)
     env = os.environ.copy()
 
@@ -256,11 +258,16 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
             if target["appear"]:
                 appeared = False
                 for attempt in range(SLASH_RETRIES):
-                    send_slash_command(child, stream, target["slash"])
-                    appeared = pump_until_text(
-                        child, screen, stream, target["appear"]
-                    )
+                    send_slash_command(child, stream, slash)
+                    appeared = pump_until_text(child, screen, stream, target["appear"])
                     if appeared:
+                        # Settle: panels paint top-down, and conditional rows
+                        # below the sentinel (e.g. claude's "Current week
+                        # (Sonnet only)") arrive after the sentinel matches.
+                        # Keep this short — pumping too long lets the "What's
+                        # contributing" breakdown render and push the bars
+                        # off pyte's fixed-row buffer.
+                        pump_until_idle(child, stream, quiet_seconds=0.3)
                         break
                     if attempt + 1 < SLASH_RETRIES:
                         pump_until_idle(child, stream, quiet_seconds=2.0)
@@ -270,7 +277,7 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
                         file=sys.stderr,
                     )
             else:
-                send_slash_command(child, stream, target["slash"])
+                send_slash_command(child, stream, slash)
             if target["gone"]:
                 if not pump_while_text(child, screen, stream, target["gone"]):
                     print(
