@@ -10,5 +10,5 @@ Add a test that sets up an existing envelope with `status: stale`, triggers the 
 - [ ] Test lives in tests/ and passes with `uv run pytest`
 
 ## Done summary
-
+Added tests/test_daemon_idle_stale_guard.py pinning the daemon.py:500 stale-guard: seeds a stale envelope, forces the idle window to exceed IDLE_THRESHOLD_S, runs one cycle of account_loop under asyncio.run with scrape/initial_delay/_latest_agent_activity monkeypatched, and asserts the on-disk envelope stays status='stale'. Mutation-verified: inverting the != guard to == flips the assertion to 'idle'.
 ## Evidence

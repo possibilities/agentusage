@@ -9,5 +9,6 @@
   "target_repo": "/Users/mike/code/agentuse",
   "tier": "medium",
   "title": "add test for idle-never-overwrites-stale guard",
-  "updated_at": "2026-05-29T18:10:24.579352Z"
+  "updated_at": "2026-05-29T18:14:23.252470Z",
+  "worker_done_at": "2026-05-29T18:14:23.252470Z"
 }
