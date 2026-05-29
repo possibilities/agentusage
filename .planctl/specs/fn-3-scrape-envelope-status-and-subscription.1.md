@@ -142,5 +142,5 @@ a running daemon — stop it or accept the known TUI contention.
 - [ ] `uv run pytest -q` passes
 
 ## Done summary
-
+Wired NoActiveSubscription end-to-end: parser branches on bar presence with shared sentinel, daemon's success/idle/stale/no-sub writers go through a single envelope builder emitting schema_version=1 + uniform keys, scrape.py short-circuits no-sub accounts on the same '% of usage' sentinel, scrape_one.py mirrors the shape, idle-skip never overwrites stale. Added pytest + 4-test parser regression guard.
 ## Evidence
