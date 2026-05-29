@@ -1,4 +1,5 @@
 {
+  "approval": "approved",
   "branch_name": "fn-4-test-daemon-idle-stale-guard",
   "bundles": [],
   "closer_done_at": "2026-05-29T18:22:33.361685Z",
@@ -18,5 +19,5 @@
   "touched_repos": [
     "/Users/mike/code/agentuse"
   ],
-  "updated_at": "2026-05-29T18:22:33.361685Z"
+  "updated_at": "2026-05-29T18:22:50.065272Z"
 }
