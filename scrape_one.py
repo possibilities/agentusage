@@ -16,7 +16,8 @@ import json
 import sys
 from datetime import datetime
 
-from daemon import ACCOUNTS, PARSERS
+from daemon import ACCOUNTS, ENVELOPE_SCHEMA_VERSION, PARSERS
+from parse_claude_usage import NoActiveSubscription
 from scrape import scrape
 
 
@@ -46,8 +47,16 @@ def main() -> int:
 
     rendered = scrape(acct["target"], acct["passthrough"])
 
+    # Mirror daemon.py's branching: NoActiveSubscription is a SUCCESS with
+    # usage=None / subscription_active=False, not a parse failure. Anything
+    # else (real format drift, panel never rendered) prints the screen so
+    # a human can diagnose.
     try:
         usage = parser(rendered)
+        no_subscription = False
+    except NoActiveSubscription:
+        usage = None
+        no_subscription = True
     except Exception as exc:
         print(f"PARSE FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
         print("--- rendered screen ---", file=sys.stderr)
@@ -61,14 +70,27 @@ def main() -> int:
         f"[{done.isoformat()}] ok ({(done - started).total_seconds():.1f}s)",
         file=sys.stderr,
     )
+    # Mirror daemon._build_envelope shape so this tool stays useful as a
+    # spec reference for client devs. Codex never has a subscription concept.
+    if acct["target"] == "claude":
+        subscription_active: bool | None = not no_subscription
+    else:
+        subscription_active = None
     print(
         json.dumps(
             {
+                "schema_version": ENVELOPE_SCHEMA_VERSION,
                 "id": acct["id"],
                 "target": acct["target"],
                 "multiplier": acct["multiplier"],
-                "fetched_at": started.isoformat(),
+                "status": "active",
+                "subscription_active": subscription_active,
+                "last_successful_fetch_at": started.isoformat(),
+                "last_skipped_fetch_at": None,
+                "last_failed_fetch_at": None,
+                "next_fetch_at": None,
                 "usage": usage,
+                "error": None,
             },
             indent=2,
         )

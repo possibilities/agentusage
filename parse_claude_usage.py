@@ -3,7 +3,22 @@
 Strict by design: any divergence from the observed TUI format raises so we
 notice when claude updates the panel rather than silently writing stale or
 partial data.
+
+Two-axis result contract:
+
+- Subscribed accounts render rate-limit bars (``"% used"``) and parse into a
+  ``{session, week[, sonnet_week]}`` dict.
+- No-subscription accounts render a usage-contribution breakdown
+  (``"% of usage"``, ``"What's contributing to your limits usage?"``) with no
+  bars; we raise :class:`NoActiveSubscription` so the caller treats this as a
+  successful read with ``usage=None`` / ``subscription_active=False`` rather
+  than as a parse failure.
+- Anything else (panel never rendered, real format drift) raises
+  :class:`ClaudeUsageParseError`.
+
+Precedence inside :func:`parse`: subscribed-bars > no-sub-breakdown > error.
 """
+
 import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -13,7 +28,23 @@ class ClaudeUsageParseError(Exception):
     """Raised when the /usage panel doesn't match the expected shape."""
 
 
+class NoActiveSubscription(Exception):
+    """Raised when the /usage panel rendered but the account has no plan limits.
+
+    The panel shows the usage-contribution breakdown (no rate-limit bars).
+    Callers should treat this as a successful read of "no subscription" rather
+    than a parse failure: there is nothing to parse and nothing wrong.
+    """
+
+
 PANEL_HEADER = "Settings  Status   Config   Usage   Stats"
+
+# Shared sentinel for the no-subscription usage-contribution breakdown.
+# Used both here (to distinguish no-sub from real format drift) AND in
+# scrape.py's appear-sentinel retry loop to short-circuit the ~180s wait.
+# The two paths MUST key on the same literal — if you change this, change
+# scrape.TARGETS["claude"]["appear_nosub"] in lockstep.
+NO_SUB_SENTINEL = "% of usage"
 
 REQUIRED_LABELS = {
     "session": "Current session",
@@ -35,8 +66,20 @@ WEEK_TIME_RE = re.compile(
 MONTHS = {
     m: i
     for i, m in enumerate(
-        ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+        [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ],
         start=1,
     )
 }
@@ -84,7 +127,7 @@ def _resolve_week(raw: str, tz: ZoneInfo, now: datetime) -> datetime:
 def _find_block(lines: list[str], label: str):
     for i, line in enumerate(lines):
         if line.strip() == label:
-            rest = [l for l in lines[i + 1:] if l.strip()]
+            rest = [ln for ln in lines[i + 1 :] if ln.strip()]
             if len(rest) < 2:
                 raise ClaudeUsageParseError(
                     f"label {label!r} found but missing percent/reset lines"
@@ -131,18 +174,42 @@ def _parse_block(lines, key, label, *, optional, now, out):
 
 
 def parse(text: str, *, now: datetime | None = None) -> dict:
-    if PANEL_HEADER not in text:
-        raise ClaudeUsageParseError(
-            f"panel header not found: {PANEL_HEADER!r} — /usage screen likely changed"
+    # Bars are the positive signal for a subscribed account: the rate-limit
+    # rows render "<pct>% used", a literal the no-sub breakdown never emits
+    # (it uses "% of usage"). Branching on bar presence — not on the panel
+    # header — keeps the subscribed and no-sub paths fully disjoint.
+    has_bars = PERCENT_RE.search(text) is not None
+
+    if has_bars:
+        # Relax the header gate to case-insensitive on the bars path: the
+        # tab strip casing varies between scrapes ("Usage" vs "usage") and
+        # we don't want a cosmetic flip to spuriously raise on a panel that
+        # otherwise has all the bars present.
+        if PANEL_HEADER.lower() not in text.lower():
+            raise ClaudeUsageParseError(
+                f"panel header not found: {PANEL_HEADER!r} — /usage screen likely changed"
+            )
+
+        lines = text.splitlines()
+        now = now or datetime.now().astimezone()
+        out: dict = {}
+
+        for key, label in REQUIRED_LABELS.items():
+            _parse_block(lines, key, label, optional=False, now=now, out=out)
+        for key, label in OPTIONAL_LABELS.items():
+            _parse_block(lines, key, label, optional=True, now=now, out=out)
+
+        return out
+
+    # No bars — either no subscription (panel opened, breakdown rendered) or
+    # the panel genuinely never rendered (real failure / format drift).
+    if NO_SUB_SENTINEL in text:
+        raise NoActiveSubscription(
+            "claude /usage panel rendered the usage-contribution breakdown "
+            "with no rate-limit bars — account has no active subscription"
         )
 
-    lines = text.splitlines()
-    now = now or datetime.now().astimezone()
-    out: dict = {}
-
-    for key, label in REQUIRED_LABELS.items():
-        _parse_block(lines, key, label, optional=False, now=now, out=out)
-    for key, label in OPTIONAL_LABELS.items():
-        _parse_block(lines, key, label, optional=True, now=now, out=out)
-
-    return out
+    raise ClaudeUsageParseError(
+        "no rate-limit bars and no no-subscription breakdown found — "
+        "/usage panel did not render or its format changed"
+    )

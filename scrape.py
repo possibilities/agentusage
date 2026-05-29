@@ -58,6 +58,13 @@ TARGETS = {
         # accounts with Sonnet usage > 0% capture it before we snapshot.
         "appear": "Current week (all models)",
         "appear_optional": "Current week (Sonnet only)",
+        # Short-circuit sentinel for no-subscription accounts: the panel
+        # opens to the usage-contribution breakdown ("% of usage") with NO
+        # rate-limit bars. Keyed on the SAME string as parse_claude_usage
+        # .NO_SUB_SENTINEL so the two detections cannot desync. When the
+        # primary `appear` sentinel never matches AND this one does, we
+        # snapshot immediately instead of burning the full retry budget.
+        "appear_nosub": "% of usage",
         "gone": None,
     },
     "codex": {
@@ -264,14 +271,25 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
 
             if target["appear"]:
                 appeared = False
+                nosub_short_circuit = False
+                appear_nosub = target.get("appear_nosub")
                 for attempt in range(SLASH_RETRIES):
                     send_slash_command(child, stream, slash)
                     appeared = pump_until_text(child, screen, stream, target["appear"])
                     if appeared:
                         break
+                    # Primary sentinel missed — before spending the next
+                    # retry/timeout, check the no-subscription breakdown.
+                    # On no-sub accounts the bars never paint so the retry
+                    # budget would otherwise burn ~180s every cycle.
+                    # ORDER MATTERS: `appeared` is False here, so this can
+                    # only fire when the subscribed path didn't match.
+                    if appear_nosub and _on_screen(screen, appear_nosub):
+                        nosub_short_circuit = True
+                        break
                     if attempt + 1 < SLASH_RETRIES:
                         pump_until_idle(child, stream, quiet_seconds=2.0)
-                if not appeared:
+                if not appeared and not nosub_short_circuit:
                     print(
                         f"warning: sentinel {target['appear']!r} never appeared",
                         file=sys.stderr,

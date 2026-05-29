@@ -33,7 +33,12 @@ import yaml
 
 import parse_claude_usage
 import parse_codex_status
+from parse_claude_usage import NoActiveSubscription
 from scrape import scrape
+
+# Bumped whenever the envelope's top-level key set or per-field semantics
+# change. Clients (the keeper profile-balancer) gate on this — see README.
+ENVELOPE_SCHEMA_VERSION = 1
 
 
 class Account(TypedDict):
@@ -364,6 +369,61 @@ def _initial_delay(acct: Account, log: logging.Logger) -> float:
 NOTIFYCTL = "/Users/mike/.local/bin/notifyctl"
 
 
+# ---------- Envelope builder ----------------------------------------------
+
+
+# Canonical key order. Every envelope variant (active, idle, stale, no-sub)
+# emits exactly these keys with `null` where the field doesn't apply, so a
+# client never has to branch on key presence — only on values.
+ENVELOPE_KEYS = (
+    "schema_version",
+    "id",
+    "target",
+    "multiplier",
+    "status",
+    "subscription_active",
+    "last_successful_fetch_at",
+    "last_skipped_fetch_at",
+    "last_failed_fetch_at",
+    "next_fetch_at",
+    "usage",
+    "error",
+)
+
+
+def _build_envelope(
+    acct: Account,
+    *,
+    status: str,
+    subscription_active: bool | None,
+    usage: dict | None,
+    last_successful_fetch_at: str | None,
+    last_skipped_fetch_at: str | None,
+    last_failed_fetch_at: str | None,
+    next_fetch_at: str,
+    error: dict | None,
+) -> dict:
+    """Build an envelope dict with the canonical key set.
+
+    All five writers (active success, no-sub success, idle skip, stale
+    failure, restart-cheap reload) go through here so the shape can't drift.
+    """
+    return {
+        "schema_version": ENVELOPE_SCHEMA_VERSION,
+        "id": acct["id"],
+        "target": acct["target"],
+        "multiplier": acct["multiplier"],
+        "status": status,
+        "subscription_active": subscription_active,
+        "last_successful_fetch_at": last_successful_fetch_at,
+        "last_skipped_fetch_at": last_skipped_fetch_at,
+        "last_failed_fetch_at": last_failed_fetch_at,
+        "next_fetch_at": next_fetch_at,
+        "usage": usage,
+        "error": error,
+    }
+
+
 def _notify_consecutive_failure(
     acct: Account, exc: Exception, log: logging.Logger
 ) -> None:
@@ -425,46 +485,60 @@ async def account_loop(
             # window — the prior envelope's `usage` values are still current,
             # since no agent has burned quota since. Bootstrap by always
             # scraping when no envelope exists yet.
+            #
+            # IMPORTANT: never overwrite a `stale` status with `idle`. A
+            # failing account needs to keep retrying through quiet periods —
+            # if the idle-skip silently flipped its status to `idle`, a
+            # client reading the envelope would think the data is good when
+            # the last fetch actually failed.
             if state_path.exists():
-                idle_for = time.time() - _latest_agent_activity()
-                if idle_for > IDLE_THRESHOLD_S:
-                    delay = random.uniform(60, 180)
-                    next_fetch_at = now + timedelta(seconds=delay)
-                    log.info(
-                        "idle %.0fs (>%ds) — skipping scrape",
-                        idle_for,
-                        IDLE_THRESHOLD_S,
-                    )
-                    # Refresh envelope with skip stamp + next attempt so the
-                    # file acts as a liveness heartbeat even when we're idle.
-                    prior = _load_envelope(state_path)
-                    prior.update(
-                        {
-                            "id": acct["id"],
-                            "target": acct["target"],
-                            "multiplier": acct["multiplier"],
-                            "last_skipped_fetch_at": now.isoformat(),
-                            "next_fetch_at": next_fetch_at.isoformat(),
-                        }
-                    )
-                    try:
-                        write_atomic(state_path, prior)
-                    except OSError as exc:
-                        log.warning("failed to write skip envelope: %s", exc)
-                    async with events_lock:
-                        _append_event(
-                            {
-                                "ts": now.isoformat(),
-                                "id": acct["id"],
-                                "target": acct["target"],
-                                "event": "idle_skipped",
-                                "idle_for_s": round(idle_for, 1),
-                                "next_fetch_at": next_fetch_at.isoformat(),
-                            },
-                            log,
+                prior = _load_envelope(state_path)
+                if prior.get("status") != "stale":
+                    idle_for = time.time() - _latest_agent_activity()
+                    if idle_for > IDLE_THRESHOLD_S:
+                        delay = random.uniform(60, 180)
+                        next_fetch_at = now + timedelta(seconds=delay)
+                        log.info(
+                            "idle %.0fs (>%ds) — skipping scrape",
+                            idle_for,
+                            IDLE_THRESHOLD_S,
                         )
-                    await asyncio.sleep(delay)
-                    continue
+                        # Refresh envelope with skip stamp + next attempt so
+                        # the file acts as a liveness heartbeat even when
+                        # we're idle. Preserve subscription_active / usage /
+                        # last_successful_fetch_at / last_failed_fetch_at
+                        # via the canonical builder.
+                        envelope = _build_envelope(
+                            acct,
+                            status="idle",
+                            subscription_active=prior.get("subscription_active"),
+                            usage=prior.get("usage"),
+                            last_successful_fetch_at=prior.get(
+                                "last_successful_fetch_at"
+                            ),
+                            last_skipped_fetch_at=now.isoformat(),
+                            last_failed_fetch_at=prior.get("last_failed_fetch_at"),
+                            next_fetch_at=next_fetch_at.isoformat(),
+                            error=prior.get("error"),
+                        )
+                        try:
+                            write_atomic(state_path, envelope)
+                        except OSError as exc:
+                            log.warning("failed to write skip envelope: %s", exc)
+                        async with events_lock:
+                            _append_event(
+                                {
+                                    "ts": now.isoformat(),
+                                    "id": acct["id"],
+                                    "target": acct["target"],
+                                    "event": "idle_skipped",
+                                    "idle_for_s": round(idle_for, 1),
+                                    "next_fetch_at": next_fetch_at.isoformat(),
+                                },
+                                log,
+                            )
+                        await asyncio.sleep(delay)
+                        continue
 
             # Serialize scrapes per target so concurrent claude TUI spawns
             # don't starve each other (multiple Ink processes booting in
@@ -481,8 +555,17 @@ async def account_loop(
                         ),
                         timeout=SCRAPE_TIMEOUT_S,
                     )
+            # Subscribed claude / codex success: parser returns a usage dict.
+            # No-subscription claude: parser raises NoActiveSubscription —
+            # we catch that as a SUCCESS (the panel rendered, the account
+            # just has no plan limits) and write a no-sub-shaped envelope.
+            # Real parse errors propagate out to the except block below.
             try:
                 usage = parser(rendered)
+                no_subscription = False
+            except NoActiveSubscription:
+                usage = None
+                no_subscription = True
             except Exception as exc:
                 setattr(exc, "screen_excerpt", _screen_excerpt(rendered))
                 raise
@@ -492,15 +575,25 @@ async def account_loop(
             next_fetch_at = fetched_at + timedelta(seconds=delay)
 
             prior = _load_envelope(state_path)
-            envelope = {
-                "id": acct["id"],
-                "target": acct["target"],
-                "multiplier": acct["multiplier"],
-                "last_successful_fetch_at": fetched_at.isoformat(),
-                "last_skipped_fetch_at": prior.get("last_skipped_fetch_at"),
-                "next_fetch_at": next_fetch_at.isoformat(),
-                "usage": usage,
-            }
+            # Codex has no subscription concept — always null. Claude
+            # success path stamps fresh, overwriting whatever prior said,
+            # so an account that upgrades flips false -> true on the next
+            # cycle without needing manual cache invalidation.
+            if acct["target"] == "claude":
+                subscription_active = not no_subscription
+            else:
+                subscription_active = None
+            envelope = _build_envelope(
+                acct,
+                status="active",
+                subscription_active=subscription_active,
+                usage=usage,
+                last_successful_fetch_at=fetched_at.isoformat(),
+                last_skipped_fetch_at=prior.get("last_skipped_fetch_at"),
+                last_failed_fetch_at=prior.get("last_failed_fetch_at"),
+                next_fetch_at=next_fetch_at.isoformat(),
+                error=None,
+            )
             write_atomic(state_path, envelope)
             error_path.unlink(missing_ok=True)
             consecutive_failures = 0
@@ -514,6 +607,7 @@ async def account_loop(
                         "event": "scraped",
                         "next_fetch_at": next_fetch_at.isoformat(),
                         "usage": usage,
+                        "subscription_active": subscription_active,
                     },
                     log,
                 )
@@ -525,6 +619,14 @@ async def account_loop(
             raise
         except Exception as exc:
             failed_at = datetime.now().astimezone()
+            delay = random.uniform(60, 180)
+            next_fetch_at = failed_at + timedelta(seconds=delay)
+
+            # Two files on failure:
+            #
+            # 1) `<id>.error.json` — verbose sidecar for human debugging
+            #    keeps `screen_excerpt` (could be hundreds of lines, useful
+            #    when format-drift triggers a parse failure).
             error_envelope = {
                 "id": acct["id"],
                 "target": acct["target"],
@@ -540,6 +642,35 @@ async def account_loop(
                 write_atomic(error_path, error_envelope)
             except Exception as write_exc:
                 log.error("failed to write error file: %s", write_exc)
+
+            # 2) `<id>.json` — main envelope stamped `status: "stale"` with a
+            #    CONCISE `error` (no screen_excerpt) so a client polling
+            #    one file always sees freshness signal. Preserve last-good
+            #    usage / subscription_active / last_successful_fetch_at
+            #    from prior — on a first-ever failure with no prior, those
+            #    stay null.
+            prior = _load_envelope(state_path)
+            concise_error = {
+                "type": type(exc).__name__,
+                "message": str(exc),
+                "at": failed_at.isoformat(),
+            }
+            stale_envelope = _build_envelope(
+                acct,
+                status="stale",
+                subscription_active=prior.get("subscription_active"),
+                usage=prior.get("usage"),
+                last_successful_fetch_at=prior.get("last_successful_fetch_at"),
+                last_skipped_fetch_at=prior.get("last_skipped_fetch_at"),
+                last_failed_fetch_at=failed_at.isoformat(),
+                next_fetch_at=next_fetch_at.isoformat(),
+                error=concise_error,
+            )
+            try:
+                write_atomic(state_path, stale_envelope)
+            except Exception as write_exc:
+                log.error("failed to write stale main envelope: %s", write_exc)
+
             log.error("error: %s", exc)
             consecutive_failures += 1
             async with events_lock:
@@ -563,7 +694,7 @@ async def account_loop(
             # outage doesn't spam the desktop.
             if consecutive_failures == 2:
                 _notify_consecutive_failure(acct, exc, log)
-            await asyncio.sleep(random.uniform(60, 180))
+            await asyncio.sleep(delay)
 
 
 # ---------- Supervisor ------------------------------------------------------
