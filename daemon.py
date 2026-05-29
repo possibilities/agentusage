@@ -1,9 +1,13 @@
 """Long-lived per-account scrape daemon.
 
 Run with `uv run python daemon.py` in the foreground. One independent asyncio
-loop per account scrapes its target on a `uniform(60, 180)s` jitter, writes a
-self-stamped JSON envelope to `~/.local/state/agentuse/<id>.json`, and survives
-restarts cheaply by sleeping out the remaining `next_fetch_at` window on boot.
+loop per account scrapes its target on a `uniform(60, 180)s` jitter and
+survives restarts cheaply by sleeping out the remaining `next_fetch_at` window
+on boot.
+
+For the on-disk envelope shape, event log format, and client routing contract,
+see README.md (the data-format reference). This module is the producer; the
+README is the consumer's source of truth.
 
 Ctrl-C (SIGINT) or SIGTERM cancels all loops with a 30s grace. No PID file,
 no launchd unit, no daemonization.
