@@ -49,25 +49,25 @@ class Account(TypedDict):
 # `default_claude_max_20x` -> Max (20x). Codex has no tier; treat as 1x.
 ACCOUNTS: list[Account] = [
     {
-        "id": "claude-default",
+        "id": "default",
         "target": "claude",
         "passthrough": ["--arthack-profile", "default"],
         "multiplier": 5,
     },
     {
-        "id": "claude-multi-1",
+        "id": "multi-claude-1",
         "target": "claude",
         "passthrough": ["--arthack-profile", "multi-claude-1"],
         "multiplier": 1,
     },
     {
-        "id": "claude-multi-2",
+        "id": "multi-claude-2",
         "target": "claude",
         "passthrough": ["--arthack-profile", "multi-claude-2"],
         "multiplier": 1,
     },
     {
-        "id": "claude-multi-3",
+        "id": "multi-claude-3",
         "target": "claude",
         "passthrough": ["--arthack-profile", "multi-claude-3"],
         "multiplier": 20,
@@ -442,9 +442,7 @@ async def account_loop(
                         "message": str(exc),
                         "consecutive_failures": consecutive_failures,
                         **(
-                            {"screen_excerpt": screen_excerpt}
-                            if screen_excerpt
-                            else {}
+                            {"screen_excerpt": screen_excerpt} if screen_excerpt else {}
                         ),
                     },
                     log,
