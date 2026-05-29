@@ -29,6 +29,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TypedDict
 
+import yaml
+
 import parse_claude_usage
 import parse_codex_status
 from scrape import scrape
@@ -47,38 +49,147 @@ class Account(TypedDict):
 #   ~/.claude-profiles/<p>/.claude.json:oauthAccount.organizationRateLimitTier
 # `default_claude_ai` -> Pro (1x), `default_claude_max_5x` -> Max (5x),
 # `default_claude_max_20x` -> Max (20x). Codex has no tier; treat as 1x.
-ACCOUNTS: list[Account] = [
-    {
-        "id": "default",
-        "target": "claude",
-        "passthrough": ["--arthack-profile", "default"],
-        "multiplier": 5,
-    },
-    {
-        "id": "multi-claude-1",
-        "target": "claude",
-        "passthrough": ["--arthack-profile", "multi-claude-1"],
-        "multiplier": 1,
-    },
-    {
-        "id": "multi-claude-2",
-        "target": "claude",
-        "passthrough": ["--arthack-profile", "multi-claude-2"],
-        "multiplier": 1,
-    },
-    {
-        "id": "multi-claude-3",
-        "target": "claude",
-        "passthrough": ["--arthack-profile", "multi-claude-3"],
-        "multiplier": 20,
-    },
-    {
-        "id": "codex",
-        "target": "codex",
-        "passthrough": [],
-        "multiplier": 1,
-    },
-]
+TIER_MULTIPLIERS: dict[str, int] = {
+    "default_claude_ai": 1,
+    "default_claude_max_5x": 5,
+    "default_claude_max_20x": 20,
+}
+
+# Cap the .claude.json read so a pathological/oversize file never balloons
+# memory at boot. Mirror the keeper usage-worker's MAX_USAGE_FILE_BYTES bound;
+# 1 MiB is far above any real `oauthAccount` payload.
+MAX_CLAUDE_JSON_BYTES = 1024 * 1024
+
+
+def _xdg_config_home() -> Path:
+    """Resolve the XDG config base dir, honoring `XDG_CONFIG_HOME`."""
+    env = os.environ.get("XDG_CONFIG_HOME")
+    if env:
+        return Path(env)
+    return Path.home() / ".config"
+
+
+def _resolve_multiplier(profile: str) -> int:
+    """Derive a profile's multiplier from its `.claude.json` tier string.
+
+    Falls back to 1x with a stderr log on any read/parse failure or unknown
+    tier — the daemon must never crash on a misconfigured profile.
+    """
+    path = Path.home() / ".claude-profiles" / profile / ".claude.json"
+    try:
+        st = path.stat()
+        if st.st_size > MAX_CLAUDE_JSON_BYTES:
+            print(
+                f"[agentuse] {path} exceeds {MAX_CLAUDE_JSON_BYTES} bytes "
+                f"({st.st_size}); falling back to 1x",
+                file=sys.stderr,
+            )
+            return 1
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"[agentuse] cannot read {path} ({exc}); falling back to 1x",
+            file=sys.stderr,
+        )
+        return 1
+
+    tier = data.get("oauthAccount", {}).get("organizationRateLimitTier")
+    if tier is None:
+        print(
+            f"[agentuse] {path} has no oauthAccount.organizationRateLimitTier; "
+            f"falling back to 1x",
+            file=sys.stderr,
+        )
+        return 1
+    mult = TIER_MULTIPLIERS.get(tier)
+    if mult is None:
+        print(
+            f"[agentuse] {path} has unknown tier {tier!r}; falling back to 1x",
+            file=sys.stderr,
+        )
+        return 1
+    return mult
+
+
+def _load_profile_names() -> list[str]:
+    """Read the XDG `agentuse/config.yaml` profile name list.
+
+    Expected shape: `profiles: [name1, name2, ...]` (a top-level YAML list).
+    Missing or malformed config logs to stderr and degrades to an empty list,
+    so the daemon runs codex-only rather than crashing.
+    """
+    path = _xdg_config_home() / "agentuse" / "config.yaml"
+    if not path.exists():
+        print(
+            f"[agentuse] no config at {path}; running codex-only",
+            file=sys.stderr,
+        )
+        return []
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as exc:
+        print(
+            f"[agentuse] failed to parse {path} ({exc}); running codex-only",
+            file=sys.stderr,
+        )
+        return []
+    if not isinstance(data, dict):
+        print(
+            f"[agentuse] {path} is not a mapping; running codex-only",
+            file=sys.stderr,
+        )
+        return []
+    raw = data.get("profiles", [])
+    if not isinstance(raw, list):
+        print(
+            f"[agentuse] {path} `profiles` is not a list; running codex-only",
+            file=sys.stderr,
+        )
+        return []
+    names: list[str] = []
+    for entry in raw:
+        if isinstance(entry, str) and entry:
+            names.append(entry)
+        else:
+            print(
+                f"[agentuse] {path} `profiles` entry {entry!r} is not a "
+                f"non-empty string; skipping",
+                file=sys.stderr,
+            )
+    return names
+
+
+def _build_accounts() -> list[Account]:
+    """Build the runtime ACCOUNTS registry from the XDG config + tier lookups.
+
+    Each configured profile becomes a claude `Account` with a derived
+    multiplier; the codex account is always appended in code (it has no tier
+    and no profile dir).
+    """
+    accounts: list[Account] = []
+    for name in _load_profile_names():
+        accounts.append(
+            {
+                "id": name,
+                "target": "claude",
+                "passthrough": ["--arthack-profile", name],
+                "multiplier": _resolve_multiplier(name),
+            }
+        )
+    accounts.append(
+        {
+            "id": "codex",
+            "target": "codex",
+            "passthrough": [],
+            "multiplier": 1,
+        }
+    )
+    return accounts
+
+
+ACCOUNTS: list[Account] = _build_accounts()
 
 assert len({a["id"] for a in ACCOUNTS}) == len(ACCOUNTS), "ACCOUNTS ids must be unique"
 
