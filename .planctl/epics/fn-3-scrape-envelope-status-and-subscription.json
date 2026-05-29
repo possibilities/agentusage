@@ -2,6 +2,7 @@
   "approval": "approved",
   "branch_name": "fn-3-scrape-envelope-status-and-subscription",
   "bundles": [],
+  "closer_done_at": "2026-05-29T18:10:28.714116Z",
   "created_at": "2026-05-29T16:01:08.524638Z",
   "depends_on_epics": [],
   "id": "fn-3-scrape-envelope-status-and-subscription",
@@ -11,10 +12,10 @@
   "primary_repo": "/Users/mike/code/agentuse",
   "queue_jump": false,
   "snippets": [],
-  "status": "open",
+  "status": "done",
   "title": "scrape envelope status and subscription axes",
   "touched_repos": [
     "/Users/mike/code/agentuse"
   ],
-  "updated_at": "2026-05-29T16:01:08.524638Z"
+  "updated_at": "2026-05-29T18:10:28.714116Z"
 }
