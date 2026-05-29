@@ -1,0 +1,21 @@
+{
+  "branch_name": "fn-4-test-daemon-idle-stale-guard",
+  "bundles": [],
+  "created_at": "2026-05-29T18:10:24.579352Z",
+  "depends_on_epics": [
+    "fn-3-scrape-envelope-status-and-subscription"
+  ],
+  "id": "fn-4-test-daemon-idle-stale-guard",
+  "last_validated_at": "2026-05-29T18:10:24.610094Z",
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "primary_repo": "/Users/mike/code/agentuse",
+  "queue_jump": false,
+  "snippets": [],
+  "status": "open",
+  "title": "test daemon idle-stale guard",
+  "touched_repos": [
+    "/Users/mike/code/agentuse"
+  ],
+  "updated_at": "2026-05-29T18:10:24.579352Z"
+}
