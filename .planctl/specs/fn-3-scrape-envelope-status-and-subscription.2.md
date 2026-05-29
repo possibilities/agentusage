@@ -69,5 +69,5 @@ sentence and point at README.md instead (don't duplicate the schema).
 - [ ] daemon.py module docstring points at README instead of duplicating schema
 
 ## Done summary
-
+Created README.md (~230 lines): full client-facing data-format reference covering envelope fields, claude vs codex usage shapes, error sidecar, three event shapes, status × subscription_active decision matrix, and multiplier-weighted balancing example. Revised daemon.py module docstring to point at README instead of duplicating schema. Tests pass (4 passed).
 ## Evidence
