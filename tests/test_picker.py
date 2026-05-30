@@ -1,4 +1,4 @@
-"""Behavior pins for the dumb round-robin picker (`picker.py`).
+"""Behavior pins for the dumb round-robin picker (`agentuse.api`).
 
 Covers the four things beat-1 promised: rotation across subscribed accounts,
 empty-set → ``"default"``, the no-subscription / missing-envelope skips, and
@@ -16,18 +16,15 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 import yaml
 
-# Repo lays flat (no `src/`); make the modules importable without an editable
-# install. Mirrors the sibling test files' pattern.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import picker  # noqa: E402
+# The ``as picker`` alias keeps every monkeypatch.setattr(picker, ...) call
+# below working unchanged after the picker module became ``agentuse.api``.
+import agentuse.api as picker
 
 
 # ---------- fixtures / helpers ----------------------------------------------

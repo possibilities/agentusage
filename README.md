@@ -26,6 +26,40 @@ All state lives under `~/.local/state/agentuse/`:
 There is no cross-instance lock. Two daemons would race the same state files.
 Run one at a time.
 
+## Python API
+
+The `agentuse-py` package (this repo) exposes a two-function reader so an
+external launcher (arthack's claude wrapper) can answer one question without
+spinning up the daemon: **"which Claude profile should I use right now?"**
+
+```python
+from agentuse import pick_profile, list_profiles
+
+profile = pick_profile()           # round-robin over subscribed claude accounts
+names = list_profiles()            # configured profile names from config.yaml
+```
+
+- `pick_profile() -> str` — round-robin over eligible accounts (envelope
+  `target == "claude"` and `subscription_active is True`). The
+  least-recently-picked eligible profile wins; ties break by name. The pick
+  is stamped to `~/.local/state/agentuse/picker.json` under an `fcntl` lock,
+  so concurrent launches can't both draw the same profile. Usage percentages
+  and `multiplier` are intentionally ignored — this is round-robin, not
+  balancing. No stale filter; `status == "stale"` still rotates.
+- `list_profiles() -> list[str]` — the `profiles:` list from
+  `~/.config/agentuse/config.yaml` (or `$XDG_CONFIG_HOME/agentuse/config.yaml`),
+  filtered to non-empty strings.
+- **Fail-open.** Any failure (no eligible profile, unreadable state, lock
+  trouble, corrupt JSON, missing config) returns `"default"` from
+  `pick_profile` or `[]` from `list_profiles`. Neither function ever raises;
+  a broken picker must never block a launch. `"default"` is itself a real
+  account id, so the fallback and a legitimate pick are the same string.
+
+The daemon (`daemon.py`, `scrape.py`, `parse_*.py`) stays flat at the repo
+root and runs in-place via `uv run python daemon.py` — it is the *producer*
+of the envelopes the reader consumes. Only the `agentuse/` package ships in
+the built wheel.
+
 ## Forward-compatibility contract
 
 - **Clients MUST ignore unknown top-level fields** in any envelope or event.

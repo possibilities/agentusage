@@ -177,9 +177,9 @@ def _record_pick(state: dict[str, Any], chosen: str) -> None:
     if not isinstance(picks, dict):
         picks = {}
         state["picks"] = picks
-    entry = picks.get(chosen)
-    if not isinstance(entry, dict):
-        entry = {"last_picked_at": None, "count": 0}
+    existing = picks.get(chosen)
+    entry: dict[str, Any] = existing if isinstance(existing, dict) else {}
+    if entry is not existing:
         picks[chosen] = entry
     entry["last_picked_at"] = datetime.now().astimezone().isoformat()
     count = entry.get("count", 0)
