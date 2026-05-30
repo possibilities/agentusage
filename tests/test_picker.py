@@ -82,7 +82,7 @@ class _MonotonicClock:
     _counter = 0
 
     @classmethod
-    def now(cls, tz: object = None) -> _dt.datetime:
+    def now(cls, _tz: object = None) -> _dt.datetime:
         cls._counter += 1
         return _dt.datetime(2026, 1, 1) + _dt.timedelta(seconds=cls._counter)
 
