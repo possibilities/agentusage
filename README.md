@@ -90,6 +90,7 @@ values.
 | `last_failed_fetch_at` | string \| null | yes | ISO 8601 timestamp with UTC offset of the most recent failure. `null` if never failed. |
 | `next_fetch_at` | string | no | ISO 8601 timestamp with UTC offset — the daemon's intended next attempt. **Scheduling hint only.** It is normal for this to be in the past (the daemon was paused, the scrape is in flight, the lock is held). Do not treat this as a liveness signal. |
 | `usage` | object \| null | yes | Parsed quota data. Shape depends on `target` — see [`usage` shapes](#usage-shapes). `null` when no successful scrape has populated it yet, or when `subscription_active == false`. |
+| `lift_at` | string \| null | yes | ISO 8601 timestamp with UTC offset — the wall-clock instant a rate-limited profile becomes eligible again. Computed as the soonest `resets_at` among `usage` windows whose `percent_used >= 100`. `null` when no window is over its limit (or when `usage` is `null`). Carried forward through `idle` and `stale` writes the same way `usage` is preserved, so a paused/failed scrape doesn't drop a still-valid lift mid-cooldown. Recomputed fresh on every successful scrape (never carried forward across a success), so a window dropping below 100% clears the lift. |
 | `error` | object \| null | yes | Concise error stamp present only when `status == "stale"`. `null` otherwise. See [Stale `error`](#stale-error). |
 
 ### Multiplier

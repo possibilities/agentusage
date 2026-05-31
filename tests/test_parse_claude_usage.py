@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from parse_claude_usage import (  # noqa: E402
     ClaudeUsageParseError,
     NoActiveSubscription,
+    derive_lift_at,
     parse,
 )
 
@@ -125,3 +126,74 @@ def test_empty_panel_raises_parse_error() -> None:
     treats it as a failure (status=stale), not a silent no-sub success."""
     with pytest.raises(ClaudeUsageParseError):
         parse("some unrelated screen with no bars and no breakdown", now=NOW)
+
+
+# `derive_lift_at` is consumed by daemon.py to populate the top-level
+# envelope field, so its contract is part of the client-facing shape and
+# warrants direct unit coverage with hand-built window dicts (avoids the
+# full parser/clock round-trip).
+
+
+def test_derive_lift_at_returns_none_for_empty_usage() -> None:
+    """No usage data at all (no-sub or pre-first-scrape) → no lift."""
+    assert derive_lift_at(None) is None
+    assert derive_lift_at({}) is None
+
+
+def test_derive_lift_at_returns_none_when_no_window_at_limit() -> None:
+    """Below 100% everywhere → never binding, even if a reset is soon."""
+    usage = {
+        "session": {"percent_used": 42.0, "resets_at": "2026-05-29T15:00:00-04:00"},
+        "week": {"percent_used": 88.5, "resets_at": "2026-06-02T09:00:00-04:00"},
+    }
+    assert derive_lift_at(usage) is None
+
+
+def test_derive_lift_at_returns_soonest_among_over_limit_windows() -> None:
+    """Session (sooner) and week (later) both at >=100% → session reset wins.
+
+    This is the load-bearing case: the binding limit is whichever >=100%
+    window lifts first, not the soonest reset overall.
+    """
+    session_reset = "2026-05-29T15:00:00-04:00"
+    week_reset = "2026-06-02T09:00:00-04:00"
+    usage = {
+        "session": {"percent_used": 100.0, "resets_at": session_reset},
+        "week": {"percent_used": 100.0, "resets_at": week_reset},
+    }
+    assert derive_lift_at(usage) == session_reset
+
+
+def test_derive_lift_at_ignores_sub_limit_windows_even_if_sooner() -> None:
+    """A 99% window resetting sooner than a 100% window must NOT bind.
+
+    Subtle but critical: the lift is among >=100% only. A near-full window
+    resetting in five minutes is still eligible right now, so it cannot
+    define the lift instant.
+    """
+    session_reset = "2026-05-29T15:00:00-04:00"  # sooner, only 99%
+    week_reset = "2026-06-02T09:00:00-04:00"  # later, 100%
+    usage = {
+        "session": {"percent_used": 99.0, "resets_at": session_reset},
+        "week": {"percent_used": 100.0, "resets_at": week_reset},
+    }
+    assert derive_lift_at(usage) == week_reset
+
+
+def test_derive_lift_at_single_over_limit_window() -> None:
+    """Just session at 100%, week below → session reset is the lift."""
+    session_reset = "2026-05-29T15:00:00-04:00"
+    usage = {
+        "session": {"percent_used": 100.0, "resets_at": session_reset},
+        "week": {"percent_used": 50.0, "resets_at": "2026-06-02T09:00:00-04:00"},
+    }
+    assert derive_lift_at(usage) == session_reset
+
+
+def test_derive_lift_at_handles_over_100_percent() -> None:
+    """`percent_used > 100` is treated identically to == 100 (still binding)."""
+    session_reset = "2026-05-29T15:00:00-04:00"
+    usage = {
+        "session": {"percent_used": 105.0, "resets_at": session_reset},
+    }
+    assert derive_lift_at(usage) == session_reset

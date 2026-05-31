@@ -173,6 +173,41 @@ def _parse_block(lines, key, label, *, optional, now, out):
     }
 
 
+def derive_lift_at(usage: dict | None) -> str | None:
+    """Return the binding rate-limit lift time for a parsed `usage` dict.
+
+    The lift is the soonest `resets_at` among windows whose `percent_used`
+    has hit or exceeded 100% — the wall-clock instant at which the binding
+    limit will release. Windows below 100% are never binding even if they
+    reset sooner.
+
+    Returns `None` when:
+    - `usage` is `None` (no successful subscribed scrape yet / no-sub),
+    - no window is at >=100%,
+    - or every >=100% window is missing `resets_at` (defensive; the parser
+      always emits both fields together, so this is a belt-and-suspenders
+      guard).
+
+    Pure: takes the already-parsed window dict and inspects its values; no
+    clock reads, no I/O. Tests can pass canned dicts directly.
+    """
+    if not usage:
+        return None
+    soonest: str | None = None
+    for window in usage.values():
+        if not isinstance(window, dict):
+            continue
+        percent = window.get("percent_used")
+        resets_at = window.get("resets_at")
+        if percent is None or resets_at is None:
+            continue
+        if percent < 100:
+            continue
+        if soonest is None or resets_at < soonest:
+            soonest = resets_at
+    return soonest
+
+
 def parse(text: str, *, now: datetime | None = None) -> dict:
     # Bars are the positive signal for a subscribed account: the rate-limit
     # rows render "<pct>% used", a literal the no-sub breakdown never emits

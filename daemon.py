@@ -391,6 +391,7 @@ ENVELOPE_KEYS = (
     "last_failed_fetch_at",
     "next_fetch_at",
     "usage",
+    "lift_at",
     "error",
 )
 
@@ -401,6 +402,7 @@ def _build_envelope(
     status: str,
     subscription_active: bool | None,
     usage: dict | None,
+    lift_at: str | None,
     last_successful_fetch_at: str | None,
     last_skipped_fetch_at: str | None,
     last_failed_fetch_at: str | None,
@@ -424,6 +426,7 @@ def _build_envelope(
         "last_failed_fetch_at": last_failed_fetch_at,
         "next_fetch_at": next_fetch_at,
         "usage": usage,
+        "lift_at": lift_at,
         "error": error,
     }
 
@@ -517,6 +520,7 @@ async def account_loop(
                             status="idle",
                             subscription_active=prior.get("subscription_active"),
                             usage=prior.get("usage"),
+                            lift_at=prior.get("lift_at"),
                             last_successful_fetch_at=prior.get(
                                 "last_successful_fetch_at"
                             ),
@@ -587,11 +591,17 @@ async def account_loop(
                 subscription_active = not no_subscription
             else:
                 subscription_active = None
+            # Derive lift_at fresh on every success — never carry the prior
+            # value forward here, since a successful scrape replaces the
+            # window data wholesale (a window may have dropped below 100%
+            # since the last cycle, which must clear the lift).
+            lift_at = parse_claude_usage.derive_lift_at(usage)
             envelope = _build_envelope(
                 acct,
                 status="active",
                 subscription_active=subscription_active,
                 usage=usage,
+                lift_at=lift_at,
                 last_successful_fetch_at=fetched_at.isoformat(),
                 last_skipped_fetch_at=prior.get("last_skipped_fetch_at"),
                 last_failed_fetch_at=prior.get("last_failed_fetch_at"),
@@ -664,6 +674,7 @@ async def account_loop(
                 status="stale",
                 subscription_active=prior.get("subscription_active"),
                 usage=prior.get("usage"),
+                lift_at=prior.get("lift_at"),
                 last_successful_fetch_at=prior.get("last_successful_fetch_at"),
                 last_skipped_fetch_at=prior.get("last_skipped_fetch_at"),
                 last_failed_fetch_at=failed_at.isoformat(),
