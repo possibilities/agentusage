@@ -55,6 +55,7 @@ def _write_envelope(
     subscription_active: object,
     target: str = "claude",
     status: str = "active",
+    lift_at: object = None,
 ) -> None:
     (state_dir / f"{name}.json").write_text(
         json.dumps(
@@ -65,6 +66,7 @@ def _write_envelope(
                 "subscription_active": subscription_active,
                 "status": status,
                 "usage": None,
+                "lift_at": lift_at,
             }
         )
     )
@@ -221,6 +223,93 @@ def test_concurrent_picks_distribute_evenly(state_dir: Path) -> None:
     counts = _counts(state_dir)
     assert sum(counts.values()) == n  # no lost updates
     assert max(counts.values()) - min(counts.values()) <= 1  # balanced
+
+
+# ---------- rate-limit cooldown (lift_at) -----------------------------------
+
+
+def _iso_offset(seconds: int) -> str:
+    """ISO stamp offset from `datetime.now().astimezone()` by `seconds`."""
+    return (
+        _dt.datetime.now().astimezone() + _dt.timedelta(seconds=seconds)
+    ).isoformat()
+
+
+def test_future_lift_at_excludes_profile(state_dir: Path) -> None:
+    """A subscribed profile whose `lift_at` is in the future is held out of
+    rotation; only the unblocked profile gets picked.
+
+    Doesn't monkeypatch `picker.datetime` — the cooldown filter reads the
+    real wall clock to compare against `lift_at`, and the offsets below
+    are computed off the same real `now()` so the relation is stable
+    regardless of when the suite runs.
+    """
+    _write_config(["cool", "hot"])
+    _write_envelope(state_dir, "cool", subscription_active=True)
+    _write_envelope(
+        state_dir,
+        "hot",
+        subscription_active=True,
+        lift_at=_iso_offset(3600),  # +1h
+    )
+
+    picks = {picker.pick_profile() for _ in range(5)}
+
+    assert picks == {"cool"}
+    assert _counts(state_dir) == {"cool": 5}
+
+
+def test_past_lift_at_does_not_exclude_profile(state_dir: Path) -> None:
+    """Once `lift_at` is in the past, the profile rotates again — a stale
+    cooldown stamp must not strand a subscribed profile forever."""
+    _write_config(["p1", "p2"])
+    _write_envelope(
+        state_dir, "p1", subscription_active=True, lift_at=_iso_offset(-3600)
+    )
+    _write_envelope(state_dir, "p2", subscription_active=True)
+
+    picks = {picker.pick_profile() for _ in range(4)}
+
+    assert picks == {"p1", "p2"}
+
+
+def test_all_rate_limited_falls_back_to_subscribed_set(state_dir: Path) -> None:
+    """Fail-open: when every subscribed profile is in cooldown, the picker
+    falls back to handing one out anyway rather than collapsing to
+    DEFAULT_PROFILE. The wrapper sees the bounce; better that than every
+    launch silently routing past the configured catalog."""
+    _write_config(["p1", "p2"])
+    _write_envelope(
+        state_dir, "p1", subscription_active=True, lift_at=_iso_offset(3600)
+    )
+    _write_envelope(
+        state_dir, "p2", subscription_active=True, lift_at=_iso_offset(7200)
+    )
+
+    picks = [picker.pick_profile() for _ in range(4)]
+
+    assert all(p in {"p1", "p2"} for p in picks)
+    counts = _counts(state_dir)
+    assert sum(counts.values()) == 4
+
+
+def test_malformed_lift_at_is_ignored(state_dir: Path) -> None:
+    """A garbage `lift_at` value (non-string / unparseable / naive) must not
+    block selection — treat as "no cooldown" rather than as "rate-limited
+    forever"."""
+    _write_config(["garbage", "naive", "good"])
+    _write_envelope(
+        state_dir, "garbage", subscription_active=True, lift_at="not-a-date"
+    )
+    # Naive ISO (no tz offset) — corrupted envelope, must not block selection.
+    _write_envelope(
+        state_dir, "naive", subscription_active=True, lift_at="2099-01-01T00:00:00"
+    )
+    _write_envelope(state_dir, "good", subscription_active=True)
+
+    picks = {picker.pick_profile() for _ in range(6)}
+
+    assert picks == {"garbage", "naive", "good"}
 
 
 # ---------- list_profiles ---------------------------------------------------

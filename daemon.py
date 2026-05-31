@@ -287,6 +287,26 @@ def _load_envelope(path: Path) -> dict:
         return {}
 
 
+def _parse_aware_isoformat(raw: object) -> datetime | None:
+    """Parse an ISO-8601 stamp into a tz-aware datetime; None on any miss.
+
+    Used by the rate-limit cooldown branch to decide whether a prior
+    envelope's ``lift_at`` is a usable future instant. Anything non-string,
+    unparseable, or naive (the envelope writers always emit aware stamps —
+    a naive value is a corrupted envelope) returns None so the caller falls
+    through to normal scrape scheduling rather than blocking on garbage.
+    """
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed
+
+
 # ---------- Events audit log -----------------------------------------------
 
 
@@ -501,6 +521,62 @@ async def account_loop(
             if state_path.exists():
                 prior = _load_envelope(state_path)
                 if prior.get("status") != "stale":
+                    # Rate-limit cooldown: if the prior envelope says we're
+                    # over a limit (`lift_at` in the future), skip the scrape
+                    # and re-check at/after the lift. Same protection rules
+                    # as the idle-skip branch — gated off `status != "stale"`
+                    # so a failing account keeps retrying through cooldown,
+                    # and the prior `usage` / `lift_at` ride forward via
+                    # `_build_envelope` so visibility doesn't flicker.
+                    lift_at_raw = prior.get("lift_at")
+                    lift_at_dt = _parse_aware_isoformat(lift_at_raw)
+                    if lift_at_dt is not None and lift_at_dt > now:
+                        # Sleep until the lift. Add a small jitter past
+                        # the lift instant so a cohort of profiles that
+                        # tripped on the same window don't all hammer
+                        # the upstream the moment the limit lifts.
+                        wakeup = lift_at_dt + timedelta(seconds=random.uniform(0, 60))
+                        log.info(
+                            "rate-limited until %s — pausing scrape until %s",
+                            lift_at_dt.isoformat(),
+                            wakeup.isoformat(),
+                        )
+                        envelope = _build_envelope(
+                            acct,
+                            status="idle",
+                            subscription_active=prior.get("subscription_active"),
+                            usage=prior.get("usage"),
+                            lift_at=prior.get("lift_at"),
+                            last_successful_fetch_at=prior.get(
+                                "last_successful_fetch_at"
+                            ),
+                            last_skipped_fetch_at=now.isoformat(),
+                            last_failed_fetch_at=prior.get("last_failed_fetch_at"),
+                            next_fetch_at=wakeup.isoformat(),
+                            error=prior.get("error"),
+                        )
+                        try:
+                            write_atomic(state_path, envelope)
+                        except OSError as exc:
+                            log.warning("failed to write cooldown envelope: %s", exc)
+                        async with events_lock:
+                            _append_event(
+                                {
+                                    "ts": now.isoformat(),
+                                    "id": acct["id"],
+                                    "target": acct["target"],
+                                    "event": "rate_limited_skipped",
+                                    "lift_at": lift_at_dt.isoformat(),
+                                    "next_fetch_at": wakeup.isoformat(),
+                                },
+                                log,
+                            )
+                        sleep_for = (
+                            wakeup - datetime.now().astimezone()
+                        ).total_seconds()
+                        if sleep_for > 0:
+                            await asyncio.sleep(sleep_for)
+                        continue
                     idle_for = time.time() - _latest_agent_activity()
                     if idle_for > IDLE_THRESHOLD_S:
                         delay = random.uniform(60, 180)

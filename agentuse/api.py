@@ -117,7 +117,14 @@ def pick_profile() -> str:
 def _pick_profile() -> str:
     eligible = _eligible_profiles()
     if not eligible:
-        return DEFAULT_PROFILE
+        # Fail-open: if the rate-limit filter stranded the eligible set,
+        # fall back to the subscribed-only set so a launch isn't blocked
+        # just because every profile is cooling down. Better to pick a
+        # rate-limited profile (the wrapper sees the same error) than to
+        # silently route every launch to DEFAULT_PROFILE.
+        eligible = _eligible_profiles(include_rate_limited=True)
+        if not eligible:
+            return DEFAULT_PROFILE
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     with _exclusive_lock():
@@ -128,21 +135,55 @@ def _pick_profile() -> str:
     return chosen
 
 
-def _eligible_profiles() -> list[str]:
+def _is_rate_limited_now(envelope: dict[str, Any], now: datetime) -> bool:
+    """True iff the envelope's ``lift_at`` parses as a future instant.
+
+    Pure: no I/O, no clock read — the caller supplies ``now`` so tests can
+    pin the comparison instant. Returns False on missing / non-string /
+    unparseable / past lift_at; the rate-limit pause is opt-in on a
+    well-formed future stamp, never inferred from absence.
+    """
+    raw = envelope.get("lift_at")
+    if not isinstance(raw, str):
+        return False
+    try:
+        lift = datetime.fromisoformat(raw)
+    except ValueError:
+        return False
+    # Compare aware-to-aware. agentuse always writes tz-aware ISO stamps
+    # (`now().astimezone().isoformat()`), so a naive `lift` here is a
+    # corrupted envelope — treat as not-rate-limited and let normal
+    # rotation continue rather than blocking on garbage.
+    if lift.tzinfo is None:
+        return False
+    return lift > now
+
+
+def _eligible_profiles(*, include_rate_limited: bool = False) -> list[str]:
     """Configured profiles confirmed to have an active Claude subscription.
 
     A profile qualifies only when its envelope exists and says it is a
     subscribed claude account. Missing envelope (daemon hasn't scraped yet) or
     ``subscription_active`` anything other than ``True`` → excluded. No status
     check — stale accounts still rotate (v1 decision).
+
+    Rate-limit cooldown: by default, profiles whose envelope carries a
+    ``lift_at`` in the future are also excluded so the picker stops handing
+    out a profile that's certain to bounce. Pass ``include_rate_limited=True``
+    to bypass the cooldown filter — used by the fail-open fallback in
+    ``_pick_profile`` when every subscribed profile is in cooldown.
     """
+    now = datetime.now().astimezone()
     eligible: list[str] = []
     for name in list_profiles():
         envelope = _load_envelope(STATE_DIR / f"{name}.json")
         if envelope.get("target") != "claude":
             continue
-        if envelope.get("subscription_active") is True:
-            eligible.append(name)
+        if envelope.get("subscription_active") is not True:
+            continue
+        if not include_rate_limited and _is_rate_limited_now(envelope, now):
+            continue
+        eligible.append(name)
     return eligible
 
 

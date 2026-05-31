@@ -20,6 +20,7 @@ import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,152 @@ def test_stale_writeback_preserves_lift_at(
     still-valid cooldown.
     """
     asyncio.run(_run_stale_lift(tmp_path, monkeypatch))
+
+
+def test_rate_limit_cooldown_pauses_scrape_until_lift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prior envelope is `active` with a future `lift_at`; the loop must
+    take the cooldown branch instead of scraping. The scrape stub asserts
+    we never reach it; the on-disk envelope must carry `lift_at` forward
+    and schedule `next_fetch_at >= lift_at` so the resume is guaranteed."""
+    asyncio.run(_run_rate_limit_pause(tmp_path, monkeypatch))
+
+
+def test_stale_prior_with_future_lift_at_still_scrapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cooldown branch must NOT engage when the prior envelope is
+    `stale` — a failing account needs to keep retrying even while its
+    last-known `lift_at` is in the future, otherwise a stale envelope
+    with a stale future-cooldown would never refresh. The scrape stub
+    raises so the cycle takes the stale-writeback branch and we assert
+    the envelope stays `stale` (proving the cooldown branch was bypassed)."""
+    asyncio.run(_run_stale_prior_cooldown_bypass(tmp_path, monkeypatch))
+
+
+async def _run_rate_limit_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    acct, state_path = _seed_state_dir(tmp_path, monkeypatch)
+
+    # Pin lift_at one hour in the (real) future so the cooldown branch
+    # decides "still rate-limited". The branch reads wall-clock now()
+    # directly — no monkeypatch on daemon.datetime — so the comparison
+    # is against actual time, and we never await the full pause (the
+    # test cancels the task after the cooldown write).
+    lift_at_dt = datetime.now().astimezone() + timedelta(hours=1)
+    lift_at_iso = lift_at_dt.isoformat()
+    prior = {
+        "schema_version": daemon.ENVELOPE_SCHEMA_VERSION,
+        "id": acct["id"],
+        "target": acct["target"],
+        "multiplier": acct["multiplier"],
+        "status": "active",
+        "subscription_active": True,
+        "last_successful_fetch_at": "2026-05-29T11:00:00-04:00",
+        "last_skipped_fetch_at": None,
+        "last_failed_fetch_at": None,
+        "next_fetch_at": "2026-05-29T12:00:00-04:00",
+        "usage": {
+            "session": {"percent_used": 100.0, "resets_at": lift_at_iso},
+        },
+        "lift_at": lift_at_iso,
+        "error": None,
+    }
+    state_path.write_text(json.dumps(prior) + "\n")
+
+    # Keep us out of the idle branch — the cooldown branch should fire
+    # first regardless, but pinning recent activity isolates the assertion
+    # to the cooldown path.
+    monkeypatch.setattr(daemon, "_latest_agent_activity", lambda: time.time())
+    monkeypatch.setattr(daemon, "_initial_delay", lambda _acct, _log: 0.0)
+
+    # If the cooldown branch failed to engage, the loop would invoke
+    # scrape — which we assert can't happen by raising here. The stale
+    # writeback would then overwrite `status: "stale"` and fail the
+    # status assertion below, but the explicit AssertionError makes the
+    # failure mode obvious in the log.
+    def _must_not_scrape(*_args, **_kwargs):
+        raise AssertionError(
+            "scrape invoked while rate-limited; cooldown branch did not engage"
+        )
+
+    monkeypatch.setattr(daemon, "scrape", _must_not_scrape)
+
+    await _drive_one_cycle(acct)
+
+    written = json.loads(state_path.read_text())
+    assert written["status"] == "idle", (
+        f"cooldown branch should have written `idle`, got {written['status']!r}"
+    )
+    assert written["lift_at"] == lift_at_iso, (
+        f"cooldown write dropped lift_at: {written.get('lift_at')!r}"
+    )
+    # Resume guarantee: the next scrape is scheduled at-or-after the
+    # lift, so the loop will actually wake up and try again once the
+    # limit releases.
+    next_fetch = datetime.fromisoformat(written["next_fetch_at"])
+    assert next_fetch >= lift_at_dt, (
+        f"next_fetch_at {next_fetch.isoformat()} must be >= lift_at "
+        f"{lift_at_dt.isoformat()} so cooldown doesn't pause forever"
+    )
+    # Usage payload rides forward unchanged (visibility doesn't flicker).
+    assert written["usage"] == prior["usage"]
+
+
+async def _run_stale_prior_cooldown_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    acct, state_path = _seed_state_dir(tmp_path, monkeypatch)
+
+    lift_at_dt = datetime.now().astimezone() + timedelta(hours=1)
+    lift_at_iso = lift_at_dt.isoformat()
+    # `status: "stale"` with a future `lift_at` — the stale gate at the
+    # top of the idle/cooldown block must shunt past BOTH so the loop
+    # actually scrapes. We stub scrape to raise, sending it down the
+    # stale-writeback branch.
+    prior = {
+        "schema_version": daemon.ENVELOPE_SCHEMA_VERSION,
+        "id": acct["id"],
+        "target": acct["target"],
+        "multiplier": acct["multiplier"],
+        "status": "stale",
+        "subscription_active": True,
+        "last_successful_fetch_at": "2026-05-29T11:00:00-04:00",
+        "last_skipped_fetch_at": None,
+        "last_failed_fetch_at": "2026-05-29T11:30:00-04:00",
+        "next_fetch_at": "2026-05-29T12:00:00-04:00",
+        "usage": {
+            "session": {"percent_used": 100.0, "resets_at": lift_at_iso},
+        },
+        "lift_at": lift_at_iso,
+        "error": {"type": "RuntimeError", "message": "x", "at": "y"},
+    }
+    state_path.write_text(json.dumps(prior) + "\n")
+
+    monkeypatch.setattr(daemon, "_latest_agent_activity", lambda: time.time())
+    monkeypatch.setattr(daemon, "_initial_delay", lambda _acct, _log: 0.0)
+
+    scrape_calls = {"count": 0}
+
+    def _boom(*_args, **_kwargs):
+        scrape_calls["count"] += 1
+        raise RuntimeError("scrape stubbed; cooldown bypass proves we got here")
+
+    monkeypatch.setattr(daemon, "scrape", _boom)
+
+    await _drive_one_cycle(acct)
+
+    written = json.loads(state_path.read_text())
+    # The loop reached scrape (cooldown was bypassed) and the failure
+    # took the stale-writeback branch.
+    assert scrape_calls["count"] >= 1, (
+        "scrape was not invoked; cooldown branch incorrectly fired on stale prior"
+    )
+    assert written["status"] == "stale", (
+        f"expected stale writeback, got {written['status']!r}"
+    )
 
 
 async def _run_stale_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -252,7 +399,9 @@ async def _run_idle_lift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     # spawn a real TUI; the test asserts on the idle write so we shouldn't
     # reach it either way.
     monkeypatch.setattr(
-        daemon, "scrape", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("nope"))
+        daemon,
+        "scrape",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("nope")),
     )
 
     await _drive_one_cycle(acct)
@@ -269,7 +418,11 @@ async def _run_idle_lift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 async def _run_stale_lift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     acct, state_path = _seed_state_dir(tmp_path, monkeypatch)
 
-    lift_at_iso = "2026-06-15T09:00:00-04:00"
+    # Pin lift_at in the PAST so the rate-limit cooldown branch (added in
+    # fn-651.3) doesn't fire and intercept before we reach scrape. The
+    # preservation contract under test is the stale-writeback branch's,
+    # not the cooldown branch's — see _run_rate_limit_pause for that.
+    lift_at_iso = (datetime.now().astimezone() - timedelta(hours=1)).isoformat()
     prior = {
         "schema_version": daemon.ENVELOPE_SCHEMA_VERSION,
         "id": acct["id"],
