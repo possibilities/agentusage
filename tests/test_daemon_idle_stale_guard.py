@@ -129,14 +129,14 @@ async def _run_rate_limit_pause(
     # first regardless, but pinning recent activity isolates the assertion
     # to the cooldown path.
     monkeypatch.setattr(daemon, "_latest_agent_activity", lambda: time.time())
-    monkeypatch.setattr(daemon, "_initial_delay", lambda _acct, _log: 0.0)
+    monkeypatch.setattr(daemon, "_initial_delay", lambda *_: 0.0)
 
     # If the cooldown branch failed to engage, the loop would invoke
     # scrape — which we assert can't happen by raising here. The stale
     # writeback would then overwrite `status: "stale"` and fail the
     # status assertion below, but the explicit AssertionError makes the
     # failure mode obvious in the log.
-    def _must_not_scrape(*_args, **_kwargs):
+    def _must_not_scrape(*_):
         raise AssertionError(
             "scrape invoked while rate-limited; cooldown branch did not engage"
         )
@@ -195,11 +195,11 @@ async def _run_stale_prior_cooldown_bypass(
     state_path.write_text(json.dumps(prior) + "\n")
 
     monkeypatch.setattr(daemon, "_latest_agent_activity", lambda: time.time())
-    monkeypatch.setattr(daemon, "_initial_delay", lambda _acct, _log: 0.0)
+    monkeypatch.setattr(daemon, "_initial_delay", lambda *_: 0.0)
 
     scrape_calls = {"count": 0}
 
-    def _boom(*_args, **_kwargs):
+    def _boom(*_):
         scrape_calls["count"] += 1
         raise RuntimeError("scrape stubbed; cooldown bypass proves we got here")
 
@@ -268,14 +268,14 @@ async def _run_stale_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     )
 
     # Skip the boot jitter so the loop hits the guard immediately.
-    monkeypatch.setattr(daemon, "_initial_delay", lambda _acct, _log: 0.0)
+    monkeypatch.setattr(daemon, "_initial_delay", lambda *_: 0.0)
 
     # Stub the live scrape so that if the guard ever lets execution past it
     # (the bug we're guarding against the inverse of), we don't actually spawn
     # a claude TUI — we raise so the except branch writes back `stale` again
     # via `_build_envelope(status="stale", ...)`. Either way the on-disk
     # envelope must stay `stale`; flipping to `idle` is the regression.
-    def _boom(*_args, **_kwargs):
+    def _boom(*_):
         raise RuntimeError("scrape stubbed in test")
 
     monkeypatch.setattr(daemon, "scrape", _boom)
@@ -394,14 +394,14 @@ async def _run_idle_lift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
         "_latest_agent_activity",
         lambda: time.time() - daemon.IDLE_THRESHOLD_S - 600,
     )
-    monkeypatch.setattr(daemon, "_initial_delay", lambda _acct, _log: 0.0)
+    monkeypatch.setattr(daemon, "_initial_delay", lambda *_: 0.0)
     # Stub scrape so that if the idle branch ever didn't fire we wouldn't
     # spawn a real TUI; the test asserts on the idle write so we shouldn't
     # reach it either way.
     monkeypatch.setattr(
         daemon,
         "scrape",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("nope")),
+        lambda *_: (_ for _ in ()).throw(RuntimeError("nope")),
     )
 
     await _drive_one_cycle(acct)
@@ -446,9 +446,9 @@ async def _run_stale_lift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     # proceeds to scrape — which we stub to raise, sending it down the
     # stale-writeback path where the preservation contract applies.
     monkeypatch.setattr(daemon, "_latest_agent_activity", lambda: time.time())
-    monkeypatch.setattr(daemon, "_initial_delay", lambda _acct, _log: 0.0)
+    monkeypatch.setattr(daemon, "_initial_delay", lambda *_: 0.0)
 
-    def _boom(*_args, **_kwargs):
+    def _boom(*_):
         raise RuntimeError("scrape stubbed in test")
 
     monkeypatch.setattr(daemon, "scrape", _boom)

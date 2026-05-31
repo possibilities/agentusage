@@ -84,7 +84,7 @@ class _MonotonicClock:
     _counter = 0
 
     @classmethod
-    def now(cls, _tz: object = None) -> _dt.datetime:
+    def now(cls) -> _dt.datetime:
         cls._counter += 1
         return _dt.datetime(2026, 1, 1) + _dt.timedelta(seconds=cls._counter)
 
@@ -144,6 +144,7 @@ def test_no_eligible_returns_default_without_writing_state(state_dir: Path) -> N
 
 def test_no_config_returns_default(state_dir: Path) -> None:
     """No catalog at all → no eligible profiles → "default"."""
+    _ = state_dir
     assert picker.pick_profile() == "default"
 
 
@@ -316,10 +317,12 @@ def test_malformed_lift_at_is_ignored(state_dir: Path) -> None:
 
 
 def test_list_profiles_reads_catalog(state_dir: Path) -> None:
+    _ = state_dir
     _write_config(["alpha", "beta"])
     assert picker.list_profiles() == ["alpha", "beta"]
 
 
 def test_list_profiles_fail_open_empty(state_dir: Path) -> None:
     """Missing config → empty list, never raises."""
+    _ = state_dir
     assert picker.list_profiles() == []
