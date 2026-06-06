@@ -31,6 +31,67 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import daemon  # noqa: E402
 
+# Wall-clock ceiling for waiting on the loop's first state-file write. The
+# write lands in ~1-5ms once the cycle reaches its `write_atomic` call; this
+# is the loud-failure backstop, not the expected latency.
+_WRITE_TIMEOUT_S = 2.0
+
+
+def _install_write_event(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
+    """Wrap `daemon.write_atomic` so the test can await the cycle's first write.
+
+    The loop writes its envelope via `write_atomic` and then parks in a long
+    trailing `await asyncio.sleep(...)`, yielding control. The seed is written
+    via `state_path.write_text` (not `write_atomic`), so the event fires exactly
+    on the cycle's write — immune to the seed-equals-terminal-status case and
+    uniform across all five tests.
+    """
+    written = asyncio.Event()
+    real_write_atomic = daemon.write_atomic
+
+    def _wrapped(*args, **kwargs):
+        real_write_atomic(*args, **kwargs)
+        written.set()
+
+    monkeypatch.setattr(daemon, "write_atomic", _wrapped)
+    return written
+
+
+async def _run_until_first_write(acct: daemon.Account, written: asyncio.Event) -> None:
+    """Run `account_loop` until its first state-file write, then cancel.
+
+    Replaces the old fixed `await asyncio.sleep(0.5)` gate: we wait on the
+    observable write (with a loud timeout) and cancel while the loop is parked
+    in its trailing sleep, instead of guessing at a settle time.
+    """
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        task = asyncio.create_task(
+            daemon.account_loop(
+                acct,
+                executor,
+                asyncio.Lock(),
+                asyncio.Lock(),
+                {"next_allowed_at": 0.0},
+                asyncio.Lock(),
+            )
+        )
+        try:
+            await asyncio.wait_for(written.wait(), timeout=_WRITE_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            task.cancel()
+            pytest.fail(
+                "account_loop never wrote its envelope within "
+                f"{_WRITE_TIMEOUT_S}s — the cycle did not reach write_atomic"
+            )
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
 
 def test_stale_envelope_preserved_when_idle_skip_would_fire(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -143,7 +204,7 @@ async def _run_rate_limit_pause(
 
     monkeypatch.setattr(daemon, "scrape", _must_not_scrape)
 
-    await _drive_one_cycle(acct)
+    await _drive_one_cycle(acct, monkeypatch)
 
     written = json.loads(state_path.read_text())
     assert written["status"] == "idle", (
@@ -205,7 +266,7 @@ async def _run_stale_prior_cooldown_bypass(
 
     monkeypatch.setattr(daemon, "scrape", _boom)
 
-    await _drive_one_cycle(acct)
+    await _drive_one_cycle(acct, monkeypatch)
 
     written = json.loads(state_path.read_text())
     # The loop reached scrape (cooldown was bypassed) and the failure
@@ -280,31 +341,10 @@ async def _run_stale_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(daemon, "scrape", _boom)
 
-    # Run the loop briefly, then cancel. Account loop is an infinite while-True;
-    # we just need it to execute one iteration through the guard.
-    executor = ThreadPoolExecutor(max_workers=1)
-    try:
-        task = asyncio.create_task(
-            daemon.account_loop(
-                acct,
-                executor,
-                asyncio.Lock(),
-                asyncio.Lock(),
-                {"next_allowed_at": 0.0},
-                asyncio.Lock(),
-            )
-        )
-        # Let the loop body run; 0.5s is generous for one synchronous-ish pass
-        # through the guard + the stubbed scrape's RuntimeError + the stale
-        # except-branch writeback.
-        await asyncio.sleep(0.5)
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+    # Run the loop until it writes its envelope (the stale except-branch
+    # writeback), then cancel — no fixed sleep gate.
+    written = _install_write_event(monkeypatch)
+    await _run_until_first_write(acct, written)
 
     # The envelope must still report `stale`. If the guard were inverted (or
     # removed), the idle-skip branch would have written `status: "idle"` here.
@@ -338,28 +378,16 @@ def _seed_state_dir(
     return acct, state_dir / f"{acct['id']}.json"
 
 
-async def _drive_one_cycle(acct: daemon.Account) -> None:
-    """Run account_loop briefly so it executes one pass through the guards."""
-    executor = ThreadPoolExecutor(max_workers=1)
-    try:
-        task = asyncio.create_task(
-            daemon.account_loop(
-                acct,
-                executor,
-                asyncio.Lock(),
-                asyncio.Lock(),
-                {"next_allowed_at": 0.0},
-                asyncio.Lock(),
-            )
-        )
-        await asyncio.sleep(0.5)
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+async def _drive_one_cycle(
+    acct: daemon.Account, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run account_loop until its first state-file write, then cancel.
+
+    Waits on the observable `write_atomic` (via an event wrapper) with a loud
+    timeout instead of a fixed sleep gate.
+    """
+    written = _install_write_event(monkeypatch)
+    await _run_until_first_write(acct, written)
 
 
 async def _run_idle_lift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -404,7 +432,7 @@ async def _run_idle_lift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
         lambda *_: (_ for _ in ()).throw(RuntimeError("nope")),
     )
 
-    await _drive_one_cycle(acct)
+    await _drive_one_cycle(acct, monkeypatch)
 
     written = json.loads(state_path.read_text())
     assert written["status"] == "idle", (
@@ -453,7 +481,7 @@ async def _run_stale_lift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(daemon, "scrape", _boom)
 
-    await _drive_one_cycle(acct)
+    await _drive_one_cycle(acct, monkeypatch)
 
     written = json.loads(state_path.read_text())
     assert written["status"] == "stale", (
