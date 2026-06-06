@@ -1,0 +1,17 @@
+{
+  "bundles": [],
+  "created_at": "2026-06-06T22:20:08.406953Z",
+  "depends_on": [
+    "fn-5-agentuse-fast-test-suite.1",
+    "fn-5-agentuse-fast-test-suite.2",
+    "fn-5-agentuse-fast-test-suite.3"
+  ],
+  "epic": "fn-5-agentuse-fast-test-suite",
+  "id": "fn-5-agentuse-fast-test-suite.4",
+  "priority": null,
+  "snippets": [],
+  "target_repo": "/Users/mike/code/agentuse",
+  "tier": "medium",
+  "title": "marker config and 3.11 pin",
+  "updated_at": "2026-06-06T22:20:08.406953Z"
+}

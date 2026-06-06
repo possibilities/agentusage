@@ -1,0 +1,13 @@
+{
+  "bundles": [],
+  "created_at": "2026-06-06T22:20:08.406953Z",
+  "depends_on": [],
+  "epic": "fn-5-agentuse-fast-test-suite",
+  "id": "fn-5-agentuse-fast-test-suite.2",
+  "priority": null,
+  "snippets": [],
+  "target_repo": "/Users/mike/code/agentuse",
+  "tier": "high",
+  "title": "cover the parsers",
+  "updated_at": "2026-06-06T22:20:08.406953Z"
+}
