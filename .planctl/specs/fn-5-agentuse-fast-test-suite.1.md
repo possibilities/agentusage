@@ -74,5 +74,5 @@ file should drop from ~2.6s to well under 0.1s, all five still passing with unch
 - [ ] All five tests pass with identical assertions/intent; the file runs < 0.1s.
 
 ## Done summary
-
+Removed both fixed asyncio.sleep(0.5) gates in the idle/stale guard tests; replaced with a deterministic wait on the loop's wrapped write_atomic (asyncio.Event) plus a loud 2s timeout, cancelling while the loop is parked. All five tests pass with unchanged intent.
 ## Evidence
