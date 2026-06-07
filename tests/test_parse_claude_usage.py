@@ -26,6 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from parse_claude_usage import (  # noqa: E402
     ClaudeUsageParseError,
     NoActiveSubscription,
+    _resolve_session,
+    _resolve_week,
     derive_lift_at,
     parse,
 )
@@ -197,3 +199,88 @@ def test_derive_lift_at_handles_over_100_percent() -> None:
         "session": {"percent_used": 105.0, "resets_at": session_reset},
     }
     assert derive_lift_at(usage) == session_reset
+
+
+# Direct `_resolve_session`/`_resolve_week` coverage under a pinned `now=`.
+# The smoke tests above only assert "resets_at is a string"; the time math
+# (12h conversion, today/tomorrow roll, year-wrap, strict month/tz errors) is
+# the actual reset contract and warrants exact assertions. Resolvers convert
+# `now` to the passed `tz` and resolve in it, so we pass the same NY zone as
+# NOW — `local_now` then equals NOW and the expected dates read directly off it.
+
+TZ = ZoneInfo("America/New_York")
+
+
+def test_resolve_session_12am_is_midnight() -> None:
+    """`12am` maps to 00:00, not 12:00 (the `_to_24h` am-boundary)."""
+    # 00:00 today < 12:00 now → rolls to tomorrow at midnight.
+    resolved = _resolve_session("12am", TZ, NOW)
+    assert resolved == datetime(2026, 5, 30, 0, 0, tzinfo=TZ)
+
+
+def test_resolve_session_12pm_is_noon() -> None:
+    """`12pm` maps to 12:00 (the `_to_24h` pm-boundary)."""
+    # 12:00 == 12:00 now → `<= now` rolls to tomorrow noon.
+    resolved = _resolve_session("12pm", TZ, NOW)
+    assert resolved == datetime(2026, 5, 30, 12, 0, tzinfo=TZ)
+
+
+def test_resolve_session_plain_pm_adds_twelve() -> None:
+    """A plain `3pm` becomes 15:00."""
+    # 15:00 > 12:00 now → stays today.
+    resolved = _resolve_session("3pm", TZ, NOW)
+    assert resolved == datetime(2026, 5, 29, 15, 0, tzinfo=TZ)
+
+
+def test_resolve_session_at_or_before_now_rolls_to_tomorrow() -> None:
+    """A session time `<= now` rolls forward a day; just-after stays today."""
+    # 11am < 12:00 now → tomorrow.
+    rolled = _resolve_session("11am", TZ, NOW)
+    assert rolled == datetime(2026, 5, 30, 11, 0, tzinfo=TZ)
+    # 1pm > 12:00 now → today.
+    stays = _resolve_session("1pm", TZ, NOW)
+    assert stays == datetime(2026, 5, 29, 13, 0, tzinfo=TZ)
+
+
+def test_resolve_session_unknown_format_raises() -> None:
+    """A reset string that isn't `H[:MM](am|pm)` raises the strict error."""
+    with pytest.raises(ClaudeUsageParseError):
+        _resolve_session("half past noon", TZ, NOW)
+
+
+def test_resolve_week_future_date_stays_this_year() -> None:
+    """A week reset still ahead this year keeps the current year."""
+    resolved = _resolve_week("May 31 at 9am", TZ, NOW)
+    assert resolved == datetime(2026, 5, 31, 9, 0, tzinfo=TZ)
+
+
+def test_resolve_week_passed_date_wraps_to_next_year() -> None:
+    """A reset month/day already passed (Jan, vs a May now) wraps to next year."""
+    resolved = _resolve_week("Jan 5 at 9am", TZ, NOW)
+    assert resolved == datetime(2027, 1, 5, 9, 0, tzinfo=TZ)
+
+
+def test_resolve_week_unknown_timezone_raises() -> None:
+    """An unparseable timezone name in the reset line raises the strict error.
+
+    The tz is resolved by the parser before reaching `_resolve_week`, so this
+    drives the full `parse` path with a bogus zone label."""
+    bad_tz_screen = """\
+  Settings  Status   Config   Usage   Stats
+
+  Current session
+  [████████░░░░░░░░] 42% used
+  Resets 3pm (Mars/Olympus_Mons)
+
+  Current week (all models)
+  [██░░░░░░░░░░░░░░] 17% used
+  Resets May 31 at 9am (America/New_York)
+"""
+    with pytest.raises(ClaudeUsageParseError):
+        parse(bad_tz_screen, now=NOW)
+
+
+def test_resolve_week_unknown_month_raises() -> None:
+    """An unparseable month name raises the strict error."""
+    with pytest.raises(ClaudeUsageParseError):
+        _resolve_week("Smarch 5 at 9am", TZ, NOW)
