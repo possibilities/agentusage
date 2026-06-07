@@ -60,6 +60,14 @@ root and runs in-place via `uv run python daemon.py` — it is the *producer*
 of the envelopes the reader consumes. Only the `agentuse/` package ships in
 the built wheel.
 
+## Development
+
+The project pins Python **3.11** (`.python-version`); `uv sync` rebuilds the
+venv against it. Run the test suite with `uv run pytest` — it's fast and
+fully offline (no real TUI, no network). Tests that spawn a real claude/codex
+TUI are tagged with the `live` marker and excluded by default; run them
+opt-in with `uv run pytest -m live`.
+
 ## Forward-compatibility contract
 
 - **Clients MUST ignore unknown top-level fields** in any envelope or event.

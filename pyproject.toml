@@ -24,6 +24,8 @@ only-packages = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["live: marks tests that spawn a real claude/codex TUI (deselect with '-m \"not live\"')"]
+addopts = ["--strict-markers", "-m", "not live"]
 
 [tool.pyright]
 venvPath = "."
