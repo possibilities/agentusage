@@ -56,5 +56,5 @@ green; capture the `--durations=15` line proving <0.6s warm.
 - [ ] (Optional) README gained a short dev/running-tests note.
 
 ## Done summary
-
+Registered live marker + --strict-markers with default '-m not live' via the addopts TOML list form (-m live selects 0 of 81 tests); pinned interpreter to 3.11 (.python-version) and rebuilt the venv on 3.11.15 via uv sync (uv run python -V reports 3.11.15); all 81 tests pass. Added a README Development note. Steady-state <0.6s timing could not be honestly measured: the box is under load-avg 27 with ~63 sibling pytest procs, inflating every wall-clock and per-test reading; the suite is green and the per-test shape is healthy under that contention.
 ## Evidence
