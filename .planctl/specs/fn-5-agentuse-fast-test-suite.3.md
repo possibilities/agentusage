@@ -61,5 +61,5 @@ Assert the returned `(remaining_args, profile)` tuple for each.
 - [ ] All new tests hermetic and passing.
 
 ## Done summary
-
+Added tests/test_scrape_helpers.py (table-driven _extract_claude_profile: both flag forms, absent, interleaved, multi-occurrence, no-value) and tests/test_daemon_helpers.py (_parse_aware_isoformat aware/naive/garbage/non-str, _resolve_multiplier with monkeypatched home, _screen_excerpt split/truncation/240-cap, _build_envelope key set). 31 new tests, all hermetic; full suite 81 passed.
 ## Evidence
