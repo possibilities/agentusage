@@ -58,5 +58,5 @@ all new cases pass, each < 0.01s.
 - [ ] All new tests deterministic under pinned `now=`, all passing.
 
 ## Done summary
-
+Added tests/test_parse_codex_status.py (codex parse happy path, 100-pct_left inversion, all sentinel/format errors, today->tomorrow + date->next-year rollovers, unknown-month) and extended test_parse_claude_usage.py with direct _resolve_session/_resolve_week cases (12am/12pm boundaries, <=now roll-forward, year-wrap, unknown-tz/month errors), all deterministic under pinned now=.
 ## Evidence
