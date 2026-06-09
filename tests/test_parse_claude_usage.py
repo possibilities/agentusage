@@ -89,6 +89,22 @@ SUBSCRIBED_WITH_SONNET = (
 )
 
 
+# Captured shape when the weekly cap is hit: the session window collapses to a
+# bar-less "0% used" with NO "Resets …" line (the panel omits the reset for a
+# 0%-usage window), while the week bar reads 100% with its own reset. The strict
+# parser must treat the missing session reset as a null-reset 0% window, not as
+# format drift — otherwise a healthy-but-capped account scrapes as `stale`.
+DEPLETED_WEEK_SCREEN = """\
+  Settings  Status   Config   Usage   Stats
+
+  Current session
+                                  0% used
+  Current week (all models)
+  [██████████████████] 100% used
+  Resets Jun 13 at 3:59am (America/New_York)
+"""
+
+
 NOW = datetime(2026, 5, 29, 12, 0, tzinfo=ZoneInfo("America/New_York"))
 
 
@@ -120,6 +136,29 @@ def test_subscribed_screen_with_sonnet_includes_optional_block() -> None:
     out = parse(SUBSCRIBED_WITH_SONNET, now=NOW)
     assert set(out) == {"session", "week", "sonnet_week"}
     assert out["sonnet_week"]["percent_used"] == 9.0
+
+
+def test_depleted_week_session_has_null_reset_not_parse_error() -> None:
+    """When the weekly cap is hit the session window renders bar-less at 0%
+    with no Resets line. The parser must emit it with resets_at=None rather
+    than raising on the absent reset; the week still parses normally at 100%."""
+    out = parse(DEPLETED_WEEK_SCREEN, now=NOW)
+    assert set(out) == {"session", "week"}
+    assert out["session"]["percent_used"] == 0.0
+    assert out["session"]["resets_at"] is None
+    assert out["week"]["percent_used"] == 100.0
+    assert isinstance(out["week"]["resets_at"], str)
+    # The binding lift derives from the depleted week, ignoring the null-reset
+    # session window.
+    assert derive_lift_at(out) == out["week"]["resets_at"]
+
+
+def test_nonzero_window_missing_reset_still_raises() -> None:
+    """The null-reset tolerance is gated on 0% — a NONZERO window with no
+    Resets line is real format drift and must still raise strictly."""
+    drifted = DEPLETED_WEEK_SCREEN.replace("0% used", "5% used")
+    with pytest.raises(ClaudeUsageParseError):
+        parse(drifted, now=NOW)
 
 
 def test_empty_panel_raises_parse_error() -> None:

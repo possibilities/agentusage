@@ -153,6 +153,17 @@ def _parse_block(lines, key, label, *, optional, now, out):
 
     rm = RESETS_RE.match(reset_line)
     if not rm:
+        # A window at 0% usage renders bar-less with NO "Resets …" line — the
+        # panel collapses it to a bare "0% used", so _find_block's second line
+        # is actually the NEXT block's label. This is the normal shape when a
+        # sibling window is depleted: hitting the weekly cap drops the session
+        # window to 0%, and the screen omits its reset. Emit the window with a
+        # null reset rather than treating the absent line as format drift. A
+        # NONZERO window must still carry a reset line — a missing one there is
+        # real drift and raises. derive_lift_at already skips null-reset windows.
+        if percent == 0:
+            out[key] = {"percent_used": percent, "resets_at": None}
+            return
         raise ClaudeUsageParseError(
             f"label {label!r}: reset line did not match: {reset_line!r}"
         )
