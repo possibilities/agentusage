@@ -490,3 +490,124 @@ async def _run_stale_lift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert written["lift_at"] == lift_at_iso, (
         f"stale write dropped lift_at: {written.get('lift_at')!r} != {lift_at_iso!r}"
     )
+
+
+# ---------- per-cycle multiplier refresh -----------------------------------
+#
+# The loop re-resolves each claude profile's multiplier at the top of every
+# cycle from `~/.claude-profiles/<id>/.claude.json` (via daemon.Path.home).
+# These tests point Path.home at a tmp dir, drive an idle-skip cycle (the
+# `continue` branch that writes an envelope without scraping), and assert the
+# written multiplier. The idle path is the strict proof: the re-resolve must
+# sit ABOVE the idle/cooldown block for an idle profile's envelope to reflect
+# a tier change at all.
+
+
+def _write_profile_tier(home: Path, profile: str, tier: str | None) -> None:
+    """Write `<home>/.claude-profiles/<profile>/.claude.json` with `tier`.
+
+    `tier=None` writes a payload with no `organizationRateLimitTier`, which the
+    resolver treats as a failure (→ keep-prior in the loop).
+    """
+    pdir = home / ".claude-profiles" / profile
+    pdir.mkdir(parents=True, exist_ok=True)
+    oauth: dict = {} if tier is None else {"organizationRateLimitTier": tier}
+    (pdir / ".claude.json").write_text(json.dumps({"oauthAccount": oauth}))
+
+
+def _seed_idle_prior(state_path: Path, acct: daemon.Account) -> None:
+    """Seed an `active` prior so the idle-skip branch is allowed to fire."""
+    prior = {
+        "schema_version": daemon.ENVELOPE_SCHEMA_VERSION,
+        "id": acct["id"],
+        "target": acct["target"],
+        "multiplier": acct["multiplier"],
+        "status": "active",
+        "subscription_active": True,
+        "last_successful_fetch_at": "2026-05-29T11:00:00-04:00",
+        "last_skipped_fetch_at": None,
+        "last_failed_fetch_at": None,
+        "next_fetch_at": "2026-05-29T12:00:00-04:00",
+        "usage": {"session": {"percent_used": 30.0}},
+        "lift_at": None,
+        "error": None,
+    }
+    state_path.write_text(json.dumps(prior) + "\n")
+
+
+def _force_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the idle-skip branch: stale-old activity, no boot jitter, scrape
+    stubbed to raise so an unexpected scrape is a loud failure."""
+    monkeypatch.setattr(
+        daemon,
+        "_latest_agent_activity",
+        lambda: time.time() - daemon.IDLE_THRESHOLD_S - 600,
+    )
+    monkeypatch.setattr(daemon, "_initial_delay", lambda *_: 0.0)
+    monkeypatch.setattr(
+        daemon,
+        "scrape",
+        lambda *_: (_ for _ in ()).throw(RuntimeError("scrape must not run")),
+    )
+
+
+def test_idle_skip_reflects_tier_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tier change in `.claude.json` reaches the idle-skip envelope within
+    one cycle — proving the re-resolve sits above the idle/cooldown block."""
+    asyncio.run(_run_idle_tier_change(tmp_path, monkeypatch))
+
+
+def test_idle_skip_keeps_prior_multiplier_on_read_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `.claude.json` read/parse failure preserves the prior multiplier in
+    the next envelope (no 1x flicker)."""
+    asyncio.run(_run_idle_keep_prior(tmp_path, monkeypatch))
+
+
+async def _run_idle_tier_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(daemon.Path, "home", lambda: home)
+
+    acct, state_path = _seed_state_dir(tmp_path, monkeypatch)
+    # Boot value 1; on-disk tier says Max-20x. After one cycle the envelope
+    # must carry 20 — the re-resolve picked up the live tier.
+    acct["multiplier"] = 1
+    _write_profile_tier(home, acct["id"], "default_claude_max_20x")
+    _seed_idle_prior(state_path, acct)
+    _force_idle(monkeypatch)
+
+    await _drive_one_cycle(acct, monkeypatch)
+
+    written = json.loads(state_path.read_text())
+    assert written["status"] == "idle", f"expected idle-skip, got {written['status']!r}"
+    assert written["multiplier"] == 20, (
+        f"idle envelope did not pick up the live tier: {written['multiplier']!r}"
+    )
+
+
+async def _run_idle_keep_prior(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(daemon.Path, "home", lambda: home)
+
+    acct, state_path = _seed_state_dir(tmp_path, monkeypatch)
+    # Prior multiplier is 5 (a Max-5x account). The on-disk tier is unreadable
+    # this cycle — the envelope must keep 5, never flicker to 1.
+    acct["multiplier"] = 5
+    _write_profile_tier(home, acct["id"], None)  # missing tier → resolver None
+    _seed_idle_prior(state_path, acct)
+    _force_idle(monkeypatch)
+
+    await _drive_one_cycle(acct, monkeypatch)
+
+    written = json.loads(state_path.read_text())
+    assert written["status"] == "idle", f"expected idle-skip, got {written['status']!r}"
+    assert written["multiplier"] == 5, (
+        f"keep-prior failed: multiplier flickered to {written['multiplier']!r}"
+    )
