@@ -140,6 +140,79 @@ def test_resolve_multiplier_oversize_file_falls_back(
     assert daemon._resolve_multiplier("prof") == 1
 
 
+# ---------- _resolve_multiplier_or_none ------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("tier", "expected"),
+    [
+        ("default_claude_ai", 1),
+        ("default_claude_max_5x", 5),
+        ("default_claude_max_20x", 20),
+    ],
+)
+def test_resolve_multiplier_or_none_known_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str, expected: int
+) -> None:
+    # Each real tier resolves to its int (distinct from the None failure path).
+    monkeypatch.setattr(daemon.Path, "home", lambda: tmp_path)
+    _write_claude_json(
+        tmp_path, "prof", {"oauthAccount": {"organizationRateLimitTier": tier}}
+    )
+    assert daemon._resolve_multiplier_or_none("prof") == expected
+
+
+def test_resolve_multiplier_or_none_unknown_tier_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(daemon.Path, "home", lambda: tmp_path)
+    _write_claude_json(
+        tmp_path,
+        "prof",
+        {"oauthAccount": {"organizationRateLimitTier": "default_claude_max_99x"}},
+    )
+    assert daemon._resolve_multiplier_or_none("prof") is None
+
+
+def test_resolve_multiplier_or_none_missing_tier_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(daemon.Path, "home", lambda: tmp_path)
+    _write_claude_json(tmp_path, "prof", {"oauthAccount": {}})
+    assert daemon._resolve_multiplier_or_none("prof") is None
+
+
+def test_resolve_multiplier_or_none_missing_file_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(daemon.Path, "home", lambda: tmp_path)
+    assert daemon._resolve_multiplier_or_none("nonexistent-profile") is None
+
+
+def test_resolve_multiplier_or_none_unreadable_json_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(daemon.Path, "home", lambda: tmp_path)
+    pdir = tmp_path / ".claude-profiles" / "prof"
+    pdir.mkdir(parents=True)
+    (pdir / ".claude.json").write_text("{ not valid json")
+    assert daemon._resolve_multiplier_or_none("prof") is None
+
+
+def test_resolve_multiplier_or_none_oversize_file_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(daemon.Path, "home", lambda: tmp_path)
+    pdir = tmp_path / ".claude-profiles" / "prof"
+    pdir.mkdir(parents=True)
+    payload = (
+        '{"oauthAccount": {"organizationRateLimitTier": "default_claude_max_20x"}}'
+    )
+    pad = " " * (daemon.MAX_CLAUDE_JSON_BYTES + 1)
+    (pdir / ".claude.json").write_text(payload + pad)
+    assert daemon._resolve_multiplier_or_none("prof") is None
+
+
 # ---------- _screen_excerpt ------------------------------------------------
 
 

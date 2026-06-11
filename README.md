@@ -114,8 +114,12 @@ available quota pool. Higher is more headroom.
 | Codex (no tier concept) | `1` |
 | Any read failure, missing tier, or unknown tier | `1` (fallback, logged) |
 
-The daemon stamps `multiplier` at boot from the profile's `.claude.json` and
-does not re-read mid-run. Restart the daemon to pick up a tier change.
+The daemon re-resolves `multiplier` from the profile's `.claude.json` at the
+top of every fetch cycle, so a mid-run tier change (upgrade or downgrade)
+reaches the envelope within one cycle — no restart needed. A transient
+read/parse failure keeps the prior multiplier rather than flickering to 1x
+(the boot-time 1x fallback in the table above still applies, since at boot
+there is no prior value to keep).
 
 ### Status
 

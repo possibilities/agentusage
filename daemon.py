@@ -78,11 +78,14 @@ def _xdg_config_home() -> Path:
     return Path.home() / ".config"
 
 
-def _resolve_multiplier(profile: str) -> int:
-    """Derive a profile's multiplier from its `.claude.json` tier string.
+def _resolve_multiplier_or_none(profile: str) -> int | None:
+    """Resolve a profile's multiplier from its `.claude.json` tier string.
 
-    Falls back to 1x with a stderr log on any read/parse failure or unknown
-    tier — the daemon must never crash on a misconfigured profile.
+    Returns the tier's int multiplier, or `None` on every failure path
+    (oversize file, OSError, JSONDecodeError, missing or unknown tier). The
+    `None` is load-bearing: callers must distinguish "read failed" from
+    "legitimately Pro (1x)" so a transient blip can't silently downgrade a
+    Max account. Never raises — every failure is caught and logged here.
     """
     path = Path.home() / ".claude-profiles" / profile / ".claude.json"
     try:
@@ -93,7 +96,7 @@ def _resolve_multiplier(profile: str) -> int:
                 f"({st.st_size}); falling back to 1x",
                 file=sys.stderr,
             )
-            return 1
+            return None
         with open(path) as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
@@ -101,7 +104,7 @@ def _resolve_multiplier(profile: str) -> int:
             f"[agentuse] cannot read {path} ({exc}); falling back to 1x",
             file=sys.stderr,
         )
-        return 1
+        return None
 
     tier = data.get("oauthAccount", {}).get("organizationRateLimitTier")
     if tier is None:
@@ -110,15 +113,26 @@ def _resolve_multiplier(profile: str) -> int:
             f"falling back to 1x",
             file=sys.stderr,
         )
-        return 1
+        return None
     mult = TIER_MULTIPLIERS.get(tier)
     if mult is None:
         print(
             f"[agentuse] {path} has unknown tier {tier!r}; falling back to 1x",
             file=sys.stderr,
         )
-        return 1
+        return None
     return mult
+
+
+def _resolve_multiplier(profile: str) -> int:
+    """Boot-time multiplier resolution with a 1x fallback.
+
+    Wraps `_resolve_multiplier_or_none`: a failed read at boot yields 1x
+    because there is no prior value to keep. The per-cycle re-resolve in
+    `account_loop` uses the `_or_none` core directly to keep the prior value
+    on failure instead.
+    """
+    return _resolve_multiplier_or_none(profile) or 1
 
 
 def _load_profile_names() -> list[str]:
@@ -507,6 +521,22 @@ async def account_loop(
     while True:
         try:
             now = datetime.now().astimezone()
+
+            # Re-resolve the plan-tier multiplier every cycle so a mid-run
+            # subscription change reaches the envelope within one fetch
+            # window without a daemon restart. This sits above the
+            # idle/cooldown block so idle and cooling profiles refresh too:
+            # their `continue` branches write envelopes off this same `acct`
+            # dict. The `_or_none` core never raises (it catches and logs
+            # internally), so a tier-file problem can't bubble into the outer
+            # stale-write handler and masquerade as a scrape failure. On a
+            # read/parse failure we leave `acct["multiplier"]` untouched — the
+            # mutable dict is the keep-prior carrier, so the last good value
+            # rides forward and `_build_envelope` reads it unchanged.
+            if acct["target"] == "claude":
+                resolved = _resolve_multiplier_or_none(acct["id"])
+                if resolved is not None:
+                    acct["multiplier"] = resolved
 
             # Skip the scrape when no agent has touched its log within the idle
             # window — the prior envelope's `usage` values are still current,
