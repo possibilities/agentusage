@@ -60,5 +60,5 @@ New tests in tests/test_picker.py:
 - [ ] `uv run pytest` green
 
 ## Done summary
-
+Replaced round-robin picker with credit-weighted stride-scheduling balancer: effective_weight = multiplier × session_headroom, pick min(count/weight) with name tie-break. New entrants seed at pool-minimum count; equal weights degenerate to round-robin; all-zero weights fall back to multiplier-only credit. Fail-open invariants preserved. api.py + tests + README updated.
 ## Evidence
