@@ -49,5 +49,5 @@ README.md Multiplier section: replace the "stamps `multiplier` at boot … Resta
 - [ ] `uv run pytest` green
 
 ## Done summary
-
+Re-resolve plan-tier multiplier at the top of every fetch cycle (claude targets) via a new _resolve_multiplier_or_none core; keep the prior value on read/parse failure so a transient blip never flickers a Max account to 1x. Boot 1x fallback and codex unchanged; README updated to per-cycle re-resolve.
 ## Evidence

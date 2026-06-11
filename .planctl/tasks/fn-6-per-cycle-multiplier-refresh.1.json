@@ -9,5 +9,6 @@
   "target_repo": "/Users/mike/code/agentuse",
   "tier": "high",
   "title": "Re-resolve multiplier each fetch cycle",
-  "updated_at": "2026-06-11T13:33:38.706364Z"
+  "updated_at": "2026-06-11T13:41:07.566592Z",
+  "worker_done_at": "2026-06-11T13:41:07.566592Z"
 }
