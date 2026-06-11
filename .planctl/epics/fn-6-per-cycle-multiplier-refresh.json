@@ -1,0 +1,17 @@
+{
+  "branch_name": "fn-6-per-cycle-multiplier-refresh",
+  "bundles": [],
+  "created_at": "2026-06-11T13:33:38.706364Z",
+  "depends_on_epics": [],
+  "id": "fn-6-per-cycle-multiplier-refresh",
+  "last_validated_at": "2026-06-11T13:33:38.758023Z",
+  "primary_repo": "/Users/mike/code/agentuse",
+  "queue_jump": false,
+  "snippets": [],
+  "status": "open",
+  "title": "Per-cycle multiplier refresh",
+  "touched_repos": [
+    "/Users/mike/code/agentuse"
+  ],
+  "updated_at": "2026-06-11T13:33:38.706364Z"
+}
