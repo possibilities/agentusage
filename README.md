@@ -35,17 +35,21 @@ spinning up the daemon: **"which Claude profile should I use right now?"**
 ```python
 from agentuse import pick_profile, list_profiles
 
-profile = pick_profile()           # round-robin over subscribed claude accounts
+profile = pick_profile()           # weighted balance over subscribed claude accounts
 names = list_profiles()            # configured profile names from config.yaml
 ```
 
-- `pick_profile() -> str` — round-robin over eligible accounts (envelope
-  `target == "claude"` and `subscription_active is True`). The
-  least-recently-picked eligible profile wins; ties break by name. The pick
-  is stamped to `~/.local/state/agentuse/picker.json` under an `fcntl` lock,
-  so concurrent launches can't both draw the same profile. Usage percentages
-  and `multiplier` are intentionally ignored — this is round-robin, not
-  balancing. No stale filter; `status == "stale"` still rotates.
+- `pick_profile() -> str` — credit-weighted balance over eligible accounts
+  (envelope `target == "claude"` and `subscription_active is True`). Each
+  profile's `effective_weight = multiplier × session_headroom`, where
+  `session_headroom = clamp(1 − usage.session.percent_used/100, 0, 1)`; the
+  pick minimizes `count / weight` (stride scheduling), ties break by name. So
+  a Max-5x account draws ~5× the picks of a Pro at equal headroom, and a
+  profile burning its session window sheds load automatically. The pick is
+  stamped to `~/.local/state/agentuse/picker.json` under an `fcntl` lock, so
+  concurrent launches can't both draw the same profile. Session window only
+  (v1 scope); no stale filter — `status == "stale"` still rotates on its
+  last-good headroom.
 - `list_profiles() -> list[str]` — the `profiles:` list from
   `~/.config/agentuse/config.yaml` (or `$XDG_CONFIG_HOME/agentuse/config.yaml`),
   filtered to non-empty strings.
@@ -318,7 +322,8 @@ combination. The full matrix is:
 1. **If `subscription_active == false`: skip.** No quota to weigh.
 2. **Else if `status == "stale"`: distrust `usage`.** Either skip or downweight
    based on how recent `error.at` is.
-3. **Else: use `usage`.** Weight by `multiplier` against the configured pool.
+3. **Else: use `usage`.** Weight by `multiplier × session headroom` against the
+   configured pool, where session headroom = `1 − usage.session.percent_used/100`.
 
 ### Worked balancing example
 
@@ -338,17 +343,18 @@ Applying the routing rule:
 - `multi-claude-4`: `status == "stale"` → **skip** (or downweight; here we skip).
 - The other three are eligible.
 
-Compute remaining-quota weight as `multiplier * (1 - week.percent_used/100)`
-(week is usually the binding constraint; session refills faster):
+Compute remaining-quota weight as `multiplier * (1 - session.percent_used/100)`
+(session window only — quota-left is the binding constraint and the feedback
+loop self-corrects as a window fills):
 
-| id | multiplier | week % used | weight | normalized |
+| id | multiplier | session % used | weight | normalized |
 |---|---|---|---|---|
-| `default` | 1 | 10% | `1 * 0.90 = 0.90` | 4.9% |
-| `multi-claude-2` | 5 | 25% | `5 * 0.75 = 3.75` | 20.4% |
-| `multi-claude-3` | 20 | 40% | `20 * 0.60 = 12.00` | 65.4% |
+| `default` | 1 | 30% | `1 * 0.70 = 0.70` | 10.4% |
+| `multi-claude-2` | 5 | 60% | `5 * 0.40 = 2.00` | 29.9% |
+| `multi-claude-3` | 20 | 80% | `20 * 0.20 = 4.00` | 59.7% |
 
-Route 65% of new work to `multi-claude-3` (the Max 20x absorbs the largest
-share even though it's the most-used), 20% to `multi-claude-2`, 5% to
+Route 60% of new work to `multi-claude-3` (the Max 20x absorbs the largest
+share even though it's the most-used), 30% to `multi-claude-2`, 10% to
 `default`. The `multiplier` is what keeps the Pro account from being
 disproportionately preferred just because it shows a lower `percent_used`
 — small accounts have less absolute room.

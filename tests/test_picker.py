@@ -48,6 +48,9 @@ def _write_config(profiles: list[str]) -> None:
     cfg.write_text(yaml.safe_dump({"profiles": profiles}))
 
 
+_UNSET = object()
+
+
 def _write_envelope(
     state_dir: Path,
     name: str,
@@ -56,20 +59,36 @@ def _write_envelope(
     target: str = "claude",
     status: str = "active",
     lift_at: object = None,
+    multiplier: object = _UNSET,
+    session_percent: object = _UNSET,
+    usage: object = _UNSET,
 ) -> None:
-    (state_dir / f"{name}.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "id": name,
-                "target": target,
-                "subscription_active": subscription_active,
-                "status": status,
-                "usage": None,
-                "lift_at": lift_at,
-            }
+    """Write a per-account envelope.
+
+    ``multiplier`` and ``session_percent`` are the balancer inputs. By default
+    the envelope carries no ``multiplier`` (the balancer coerces absence to 1)
+    and a null ``usage`` (absence → full headroom). Pass ``session_percent`` to
+    nest it as ``usage.session.percent_used`` exactly as the producer writes it;
+    pass ``usage`` directly to inject a malformed shape for defensive tests.
+    """
+    if usage is _UNSET:
+        usage = (
+            None
+            if session_percent is _UNSET
+            else {"session": {"percent_used": session_percent}}
         )
-    )
+    envelope: dict[str, object] = {
+        "schema_version": 1,
+        "id": name,
+        "target": target,
+        "subscription_active": subscription_active,
+        "status": status,
+        "usage": usage,
+        "lift_at": lift_at,
+    }
+    if multiplier is not _UNSET:
+        envelope["multiplier"] = multiplier
+    (state_dir / f"{name}.json").write_text(json.dumps(envelope))
 
 
 def _counts(state_dir: Path) -> dict[str, int]:
@@ -126,6 +145,191 @@ def test_stale_account_still_rotates(
     picks = {picker.pick_profile() for _ in range(4)}
 
     assert picks == {"p1", "p2"}
+
+
+# ---------- weighted balancing ----------------------------------------------
+
+
+def test_5x_picked_five_times_as_often_at_equal_headroom(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At equal (full) headroom, a 5x profile draws ~5x the picks of a 1x over
+    a large N — proportionality is the core balancing property."""
+    monkeypatch.setattr(picker, "datetime", _MonotonicClock)
+    _MonotonicClock._counter = 0
+    _write_config(["pro", "max5"])
+    _write_envelope(state_dir, "pro", subscription_active=True, multiplier=1)
+    _write_envelope(state_dir, "max5", subscription_active=True, multiplier=5)
+
+    for _ in range(600):
+        picker.pick_profile()
+
+    counts = _counts(state_dir)
+    ratio = counts["max5"] / counts["pro"]
+    assert 4.5 <= ratio <= 5.5, counts
+
+
+def test_headroom_scales_multiplier_to_even_split(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 10x at 50% session used (effective 5.0) balances evenly against a 5x
+    at 0% used (effective 5.0) — headroom scales the multiplier."""
+    monkeypatch.setattr(picker, "datetime", _MonotonicClock)
+    _MonotonicClock._counter = 0
+    _write_config(["a", "b"])
+    _write_envelope(
+        state_dir, "a", subscription_active=True, multiplier=10, session_percent=50.0
+    )
+    _write_envelope(
+        state_dir, "b", subscription_active=True, multiplier=5, session_percent=0.0
+    )
+
+    for _ in range(400):
+        picker.pick_profile()
+
+    counts = _counts(state_dir)
+    assert abs(counts["a"] - counts["b"]) <= 1, counts
+
+
+def test_equal_weights_degrade_to_round_robin(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three profiles at identical weight reproduce round-robin: the first three
+    picks are all-distinct and six picks land two each."""
+    monkeypatch.setattr(picker, "datetime", _MonotonicClock)
+    _MonotonicClock._counter = 0
+    _write_config(["p1", "p2", "p3"])
+    for name in ("p1", "p2", "p3"):
+        _write_envelope(state_dir, name, subscription_active=True, multiplier=5)
+
+    picks = [picker.pick_profile() for _ in range(6)]
+
+    assert set(picks[:3]) == {"p1", "p2", "p3"}
+    assert _counts(state_dir) == {"p1": 2, "p2": 2, "p3": 2}
+
+
+def test_all_sessions_burned_falls_back_to_multiplier_credit(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every profile at 100% session used (weight floors to 0) → picks still
+    distribute by multiplier-only credit and never raise."""
+    monkeypatch.setattr(picker, "datetime", _MonotonicClock)
+    _MonotonicClock._counter = 0
+    _write_config(["pro", "max5"])
+    _write_envelope(
+        state_dir, "pro", subscription_active=True, multiplier=1, session_percent=100.0
+    )
+    _write_envelope(
+        state_dir, "max5", subscription_active=True, multiplier=5, session_percent=100.0
+    )
+
+    for _ in range(600):
+        picker.pick_profile()
+
+    counts = _counts(state_dir)
+    assert sum(counts.values()) == 600
+    ratio = counts["max5"] / counts["pro"]
+    assert 4.5 <= ratio <= 5.5, counts
+
+
+def test_missing_usage_means_full_headroom(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing usage / missing session / missing percent_used all yield full
+    headroom (1.0), so two equal-multiplier profiles split evenly."""
+    monkeypatch.setattr(picker, "datetime", _MonotonicClock)
+    _MonotonicClock._counter = 0
+    _write_config(["nousage", "nosession", "nopercent", "full"])
+    _write_envelope(state_dir, "nousage", subscription_active=True, usage=None)
+    _write_envelope(state_dir, "nosession", subscription_active=True, usage={})
+    _write_envelope(
+        state_dir, "nopercent", subscription_active=True, usage={"session": {}}
+    )
+    _write_envelope(state_dir, "full", subscription_active=True, session_percent=0.0)
+
+    for _ in range(400):
+        picker.pick_profile()
+
+    counts = _counts(state_dir)
+    assert max(counts.values()) - min(counts.values()) <= 1, counts
+
+
+def test_new_entrant_gets_no_catch_up_burst(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A profile with no ledger entry enters at min(existing counts), not 0, so
+    it doesn't draw a run of consecutive catch-up picks on first appearance."""
+    monkeypatch.setattr(picker, "datetime", _MonotonicClock)
+    _MonotonicClock._counter = 0
+    # Seed an established ledger: p1 and p2 already have substantial counts.
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "picker.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "picks": {
+                    "p1": {"count": 50, "last_picked_at": "2026-01-01T00:00:00"},
+                    "p2": {"count": 50, "last_picked_at": "2026-01-01T00:00:00"},
+                },
+            }
+        )
+    )
+    _write_config(["p1", "p2", "fresh"])
+    for name in ("p1", "p2", "fresh"):
+        _write_envelope(state_dir, name, subscription_active=True, multiplier=1)
+
+    # The fresh profile enters crediting at min(50, 50) = 50, tying p1/p2.
+    # Its first pick is therefore a single pick, not a burst back to parity.
+    first = picker.pick_profile()
+    assert first == "fresh"  # name tie-break among the three equal credits
+    second = picker.pick_profile()
+    assert second != "fresh"  # no catch-up burst — fresh already has credit 51
+
+
+def test_percent_used_over_100_clamps_to_zero_headroom(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A corrupt percent_used > 100 clamps headroom to 0 (weight floors to 0),
+    so the over-100 profile only wins via the all-zero multiplier fallback."""
+    monkeypatch.setattr(picker, "datetime", _MonotonicClock)
+    _MonotonicClock._counter = 0
+    _write_config(["bad", "good"])
+    _write_envelope(
+        state_dir, "bad", subscription_active=True, multiplier=20, session_percent=150.0
+    )
+    _write_envelope(
+        state_dir, "good", subscription_active=True, multiplier=1, session_percent=0.0
+    )
+
+    for _ in range(50):
+        picker.pick_profile()
+
+    counts = _counts(state_dir)
+    # "bad" has zero headroom while "good" has positive weight, so "good" wins
+    # every pick — the over-100 clamp keeps the burned profile out.
+    assert counts.get("bad", 0) == 0, counts
+    assert counts["good"] == 50
+
+
+@pytest.mark.parametrize("bad_multiplier", [0, -5, "garbage", 3.5, True, None])
+def test_garbage_multiplier_treated_as_one(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch, bad_multiplier: object
+) -> None:
+    """A multiplier that's 0, negative, non-int, or garbage is coerced to 1, so
+    it balances evenly against a genuine 1x profile."""
+    monkeypatch.setattr(picker, "datetime", _MonotonicClock)
+    _MonotonicClock._counter = 0
+    _write_config(["weird", "one"])
+    _write_envelope(
+        state_dir, "weird", subscription_active=True, multiplier=bad_multiplier
+    )
+    _write_envelope(state_dir, "one", subscription_active=True, multiplier=1)
+
+    for _ in range(200):
+        picker.pick_profile()
+
+    counts = _counts(state_dir)
+    assert abs(counts["weird"] - counts["one"]) <= 1, counts
 
 
 # ---------- empty / skip paths ----------------------------------------------
