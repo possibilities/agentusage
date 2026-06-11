@@ -259,8 +259,7 @@ def _counts(state: dict[str, Any]) -> dict[str, int]:
     out: dict[str, int] = {}
     for name, entry in picks.items():
         count = entry.get("count") if isinstance(entry, dict) else None
-        valid = isinstance(count, int) and not isinstance(count, bool)
-        out[name] = count if valid else 0
+        out[name] = count if isinstance(count, int) and not isinstance(count, bool) else 0
     return out
 
 
