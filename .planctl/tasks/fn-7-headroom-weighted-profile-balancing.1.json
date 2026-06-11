@@ -1,0 +1,13 @@
+{
+  "bundles": [],
+  "created_at": "2026-06-11T13:34:36.184849Z",
+  "depends_on": [],
+  "epic": "fn-7-headroom-weighted-profile-balancing",
+  "id": "fn-7-headroom-weighted-profile-balancing.1",
+  "priority": null,
+  "snippets": [],
+  "target_repo": "/Users/mike/code/agentuse",
+  "tier": "xhigh",
+  "title": "Weighted pick by multiplier and headroom",
+  "updated_at": "2026-06-11T13:34:36.184849Z"
+}
