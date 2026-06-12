@@ -18,9 +18,11 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+package = false
+
 [tool.hatch.build.targets.wheel]
-packages = ["agentuse"]
-only-packages = true
+bypass-selection = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
