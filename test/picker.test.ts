@@ -4,9 +4,8 @@
  * proportionality, headroom scaling, stale-still-rotates, missing-usage→full-
  * headroom, new-entrant-no-catch-up-burst, over-100 clamp, garbage-multiplier
  * coercion, empty/skip paths, corrupt-state-reset-not-fatal, never-raises-on-
- * unreadable-state-dir, a REAL multi-process flock contention test, the
- * rate-limit cooldown (future/past/all-cooling/malformed lift_at), and the
- * cross-runtime ledger byte-compatibility round-trip with the Python lib.
+ * unreadable-state-dir, a REAL multi-process flock contention test, and the
+ * rate-limit cooldown (future/past/all-cooling/malformed lift_at).
  *
  * The picker reads two sources redirected into tmp: per-account envelopes under
  * the state dir (via `setStateDir`) and the catalog at
@@ -520,74 +519,5 @@ describe("listProfiles", () => {
       "multi-claude-2",
       "multi-claude-3",
     ]);
-  });
-});
-
-// ---------- cross-runtime ledger byte-compatibility -------------------------
-
-describe("cross-runtime ledger compatibility", () => {
-  test("TS-written picker.json parses under the Python lib (schema_version 1)", () => {
-    installMonotonicClock();
-    writeConfig(["p1", "p2"]);
-    writeEnvelope("p1", { subscription_active: true });
-    writeEnvelope("p2", { subscription_active: true });
-    pickProfile();
-    pickProfile();
-
-    // Feed the TS-written ledger through the still-present Python picker's
-    // loader + counts reader; it must accept schema_version 1 and read the
-    // same counts the TS reader sees.
-    const py = `
-import json, sys
-sys.path.insert(0, "${join(import.meta.dir, "..")}")
-import agentuse.api as picker
-picker.STATE_DIR = __import__("pathlib").Path("${stateDir}")
-state = picker._load_picker_state()
-assert state.get("schema_version") == 1, state
-print(json.dumps(picker._counts(state)))
-`;
-    const proc = spawn({
-      cmd: ["python3", "-c", py],
-      env: { ...process.env },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const code = proc.exited;
-    return (async () => {
-      const out = await new Response(proc.stdout).text();
-      const err = await new Response(proc.stderr).text();
-      const exitCode = await code;
-      expect(exitCode, err).toBe(0);
-      const pyCounts = JSON.parse(out.trim());
-      expect(pyCounts).toEqual(readCounts());
-    })();
-  });
-
-  test("Python-written picker.json parses under the TS lib", async () => {
-    writeConfig(["p1"]);
-    writeEnvelope("p1", { subscription_active: true });
-    // Have the Python picker do one pick, writing the ledger.
-    const py = `
-import sys
-sys.path.insert(0, "${join(import.meta.dir, "..")}")
-import agentuse.api as picker
-picker.STATE_DIR = __import__("pathlib").Path("${stateDir}")
-print(picker.pick_profile())
-`;
-    const proc = spawn({
-      cmd: ["python3", "-c", py],
-      env: { ...process.env, XDG_CONFIG_HOME: configHome },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const out = (await new Response(proc.stdout).text()).trim();
-    const err = await new Response(proc.stderr).text();
-    expect(await proc.exited, err).toBe(0);
-    expect(out).toBe("p1");
-
-    // The TS lib reads the Python-written ledger and continues the count.
-    installMonotonicClock();
-    expect(pickProfile()).toBe("p1");
-    expect(readCounts()).toEqual({ p1: 2 });
   });
 });

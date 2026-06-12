@@ -26,43 +26,43 @@ All state lives under `~/.local/state/agentuse/`:
 There is no cross-instance lock. Two daemons would race the same state files.
 Run one at a time.
 
-## Python API
+## TypeScript API
 
-The `agentuse-py` package (this repo) exposes a two-function reader so an
-external launcher (arthack's claude wrapper) can answer one question without
-spinning up the daemon: **"which Claude profile should I use right now?"**
+The agentuse package (this repo) exposes a small reader so an external launcher
+(arthack's claudewrap) can answer one question without spinning up the daemon:
+**"which Claude profile should I use right now?"** Import it from `src/` (the
+package `exports` map points `.` at `src/index.ts`):
 
-```python
-from agentuse import pick_profile, list_profiles
+```ts
+import { pickProfile, listProfiles } from "agentuse";
 
-profile = pick_profile()           # weighted balance over subscribed claude accounts
-names = list_profiles()            # configured profile names from config.yaml
+const profile = pickProfile();   // weighted balance over subscribed claude accounts
+const names = listProfiles();    // configured profile names from config.yaml
 ```
 
-- `pick_profile() -> str` — credit-weighted balance over eligible accounts
-  (envelope `target == "claude"` and `subscription_active is True`). Each
+- `pickProfile(): string` — credit-weighted balance over eligible accounts
+  (envelope `target === "claude"` and `subscription_active === true`). Each
   profile's `effective_weight = multiplier × session_headroom`, where
   `session_headroom = clamp(1 − usage.session.percent_used/100, 0, 1)`; the
   pick minimizes `count / weight` (stride scheduling), ties break by name. So
   a Max-5x account draws ~5× the picks of a Pro at equal headroom, and a
   profile burning its session window sheds load automatically. The pick is
-  stamped to `~/.local/state/agentuse/picker.json` under an `fcntl` lock, so
-  concurrent launches can't both draw the same profile. Session window only
-  (v1 scope); no stale filter — `status == "stale"` still rotates on its
-  last-good headroom.
-- `list_profiles() -> list[str]` — the `profiles:` list from
+  stamped to `~/.local/state/agentuse/picker.json` under an `flock` (the
+  `FileLock` helper exported from `agentuse/flock`), so concurrent launches
+  can't both draw the same profile. Session window only (v1 scope); no stale
+  filter — `status === "stale"` still rotates on its last-good headroom.
+- `listProfiles(): string[]` — the `profiles:` list from
   `~/.config/agentuse/config.yaml` (or `$XDG_CONFIG_HOME/agentuse/config.yaml`),
   filtered to non-empty strings.
 - **Fail-open.** Any failure (no eligible profile, unreadable state, lock
   trouble, corrupt JSON, missing config) returns `"default"` from
-  `pick_profile` or `[]` from `list_profiles`. Neither function ever raises;
+  `pickProfile` or `[]` from `listProfiles`. Neither function ever throws;
   a broken picker must never block a launch. `"default"` is itself a real
   account id, so the fallback and a legitimate pick are the same string.
 
 The daemon (`daemon.py`, `scrape.py`, `parse_*.py`) stays flat at the repo
 root and runs in-place via `uv run python daemon.py` — it is the *producer*
-of the envelopes the reader consumes. Only the `agentuse/` package ships in
-the built wheel.
+of the envelopes the reader consumes.
 
 ## Development
 
