@@ -3,7 +3,7 @@ agentuse — scrape Claude/Codex usage per account and expose a round-robin prof
 Polyglot repo. The Python daemon (`daemon.py`) is the envelope PRODUCER: it
 scrapes each account and writes `~/.local/state/agentuse/<id>.json` envelopes
 plus the `picker.json` ledger. The TypeScript library under `src/` is a CONSUMER
-surface — `listProfiles()` / `pickProfile()` — that claudewrap imports via
+surface — `listProfiles()` / `pickProfile()` — that agentwrap imports via
 `file:../agentuse`. Both runtimes coexist on the same on-disk state during the
 launcher cutover, so the data contract is load-bearing across the language seam.
 

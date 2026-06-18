@@ -3,7 +3,7 @@
  *
  * The daemon (`daemon.py`) is the *producer*: it scrapes each account and
  * writes `~/.local/state/agentuse/<id>.json` envelopes. This module is a
- * *consumer* — the dumb balancer a launcher (claudewrap) calls to answer one
+ * *consumer* — the dumb balancer a launcher (agentwrap) calls to answer one
  * question: **"which Claude profile should I use right now?"** It is a 1:1 port
  * of `agentuse/api.py`; the Python `pick_profile` coexists on the same ledger
  * until the launcher cutover completes, so serialization, schema_version, lock

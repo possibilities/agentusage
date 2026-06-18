@@ -1,6 +1,6 @@
 /**
  * agentuse TypeScript library — the consumer surface for the profile picker the
- * Python daemon feeds. claudewrap imports this via `file:../agentuse`.
+ * Python daemon feeds. agentwrap imports this via `file:../agentuse`.
  */
 
 export {

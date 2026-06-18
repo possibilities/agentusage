@@ -29,7 +29,7 @@ Run one at a time.
 ## TypeScript API
 
 The agentuse package (this repo) exposes a small reader so an external launcher
-(arthack's claudewrap) can answer one question without spinning up the daemon:
+(arthack's agentwrap) can answer one question without spinning up the daemon:
 **"which Claude profile should I use right now?"** Import it from `src/` (the
 package `exports` map points `.` at `src/index.ts`):
 

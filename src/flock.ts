@@ -20,7 +20,7 @@
  *
  * `FileLock` owns the common case: it opens its own lock file (truncating `"w"`
  * — content is irrelevant) and locks the open-file-description. A consumer that
- * must lock a fd it opened NON-truncating (claudewrap's ordinal counter locks
+ * must lock a fd it opened NON-truncating (agentwrap's ordinal counter locks
  * the data file directly; `FileLock.acquire`'s `"w"` open would truncate it)
  * uses the raw `loadLibc` / `flockFd` / `setCloexec` exports against its own fd.
  */

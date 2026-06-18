@@ -3,7 +3,7 @@
  * from keeper. Covers acquire/release round-trip, idempotent release, a second
  * concurrent non-blocking acquire blocking while held, the constants matching
  * the on-the-wire flock(2)/fcntl values, and the raw libc symbol exports an
- * external consumer (claudewrap) locks its own fd with.
+ * external consumer (agentwrap) locks its own fd with.
  *
  * bun:ffi is experimental; this is the regression tripwire pinning the two
  * silent-failing macOS-aarch64 hazards (i32 return width, FD_CLOEXEC ordering).
@@ -72,7 +72,7 @@ describe("FileLock", () => {
 
 describe("raw libc exports (external-consumer fd locking)", () => {
   test("setCloexec + flockFd lock a fd the consumer opened non-truncating", () => {
-    // claudewrap's ordinal counter locks the DATA file directly with a
+    // agentwrap's ordinal counter locks the DATA file directly with a
     // non-truncating open. Prove the raw symbols lock such a fd and that a
     // second non-blocking flock on a fresh fd reports contention.
     const dataPath = join(tmpDir, "counter.dat");
