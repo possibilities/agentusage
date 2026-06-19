@@ -45,7 +45,7 @@ TARGETS = {
         # Bare claude binary — we bypass the arthack-claude wrapper to avoid
         # its devctl-roots cwd prompt (which trips when spawning in /tmp) and
         # its plugin/auth setup overhead. Profile selection is handled here
-        # by setting CLAUDE_CONFIG_DIR from --arthack-profile <name>.
+        # by setting CLAUDE_CONFIG_DIR from --agentwrap-profile <name>.
         "command": "/Users/mike/.local/bin/claude",
         "slash": "/usage",
         # Bare binary boots faster than the wrapper, so pump_until_idle's
@@ -95,7 +95,7 @@ TARGETS = {
 
 
 def _extract_claude_profile(args: list[str]) -> tuple[list[str], str | None]:
-    """Strip --arthack-profile <name> (or --arthack-profile=<name>) from args.
+    """Strip --agentwrap-profile <name> (or --agentwrap-profile=<name>) from args.
 
     Returns (remaining_args, profile_name_or_None). Used to translate the
     daemon's wrapper-shaped passthrough_args into a bare-claude env var.
@@ -104,10 +104,10 @@ def _extract_claude_profile(args: list[str]) -> tuple[list[str], str | None]:
     profile: str | None = None
     i = 0
     while i < len(args):
-        if args[i] == "--arthack-profile" and i + 1 < len(args):
+        if args[i] == "--agentwrap-profile" and i + 1 < len(args):
             profile = args[i + 1]
             i += 2
-        elif args[i].startswith("--arthack-profile="):
+        elif args[i].startswith("--agentwrap-profile="):
             profile = args[i].split("=", 1)[1]
             i += 1
         else:

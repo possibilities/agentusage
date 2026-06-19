@@ -1,7 +1,7 @@
 """Table-driven coverage for ``scrape._extract_claude_profile``.
 
-Pure arg-munging helper: strips ``--arthack-profile <name>`` (space form) or
-``--arthack-profile=<name>`` (equals form) out of a wrapper-shaped passthrough
+Pure arg-munging helper: strips ``--agentwrap-profile <name>`` (space form) or
+``--agentwrap-profile=<name>`` (equals form) out of a wrapper-shaped passthrough
 arg list, returning ``(remaining_args, profile_or_None)``.
 
 Import ``scrape`` (the module), NOT ``scrape_one`` — the helper lives on the
@@ -25,46 +25,46 @@ import scrape  # noqa: E402
 @pytest.mark.parametrize(
     ("args", "expected_remaining", "expected_profile"),
     [
-        # Space form: `--arthack-profile foo`.
-        (["--arthack-profile", "foo"], [], "foo"),
-        # Equals form: `--arthack-profile=foo`.
-        (["--arthack-profile=foo"], [], "foo"),
+        # Space form: `--agentwrap-profile foo`.
+        (["--agentwrap-profile", "foo"], [], "foo"),
+        # Equals form: `--agentwrap-profile=foo`.
+        (["--agentwrap-profile=foo"], [], "foo"),
         # Flag absent: everything passes through, profile is None.
         (["--model", "opus", "--print"], ["--model", "opus", "--print"], None),
         # Empty input.
         ([], [], None),
         # Interleaved with passthrough args (space form).
         (
-            ["--model", "opus", "--arthack-profile", "foo", "--print"],
+            ["--model", "opus", "--agentwrap-profile", "foo", "--print"],
             ["--model", "opus", "--print"],
             "foo",
         ),
         # Interleaved with passthrough args (equals form).
         (
-            ["--model", "opus", "--arthack-profile=foo", "--print"],
+            ["--model", "opus", "--agentwrap-profile=foo", "--print"],
             ["--model", "opus", "--print"],
             "foo",
         ),
         # Multiple occurrences: last wins (space form).
         (
-            ["--arthack-profile", "foo", "--arthack-profile", "bar"],
+            ["--agentwrap-profile", "foo", "--agentwrap-profile", "bar"],
             [],
             "bar",
         ),
         # Multiple occurrences: last wins (mixed forms).
         (
-            ["--arthack-profile=foo", "--arthack-profile", "bar"],
+            ["--agentwrap-profile=foo", "--agentwrap-profile", "bar"],
             [],
             "bar",
         ),
-        # Trailing `--arthack-profile` with no value: there's no `i+1` and it
+        # Trailing `--agentwrap-profile` with no value: there's no `i+1` and it
         # doesn't match the `=` prefix, so it falls through to passthrough and
         # profile stays None.
-        (["--arthack-profile"], ["--arthack-profile"], None),
+        (["--agentwrap-profile"], ["--agentwrap-profile"], None),
         # No-value trailing flag after real passthrough args.
         (
-            ["--model", "opus", "--arthack-profile"],
-            ["--model", "opus", "--arthack-profile"],
+            ["--model", "opus", "--agentwrap-profile"],
+            ["--model", "opus", "--agentwrap-profile"],
             None,
         ),
     ],

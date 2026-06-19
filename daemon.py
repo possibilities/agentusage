@@ -197,7 +197,7 @@ def _build_accounts() -> list[Account]:
             {
                 "id": name,
                 "target": "claude",
-                "passthrough": ["--arthack-profile", name],
+                "passthrough": ["--agentwrap-profile", name],
                 "multiplier": _resolve_multiplier(name),
             }
         )
