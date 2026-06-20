@@ -261,7 +261,7 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
             encoding=None,
             timeout=10,
             cwd=tmpdir,
-            env=env,
+            env=env,  # type: ignore[arg-type]  # pexpect stubs require _Environ, dict[str,str] works
         )
 
         try:
