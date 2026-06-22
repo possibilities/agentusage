@@ -49,5 +49,5 @@ Canary: after restart, `~/.local/state/agentuse` must NOT reappear; if it does, 
 - [ ] `.keeper` history untouched
 
 ## Done summary
-
+Flag-day cutover executed supervised. Booted out the launchd producer (keeperd/buildbot left up as tolerant readers), moved repo dir + ~/.local/state + ~/.config to agentusage, reconciled a nested-state race preserving the picker ledger with full history, bootstrapped the agentusage daemon (healthy on new paths), renamed the GitHub remote and updated origin.
 ## Evidence

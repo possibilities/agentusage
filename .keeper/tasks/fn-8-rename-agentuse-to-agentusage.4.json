@@ -13,5 +13,6 @@
   "target_repo": "/Users/mike/code/agentuse",
   "tier": "xhigh",
   "title": "flag-day cutover move state restart daemons",
-  "updated_at": "2026-06-22T14:15:24.145000Z"
+  "updated_at": "2026-06-22T15:15:26.461000Z",
+  "worker_done_at": "2026-06-22T15:15:26.461000Z"
 }
