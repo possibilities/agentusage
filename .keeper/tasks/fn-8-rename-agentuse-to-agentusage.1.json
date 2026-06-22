@@ -6,9 +6,9 @@
   "id": "fn-8-rename-agentuse-to-agentusage.1",
   "priority": null,
   "snippets": [],
-  "target_repo": "/Users/mike/code/agentuse",
+  "target_repo": "/Users/mike/code/agentusage",
   "tier": "high",
   "title": "rename agentuse package in-repo",
-  "updated_at": "2026-06-22T14:17:21.127000Z",
+  "updated_at": "2026-06-22T15:51:21.733000Z",
   "worker_done_at": "2026-06-22T14:17:21.127000Z"
 }
