@@ -9,5 +9,6 @@
   "target_repo": "/Users/mike/code/agentuse",
   "tier": "high",
   "title": "rename agentuse package in-repo",
-  "updated_at": "2026-06-22T14:13:17.028000Z"
+  "updated_at": "2026-06-22T14:17:21.127000Z",
+  "worker_done_at": "2026-06-22T14:17:21.127000Z"
 }

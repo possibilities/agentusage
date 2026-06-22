@@ -42,5 +42,5 @@ Full matrix in place: `bun lint` (biome + tsc --noEmit), `bun test`, `ruff`, `uv
 - [ ] `bun lint` + `bun test` + `ruff` + `uv run pytest` green; repo directory still named `agentuse`
 
 ## Done summary
-
+Renamed agentuse -> agentusage across the repo's source, tests, manifests, and docs (XDG leaf strings, both coupled pairs, cosmetic identity strings); regenerated uv.lock + bun.lock. Full matrix green (biome + tsc + bun test 33 + ruff + pytest 79); repo dir still agentuse per the .4 cutover.
 ## Evidence
