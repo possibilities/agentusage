@@ -8,9 +8,9 @@
 
 import { pickProfile, setStateDir } from "../../src/api";
 
-const stateDir = process.env.AGENTUSE_TEST_STATE_DIR;
+const stateDir = process.env.AGENTUSAGE_TEST_STATE_DIR;
 if (!stateDir) {
-  process.stderr.write("AGENTUSE_TEST_STATE_DIR unset\n");
+  process.stderr.write("AGENTUSAGE_TEST_STATE_DIR unset\n");
   process.exit(2);
 }
 setStateDir(stateDir);

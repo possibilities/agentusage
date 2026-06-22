@@ -239,9 +239,9 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
     stream = pyte.ByteStream(screen)
 
     # Spawn in a throwaway /tmp dir so the TUI doesn't auto-load whatever
-    # project we happen to be running in (agentuse's own CLAUDE.md, planctl
+    # project we happen to be running in (agentusage's own CLAUDE.md, planctl
     # state, etc.).
-    with tempfile.TemporaryDirectory(prefix="agentuse-scrape-", dir="/tmp") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="agentusage-scrape-", dir="/tmp") as tmpdir:
         # Resolve symlinks (macOS /tmp -> /private/tmp) since both tools
         # canonicalize cwd before looking up trust state.
         tmpdir_real = str(Path(tmpdir).resolve())

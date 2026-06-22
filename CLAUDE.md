@@ -1,10 +1,10 @@
-agentuse — scrape Claude/Codex usage per account and expose a round-robin profile picker.
+agentusage — scrape Claude/Codex usage per account and expose a round-robin profile picker.
 
 Polyglot repo. The Python daemon (`daemon.py`) is the envelope PRODUCER: it
-scrapes each account and writes `~/.local/state/agentuse/<id>.json` envelopes
+scrapes each account and writes `~/.local/state/agentusage/<id>.json` envelopes
 plus the `picker.json` ledger. The TypeScript library under `src/` is a CONSUMER
 surface — `listProfiles()` / `pickProfile()` — that agentwrap imports via
-`file:../agentuse`. Both runtimes coexist on the same on-disk state during the
+`file:../agentusage`. Both runtimes coexist on the same on-disk state during the
 launcher cutover, so the data contract is load-bearing across the language seam.
 
 ## Repo facts
@@ -15,7 +15,7 @@ launcher cutover, so the data contract is load-bearing across the language seam.
 - **Forward-facing advice only** in comments and docs: state current behavior and
   invariants, not change history (which lives in the diff).
 
-## Cross-runtime ledger invariants (TS `src/api.ts` ↔ Python `agentuse/api.py`)
+## Cross-runtime ledger invariants (TS `src/api.ts` ↔ Python `agentusage/api.py`)
 
 - **`schema_version: 1`** on `picker.json`; an unrecognized version is treated as
   absent (start fresh), never migrated. Bump in BOTH runtimes together.
@@ -31,9 +31,9 @@ launcher cutover, so the data contract is load-bearing across the language seam.
 - **`lift_at` rate-limit:** a future tz-aware instant excludes a profile; an
   offset-less stamp is NOT rate-limited (JS would parse it as local time; Python
   rejects it as corrupt) — require an explicit offset/`Z` before trusting it.
-- **State dir** is fixed at `~/.local/state/agentuse` (deliberately NOT
+- **State dir** is fixed at `~/.local/state/agentusage` (deliberately NOT
   `XDG_STATE_HOME` — matches Python). Config at `$XDG_CONFIG_HOME`-or-`~/.config`
-  `/agentuse/config.yaml`.
+  `/agentusage/config.yaml`.
 
 ## TS conventions
 

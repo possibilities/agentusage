@@ -1,5 +1,5 @@
 [project]
-name = "agentuse-py"
+name = "agentusage-py"
 version = "0.1.0"
 description = "Scrape Claude/Codex usage per account and expose a round-robin profile picker"
 requires-python = ">=3.11"

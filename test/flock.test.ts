@@ -24,7 +24,7 @@ import {
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "agentuse-flock-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "agentusage-flock-"));
 });
 
 afterEach(() => {

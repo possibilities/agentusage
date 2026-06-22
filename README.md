@@ -1,4 +1,4 @@
-# agentuse
+# agentusage
 
 A long-lived daemon that scrapes Claude `/usage` and Codex `/status` panels
 once per account on a `uniform(60, 180)s` jitter, then writes a self-stamped
@@ -10,7 +10,7 @@ client developer reading these files, this is the contract you depend on.
 
 ## Layout
 
-All state lives under `~/.local/state/agentuse/`:
+All state lives under `~/.local/state/agentusage/`:
 
 - `<id>.json` — the main per-account envelope. One file per account. Atomic
   same-filesystem rename writes; readers see either the previous full file
@@ -28,13 +28,13 @@ Run one at a time.
 
 ## TypeScript API
 
-The agentuse package (this repo) exposes a small reader so an external launcher
+The agentusage package (this repo) exposes a small reader so an external launcher
 (arthack's agentwrap) can answer one question without spinning up the daemon:
 **"which Claude profile should I use right now?"** Import it from `src/` (the
 package `exports` map points `.` at `src/index.ts`):
 
 ```ts
-import { pickProfile, listProfiles } from "agentuse";
+import { pickProfile, listProfiles } from "agentusage";
 
 const profile = pickProfile();   // weighted balance over subscribed claude accounts
 const names = listProfiles();    // configured profile names from config.yaml
@@ -47,12 +47,12 @@ const names = listProfiles();    // configured profile names from config.yaml
   pick minimizes `count / weight` (stride scheduling), ties break by name. So
   a Max-5x account draws ~5× the picks of a Pro at equal headroom, and a
   profile burning its session window sheds load automatically. The pick is
-  stamped to `~/.local/state/agentuse/picker.json` under an `flock` (the
-  `FileLock` helper exported from `agentuse/flock`), so concurrent launches
+  stamped to `~/.local/state/agentusage/picker.json` under an `flock` (the
+  `FileLock` helper exported from `agentusage/flock`), so concurrent launches
   can't both draw the same profile. Session window only (v1 scope); no stale
   filter — `status === "stale"` still rotates on its last-good headroom.
 - `listProfiles(): string[]` — the `profiles:` list from
-  `~/.config/agentuse/config.yaml` (or `$XDG_CONFIG_HOME/agentuse/config.yaml`),
+  `~/.config/agentusage/config.yaml` (or `$XDG_CONFIG_HOME/agentusage/config.yaml`),
   filtered to non-empty strings.
 - **Fail-open.** Any failure (no eligible profile, unreadable state, lock
   trouble, corrupt JSON, missing config) returns `"default"` from

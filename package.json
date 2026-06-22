@@ -1,5 +1,5 @@
 {
-  "name": "agentuse",
+  "name": "agentusage",
   "version": "0.1.0",
   "description": "Scrape Claude/Codex usage per account and expose a round-robin profile picker",
   "private": true,

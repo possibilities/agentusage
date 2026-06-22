@@ -9,7 +9,7 @@
  *
  * The picker reads two sources redirected into tmp: per-account envelopes under
  * the state dir (via `setStateDir`) and the catalog at
- * `$XDG_CONFIG_HOME/agentuse/config.yaml` (via the env var). The clock is
+ * `$XDG_CONFIG_HOME/agentusage/config.yaml` (via the env var). The clock is
  * pinned with `setClock` (the DI seam replacing Python's `_MonotonicClock`).
  */
 
@@ -39,11 +39,11 @@ let configHome: string;
 let savedXdg: string | undefined;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "agentuse-picker-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "agentusage-picker-"));
   stateDir = join(tmpDir, "state");
   mkdirSync(stateDir);
   configHome = join(tmpDir, "config");
-  mkdirSync(join(configHome, "agentuse"), { recursive: true });
+  mkdirSync(join(configHome, "agentusage"), { recursive: true });
   setStateDir(stateDir);
   savedXdg = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = configHome;
@@ -63,7 +63,7 @@ afterEach(() => {
 
 function writeConfig(profiles: string[]): void {
   const yaml = `profiles:\n${profiles.map((p) => `  - ${p}`).join("\n")}\n`;
-  writeFileSync(join(configHome, "agentuse", "config.yaml"), yaml);
+  writeFileSync(join(configHome, "agentusage", "config.yaml"), yaml);
 }
 
 const UNSET = Symbol("unset");
@@ -400,7 +400,7 @@ describe("concurrency", () => {
         cmd: ["bun", "run", fixture],
         env: {
           ...process.env,
-          AGENTUSE_TEST_STATE_DIR: stateDir,
+          AGENTUSAGE_TEST_STATE_DIR: stateDir,
           XDG_CONFIG_HOME: configHome,
         },
         stdout: "pipe",
@@ -506,11 +506,11 @@ describe("listProfiles", () => {
     expect(listProfiles()).toEqual([]);
   });
 
-  test("parses the real ~/.config/agentuse/config.yaml shape via Bun.YAML", () => {
+  test("parses the real ~/.config/agentusage/config.yaml shape via Bun.YAML", () => {
     // Guards the YAML-1.2-only adapter against the real config corpus shape
     // (a plain string list under `profiles:`; corpus is boolean-free).
     writeFileSync(
-      join(configHome, "agentuse", "config.yaml"),
+      join(configHome, "agentusage", "config.yaml"),
       "profiles:\n  - default\n  - multi-claude-1\n  - multi-claude-2\n  - multi-claude-3\n",
     );
     expect(listProfiles()).toEqual([

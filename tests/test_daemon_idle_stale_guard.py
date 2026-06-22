@@ -281,7 +281,7 @@ async def _run_stale_prior_cooldown_bypass(
 
 async def _run_stale_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Redirect STATE_DIR + EVENTS_LOG into a tmp dir so the test never touches
-    # the developer's real ~/.local/state/agentuse.
+    # the developer's real ~/.local/state/agentusage.
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     monkeypatch.setattr(daemon, "STATE_DIR", state_dir)
@@ -291,7 +291,7 @@ async def _run_stale_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     # entry keeps the Account TypedDict shape honest.
     # Synthesize a minimal Account rather than depending on the host's config
     # — the registered ACCOUNTS list is environment-specific (empty without
-    # ~/.config/agentuse/config.yaml) and the guard doesn't care which target
+    # ~/.config/agentusage/config.yaml) and the guard doesn't care which target
     # it runs against.
     acct: daemon.Account = {
         "id": "test-stale-guard",

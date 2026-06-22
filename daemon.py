@@ -92,7 +92,7 @@ def _resolve_multiplier_or_none(profile: str) -> int | None:
         st = path.stat()
         if st.st_size > MAX_CLAUDE_JSON_BYTES:
             print(
-                f"[agentuse] {path} exceeds {MAX_CLAUDE_JSON_BYTES} bytes "
+                f"[agentusage] {path} exceeds {MAX_CLAUDE_JSON_BYTES} bytes "
                 f"({st.st_size}); falling back to 1x",
                 file=sys.stderr,
             )
@@ -101,7 +101,7 @@ def _resolve_multiplier_or_none(profile: str) -> int | None:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
         print(
-            f"[agentuse] cannot read {path} ({exc}); falling back to 1x",
+            f"[agentusage] cannot read {path} ({exc}); falling back to 1x",
             file=sys.stderr,
         )
         return None
@@ -109,7 +109,7 @@ def _resolve_multiplier_or_none(profile: str) -> int | None:
     tier = data.get("oauthAccount", {}).get("organizationRateLimitTier")
     if tier is None:
         print(
-            f"[agentuse] {path} has no oauthAccount.organizationRateLimitTier; "
+            f"[agentusage] {path} has no oauthAccount.organizationRateLimitTier; "
             f"falling back to 1x",
             file=sys.stderr,
         )
@@ -117,7 +117,7 @@ def _resolve_multiplier_or_none(profile: str) -> int | None:
     mult = TIER_MULTIPLIERS.get(tier)
     if mult is None:
         print(
-            f"[agentuse] {path} has unknown tier {tier!r}; falling back to 1x",
+            f"[agentusage] {path} has unknown tier {tier!r}; falling back to 1x",
             file=sys.stderr,
         )
         return None
@@ -136,16 +136,16 @@ def _resolve_multiplier(profile: str) -> int:
 
 
 def _load_profile_names() -> list[str]:
-    """Read the XDG `agentuse/config.yaml` profile name list.
+    """Read the XDG `agentusage/config.yaml` profile name list.
 
     Expected shape: `profiles: [name1, name2, ...]` (a top-level YAML list).
     Missing or malformed config logs to stderr and degrades to an empty list,
     so the daemon runs codex-only rather than crashing.
     """
-    path = _xdg_config_home() / "agentuse" / "config.yaml"
+    path = _xdg_config_home() / "agentusage" / "config.yaml"
     if not path.exists():
         print(
-            f"[agentuse] no config at {path}; running codex-only",
+            f"[agentusage] no config at {path}; running codex-only",
             file=sys.stderr,
         )
         return []
@@ -154,20 +154,20 @@ def _load_profile_names() -> list[str]:
             data = yaml.safe_load(f)
     except (OSError, yaml.YAMLError) as exc:
         print(
-            f"[agentuse] failed to parse {path} ({exc}); running codex-only",
+            f"[agentusage] failed to parse {path} ({exc}); running codex-only",
             file=sys.stderr,
         )
         return []
     if not isinstance(data, dict):
         print(
-            f"[agentuse] {path} is not a mapping; running codex-only",
+            f"[agentusage] {path} is not a mapping; running codex-only",
             file=sys.stderr,
         )
         return []
     raw = data.get("profiles", [])
     if not isinstance(raw, list):
         print(
-            f"[agentuse] {path} `profiles` is not a list; running codex-only",
+            f"[agentusage] {path} `profiles` is not a list; running codex-only",
             file=sys.stderr,
         )
         return []
@@ -177,7 +177,7 @@ def _load_profile_names() -> list[str]:
             names.append(entry)
         else:
             print(
-                f"[agentuse] {path} `profiles` entry {entry!r} is not a "
+                f"[agentusage] {path} `profiles` entry {entry!r} is not a "
                 f"non-empty string; skipping",
                 file=sys.stderr,
             )
@@ -216,7 +216,7 @@ ACCOUNTS: list[Account] = _build_accounts()
 
 assert len({a["id"] for a in ACCOUNTS}) == len(ACCOUNTS), "ACCOUNTS ids must be unique"
 
-STATE_DIR = Path.home() / ".local" / "state" / "agentuse"
+STATE_DIR = Path.home() / ".local" / "state" / "agentusage"
 
 # One-line-per-event audit log of every scrape and every idle-skip across all
 # accounts. Unbounded growth; rotation is a future concern when it matters.
@@ -248,7 +248,7 @@ def _latest_agent_activity() -> float:
 
     Claude profiles all symlink projects/ to ~/.claude/projects, so one walk
     covers every claude account. Codex writes per-session rollouts under
-    sessions/YYYY/MM/DD/. Paths containing 'agentuse-scrape-' are filtered as
+    sessions/YYYY/MM/DD/. Paths containing 'agentusage-scrape-' are filtered as
     a defensive measure — empirically /usage and /status don't materialize
     session files, but a future scrape change shouldn't accidentally keep the
     daemon awake.
@@ -261,7 +261,7 @@ def _latest_agent_activity() -> float:
         if not root.exists():
             continue
         for p in root.rglob("*.jsonl"):
-            if "agentuse-scrape-" in str(p):
+            if "agentusage-scrape-" in str(p):
                 continue
             try:
                 newest = max(newest, p.stat().st_mtime)
@@ -473,7 +473,7 @@ def _notify_consecutive_failure(
     Fire-and-forget — we Popen without wait. If notifyctl is missing or
     fails the daemon keeps going; we log and move on.
     """
-    title = f"agentuse: {acct['id']} failing"
+    title = f"agentusage: {acct['id']} failing"
     message = f"{type(exc).__name__}: {exc}"
     try:
         subprocess.Popen(
@@ -502,7 +502,7 @@ async def account_loop(
     profile_gate_state: dict[str, float],
     events_lock: asyncio.Lock,
 ) -> None:
-    log = logging.getLogger(f"agentuse.{acct['id']}")
+    log = logging.getLogger(f"agentusage.{acct['id']}")
     loop = asyncio.get_running_loop()
     parser = PARSERS[acct["target"]]
     state_path = _state_path(acct)
@@ -824,7 +824,7 @@ async def account_loop(
 async def main() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
-    log = logging.getLogger("agentuse.main")
+    log = logging.getLogger("agentusage.main")
     log.info("starting daemon with %d accounts; state_dir=%s", len(ACCOUNTS), STATE_DIR)
 
     executor = ThreadPoolExecutor(max_workers=len(ACCOUNTS) + 1)

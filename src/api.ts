@@ -2,10 +2,10 @@
  * Profile picker — the client-side balancer the README's data contract feeds.
  *
  * The daemon (`daemon.py`) is the *producer*: it scrapes each account and
- * writes `~/.local/state/agentuse/<id>.json` envelopes. This module is a
+ * writes `~/.local/state/agentusage/<id>.json` envelopes. This module is a
  * *consumer* — the dumb balancer a launcher (agentwrap) calls to answer one
  * question: **"which Claude profile should I use right now?"** It is a 1:1 port
- * of `agentuse/api.py`; the Python `pick_profile` coexists on the same ledger
+ * of `agentusage/api.py`; the Python `pick_profile` coexists on the same ledger
  * until the launcher cutover completes, so serialization, schema_version, lock
  * ordering, and stamp shape are all load-bearing cross-runtime invariants.
  *
@@ -43,12 +43,12 @@ export const DEFAULT_PROFILE = "default";
 
 // Bumped when picker.json's shape changes. A file with an unrecognized version
 // is treated as absent (start fresh) rather than migrated. Must match
-// agentuse.api.PICKER_SCHEMA_VERSION for cross-runtime ledger compatibility.
+// agentusage.api.PICKER_SCHEMA_VERSION for cross-runtime ledger compatibility.
 export const PICKER_SCHEMA_VERSION = 1;
 
 // Mirrors daemon.STATE_DIR / api.STATE_DIR. Deliberately NOT XDG_STATE_HOME —
 // matches Python. Kept mutable behind a setter so tests can redirect it.
-let stateDir = join(homedir(), ".local", "state", "agentuse");
+let stateDir = join(homedir(), ".local", "state", "agentusage");
 
 /** Test-only seam: redirect STATE_DIR (mirrors the Python `state_dir` fixture). */
 export function setStateDir(dir: string): void {
@@ -85,10 +85,10 @@ function pickerLockPath(): string {
 }
 
 function configPath(): string {
-  // `~/.config/agentuse/config.yaml` — the same catalog the daemon reads.
+  // `~/.config/agentusage/config.yaml` — the same catalog the daemon reads.
   const env = process.env.XDG_CONFIG_HOME;
   const base = env ? env : join(homedir(), ".config");
-  return join(base, "agentuse", "config.yaml");
+  return join(base, "agentusage", "config.yaml");
 }
 
 type Envelope = Record<string, unknown>;
@@ -98,7 +98,7 @@ type PickerState = Record<string, unknown>;
 
 /**
  * Parse a YAML document. Bun.YAML targets YAML 1.2 — no `yes/no/on/off`
- * booleans (the agentuse config corpus is boolean-free, so this is safe).
+ * booleans (the agentusage config corpus is boolean-free, so this is safe).
  * Isolated behind one function so js-yaml could swap in if a 1.1-only document
  * ever appears. Returns `null` on any parse failure (fail-open caller turns
  * that into `[]`).
@@ -114,7 +114,7 @@ function parseYaml(text: string): unknown {
 // ---------- listProfiles ----------------------------------------------------
 
 /**
- * Configured Claude profile names from agentuse's config.yaml. Reads the same
+ * Configured Claude profile names from agentusage's config.yaml. Reads the same
  * `profiles: [name1, ...]` list the daemon builds its registry from. Fail-open:
  * any missing/malformed config returns `[]` rather than throwing.
  */
@@ -186,7 +186,7 @@ function doPickProfile(): string {
  * True iff the envelope's `lift_at` parses as a future instant. Pure: the
  * caller supplies `now`. Returns false on missing / non-string / unparseable /
  * past lift_at, and — critically — false on a naive (offset-less) stamp:
- * agentuse always writes tz-aware ISO, so a naive `lift` is a corrupted
+ * agentusage always writes tz-aware ISO, so a naive `lift` is a corrupted
  * envelope. JS's `Date` parses a naive ISO as LOCAL time silently, so we
  * require an explicit offset or `Z` suffix before trusting the parse, matching
  * Python's `datetime.fromisoformat(...).tzinfo is None` rejection.
