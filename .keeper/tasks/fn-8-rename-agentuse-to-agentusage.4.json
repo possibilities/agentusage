@@ -1,0 +1,17 @@
+{
+  "bundles": [],
+  "created_at": "2026-06-22T14:13:17.028000Z",
+  "depends_on": [
+    "fn-8-rename-agentuse-to-agentusage.1",
+    "fn-8-rename-agentuse-to-agentusage.2",
+    "fn-8-rename-agentuse-to-agentusage.3"
+  ],
+  "epic": "fn-8-rename-agentuse-to-agentusage",
+  "id": "fn-8-rename-agentuse-to-agentusage.4",
+  "priority": null,
+  "snippets": [],
+  "target_repo": "/Users/mike/code/agentuse",
+  "tier": "xhigh",
+  "title": "flag-day cutover move state restart daemons",
+  "updated_at": "2026-06-22T14:13:17.028000Z"
+}
