@@ -9,5 +9,6 @@
   "target_repo": "/Users/mike/code/arthack",
   "tier": "high",
   "title": "rename agentuse launchd and CI in arthack",
-  "updated_at": "2026-06-22T14:13:17.028000Z"
+  "updated_at": "2026-06-22T14:40:51.888000Z",
+  "worker_done_at": "2026-06-22T14:40:51.888000Z"
 }

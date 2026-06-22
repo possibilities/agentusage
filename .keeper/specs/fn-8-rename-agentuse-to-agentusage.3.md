@@ -36,5 +36,5 @@ re-point the `~/Library/LaunchAgents` symlink to the renamed file.
 - [ ] No launchctl reload performed in this task (deferred to .4)
 
 ## Done summary
-
+Renamed agentuse to agentusage in arthack ops artifacts: daemon plist (Label/WorkingDirectory/log paths + file rename + re-pointed ~/Library/LaunchAgents symlink), buildbot master.cfg CI registration, README CI list, install.sh comment, and test docstring. No launchctl reload (deferred to .4).
 ## Evidence
