@@ -34,5 +34,7 @@ Verify end-to-end: `bun pm ls | grep agentusage`; `bun lint` (biome + tsc) green
 - [ ] `bun lint` + `bun test` green; launcher resolves `agentusage` and performs a pick end-to-end
 
 ## Done summary
-
+Relinked agentwrap to the renamed package after the cutover: flipped the file: dependency + import specifiers (agentusage, agentusage/flock) + prose, cleared the stale node_modules symlink and reinstalled, regenerated bun.lock.
 ## Evidence
+- Commits: 31f7a32
+- Tests: bun lint (biome+tsc) clean; bun test 223 pass; import resolution agentusage + agentusage/flock OK
