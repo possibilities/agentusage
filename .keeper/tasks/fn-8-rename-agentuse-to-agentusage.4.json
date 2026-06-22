@@ -10,9 +10,9 @@
   "id": "fn-8-rename-agentuse-to-agentusage.4",
   "priority": null,
   "snippets": [],
-  "target_repo": "/Users/mike/code/agentuse",
+  "target_repo": "/Users/mike/code/agentusage",
   "tier": "xhigh",
   "title": "flag-day cutover move state restart daemons",
-  "updated_at": "2026-06-22T15:15:26.461000Z",
+  "updated_at": "2026-06-22T15:51:21.955000Z",
   "worker_done_at": "2026-06-22T15:15:26.461000Z"
 }
