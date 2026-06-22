@@ -1,15 +1,16 @@
 ## Overview
 
 Rename the project `agentuse` → `agentusage` across four independent git
-repos (agentuse, agentwrap, keeper, arthack) AND the live XDG state/config
-it owns on disk, executed as a sequenced flag-day cutover. The producer is a
-launchd-managed Python daemon writing `~/.local/state/agentuse/<id>.json`
-envelopes + a `picker.json` ledger; consumers are the agentwrap launcher
-(imports the TS lib via `file:../agentuse`) and a keeper daemon that watches
-the same state dir live. This is a directory/name rename only — the JSON
-schema is unchanged (`schema_version` stays 1; no migration, no cross-runtime
-bump). End state: every reference, path, package name, import specifier,
-launchd plist, CI registration, and the on-disk state/config dirs read
+repos (agentuse, agentwrap, keeper, arthack), the live XDG state/config it
+owns on disk, AND the agentuse GitHub remote, executed as a sequenced
+flag-day cutover. The producer is a launchd-managed Python daemon writing
+`~/.local/state/agentuse/<id>.json` envelopes + a `picker.json` ledger;
+consumers are the agentwrap launcher (imports the TS lib via
+`file:../agentuse`) and a keeper daemon that watches the same state dir live.
+This is a directory/name rename only — the JSON schema is unchanged
+(`schema_version` stays 1; no migration, no cross-runtime bump). End state:
+every reference, path, package name, import specifier, launchd plist, CI
+registration, the on-disk state/config dirs, and the git remote read
 `agentusage`, with all three daemons running clean against the new paths.
 
 ## Quick commands
@@ -17,6 +18,7 @@ launchd plist, CI registration, and the on-disk state/config dirs read
 - `launchctl list | grep -E 'agentusage|keeperd|buildbot'` — all three jobs up, agentusage daemon alive
 - `test -f ~/.local/state/agentusage/picker.json && ! test -e ~/.local/state/agentuse && echo OK` — state moved, no stale old dir respawned (the canary)
 - `cd /Users/mike/code/agentwrap && bun pm ls 2>/dev/null | grep agentusage` — launcher resolves the renamed dep
+- `git -C /Users/mike/code/agentusage remote -v | grep agentusage` — remote renamed + local origin updated
 - `cd /Users/mike/code/keeper && grep -rn 'agentuse[^r]' src/ | grep -v agentusage` — no stale keeper refs (expect empty)
 
 ## Acceptance
@@ -25,6 +27,7 @@ launchd plist, CI registration, and the on-disk state/config dirs read
 - [ ] `~/.local/state/agentusage/` and `~/.config/agentusage/` exist with the moved ledger + profile list; old dirs gone and not recreated
 - [ ] All three launchd jobs run against the new paths; agentuse daemon writes `~/.local/state/agentusage`
 - [ ] keeper usage projection shows rows again after keeperd reboot; agentwrap launcher resolves `agentusage` + `agentusage/flock`
+- [ ] GitHub repo renamed to `possibilities/agentusage`; local `origin` set-url updated
 - [ ] `.keeper` plan history left untouched in every repo
 
 ## Early proof point
@@ -43,6 +46,7 @@ before any on-disk move.
 - flock locks bind to the inode/open-file-description, not the path: the daemon MUST be fully down before `mv`, else a post-move open of the new path gets a separate unlocked inode and mutual exclusion silently breaks (flock(2)).
 - keeper resolves the watch root ONCE at boot (`db.ts:341 resolveUsageRoot` → `daemon.ts:2639 workerData.root`); it never re-reads, so keeperd must be rebooted after the move.
 - bun `file:` deps install under the target package's `name`; renaming the dir leaves a stale `node_modules/agentuse` symlink — the consumer needs `rm -rf node_modules && bun install`, not a plain install.
+- Remote is `https://github.com/possibilities/agentuse.git`; GitHub auto-redirects a renamed repo, and no manifest/README/other-repo hardcodes the URL, so the remote rename is low-risk and self-contained.
 
 ## Docs gaps
 
