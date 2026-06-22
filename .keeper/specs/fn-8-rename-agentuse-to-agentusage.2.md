@@ -37,5 +37,5 @@ keeper matrix: `bun lint` + `bun test`. The usage-worker / reducer / db tests th
 - [ ] Live `~/.config/keeper/config.yaml` untouched
 
 ## Done summary
-
+Renamed agentuse state-path strings, internal identifiers, and the agentuse_root config key to the agentusage form across keeper src/, cli/, tests, and README. bun lint + targeted usage/db/reducer/daemon tests green (501 pass).
 ## Evidence
