@@ -58,44 +58,20 @@ There is no cross-instance lock on the envelope writes — the keeper worker is
 the single producer and serializes its own scrapes. Run exactly one producer
 against this state tree.
 
-## TypeScript API
+## Profile picker (now in keeper)
 
-The agentusage package (this repo) exposes a small reader so an external launcher
-(arthack's agentwrap) can answer one question without spinning up the daemon:
-**"which Claude profile should I use right now?"** Import it from `src/` (the
-package `exports` map points `.` at `src/index.ts`):
-
-```ts
-import { pickProfile, listProfiles } from "agentusage";
-
-const profile = pickProfile();   // weighted balance over subscribed claude accounts
-const names = listProfiles();    // configured profile names from config.yaml
-```
-
-- `pickProfile(): string` — credit-weighted balance over eligible accounts
-  (envelope `target === "claude"` and `subscription_active === true`). Each
-  profile's `effective_weight = multiplier × session_headroom`, where
-  `session_headroom = clamp(1 − usage.session.percent_used/100, 0, 1)`; the
-  pick minimizes `count / weight` (stride scheduling), ties break by name. So
-  a Max-5x account draws ~5× the picks of a Pro at equal headroom, and a
-  profile burning its session window sheds load automatically. The pick is
-  stamped to `~/.local/state/agentusage/picker.json` under an `flock` (the
-  `FileLock` helper exported from `agentusage/flock`), so concurrent launches
-  can't both draw the same profile. Session window only (v1 scope); no stale
-  filter — `status === "stale"` still rotates on its last-good headroom.
-- `listProfiles(): string[]` — the `profiles:` list from
-  `~/.config/agentusage/config.yaml` (or `$XDG_CONFIG_HOME/agentusage/config.yaml`),
-  filtered to non-empty strings.
-- **Fail-open.** Any failure (no eligible profile, unreadable state, lock
-  trouble, corrupt JSON, missing config) returns `"default"` from
-  `pickProfile` or `[]` from `listProfiles`. Neither function ever throws;
-  a broken picker must never block a launch. `"default"` is itself a real
-  account id, so the fallback and a legitimate pick are the same string.
+The credit-weighted profile picker (`pickProfile`/`listProfiles` + the `flock`
+helper) that reads these envelopes used to live in this repo as a TypeScript
+reader. It is now **vendored into keeper** (`src/usage-picker.ts` +
+`src/usage-flock.ts`), where keeper's launch path consumes it directly. This
+repo no longer ships any TypeScript — it is Python-only. The envelope + ledger
+on-disk contract documented here is unchanged, so the in-keeper picker and any
+other reader stay agnostic to it.
 
 The scrape mechanics (`scrape.py`, `parse_*.py`) stay flat at the repo root;
 the `agentusage.scrape_cli` package wraps them as the one-shot util the keeper
-worker shells out to. The worker is the *producer* of the envelopes this reader
-consumes.
+worker shells out to. The keeper worker is the *producer* of the envelopes that
+picker consumes.
 
 ## Development
 
