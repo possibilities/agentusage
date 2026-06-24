@@ -380,7 +380,8 @@ def scrape(
             # the setsid process group, so SIGKILL the whole group to guarantee
             # no TUI survives a parent kill. Idempotent if the group already
             # exited (ProcessLookupError) — best-effort, never re-raises.
-            try:
-                os.killpg(os.getpgid(child.pid), signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                pass
+            if child.pid is not None:
+                try:
+                    os.killpg(os.getpgid(child.pid), signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    pass

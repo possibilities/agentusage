@@ -131,7 +131,7 @@ def _emit(payload: dict) -> None:
     sys.stdout.flush()
 
 
-def run(target: str, profile: str, command: str | None, rows: int, cols: int) -> int:
+def run(target: str, profile: str, command: str | None, rows: int | None, cols: int | None) -> int:
     """Scrape one account, emit one JSON object, return the process exit code."""
     parser = PARSERS[target]
     passthrough = _passthrough_for(target, profile)
