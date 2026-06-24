@@ -10,6 +10,7 @@ Targets:
 
 import json
 import os
+import signal
 import sys
 import tempfile
 import time
@@ -218,7 +219,14 @@ def send_slash_command(child, stream, slash: str) -> None:
 # ---------- Core scrape flow -----------------------------------------------
 
 
-def scrape(target_name: str, passthrough_args: list[str]) -> str:
+def scrape(
+    target_name: str,
+    passthrough_args: list[str],
+    *,
+    command: str | None = None,
+    rows: int | None = None,
+    cols: int | None = None,
+) -> str:
     target = TARGETS[target_name]
 
     extra_args = target.get("extra_args", [])
@@ -226,7 +234,18 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
     slash = target["slash"]
     assert isinstance(slash, str)
     args = list(extra_args) + list(passthrough_args)
+
+    spawn_rows = rows if rows is not None else ROWS
+    spawn_cols = cols if cols is not None else COLS
+
+    # Pin the terminal geometry + identity so pyte renders a deterministic
+    # screen regardless of the (often absent) controlling-TTY environment under
+    # keeperd. The Ink TUIs read LINES/COLUMNS/TERM; mismatched dims reflow the
+    # panel and break the parser regexes.
     env = os.environ.copy()
+    env["TERM"] = "xterm-256color"
+    env["LINES"] = str(spawn_rows)
+    env["COLUMNS"] = str(spawn_cols)
 
     config_dir: Path | None = None
     if target_name == "claude":
@@ -235,7 +254,7 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
             config_dir = Path.home() / ".claude-profiles" / profile
             env["CLAUDE_CONFIG_DIR"] = str(config_dir)
 
-    screen = pyte.Screen(COLS, ROWS)
+    screen = pyte.Screen(spawn_cols, spawn_rows)
     stream = pyte.ByteStream(screen)
 
     # Spawn in a throwaway /tmp dir so the TUI doesn't auto-load whatever
@@ -254,14 +273,21 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
         if target_name == "codex":
             _ensure_codex_dir_trusted(tmpdir_real)
 
+        spawn_command = command if command is not None else target["command"]
         child = pexpect.spawn(
-            target["command"],
+            spawn_command,
             args=args,
-            dimensions=(ROWS, COLS),
+            dimensions=(spawn_rows, spawn_cols),
             encoding=None,
             timeout=10,
             cwd=tmpdir,
             env=env,  # type: ignore[arg-type]  # pexpect stubs require _Environ, dict[str,str] works
+            # New session => the python child becomes the process-group leader.
+            # The grandchild `claude`/`codex` TUI inherits that pgid, so a
+            # killpg in the finally below reaps the whole group. Without setsid,
+            # child.terminate() signals only the python child and the TUI
+            # survives, leaking a live process every scrape.
+            preexec_fn=os.setsid,
         )
 
         try:
@@ -349,3 +375,12 @@ def scrape(target_name: str, passthrough_args: list[str]) -> str:
                     child.terminate(force=True)
                 except (OSError, pexpect.ExceptionPexpect):
                     pass
+            # Unconditional process-group reap. A bare terminate() above signals
+            # only the python child; the grandchild `claude`/`codex` TUI shares
+            # the setsid process group, so SIGKILL the whole group to guarantee
+            # no TUI survives a parent kill. Idempotent if the group already
+            # exited (ProcessLookupError) — best-effort, never re-raises.
+            try:
+                os.killpg(os.getpgid(child.pid), signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass

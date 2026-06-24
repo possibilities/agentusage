@@ -4,8 +4,7 @@ Pure arg-munging helper: strips ``--agentwrap-profile <name>`` (space form) or
 ``--agentwrap-profile=<name>`` (equals form) out of a wrapper-shaped passthrough
 arg list, returning ``(remaining_args, profile_or_None)``.
 
-Import ``scrape`` (the module), NOT ``scrape_one`` — the helper lives on the
-module and ``scrape_one`` is a different symbol entirely.
+Import ``scrape`` (the module) — the helper lives on the module.
 """
 
 from __future__ import annotations

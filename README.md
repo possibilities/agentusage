@@ -1,12 +1,43 @@
 # agentusage
 
-A long-lived daemon that scrapes Claude `/usage` and Codex `/status` panels
-once per account on a `uniform(60, 180)s` jitter, then writes a self-stamped
-JSON envelope per account that an external client (a profile balancer) reads
-to route work to accounts with available quota.
+A stateless **one-shot scrape util** plus a profile-picker reader. The util
+(`agentusage.scrape_cli`) does exactly one scrape of a Claude `/usage` or Codex
+`/status` panel and prints one discriminated JSON object — it writes no state.
+The orchestration (scheduling, idle/cooldown gating, tier/multiplier resolution,
+envelope assembly) lives in the keeper `usage-scraper-worker`, which shells out
+to this util once per account, then writes the per-account JSON envelopes a
+profile balancer reads to route work to accounts with available quota.
 
 This document is the **client-facing data-format reference**. If you're a
-client developer reading these files, this is the contract you depend on.
+client developer reading the envelope files, this is the contract you depend on.
+
+## One-shot scrape util (`agentusage.scrape_cli`)
+
+The producer-side scrape entry point — invoked once per account by the keeper
+worker:
+
+```sh
+uv run --project ~/code/agentusage python -m agentusage.scrape_cli \
+    --target <claude|codex> --profile <name> [--command <path>] [--rows N] [--cols M]
+```
+
+It does ONE scrape, prints exactly one JSON object on stdout, sends all
+diagnostics/tracebacks to stderr, and writes NO state files. The integer
+`schema_version` gates the contract. Three discriminated arms:
+
+| arm | stdout shape | exit |
+| --- | --- | --- |
+| **ok / subscribed** | `{schema_version, status:"ok", usage:{session, week[, sonnet_week]}, subscription_active}` | `0` |
+| **ok / no_subscription** | `{schema_version, status:"ok", no_subscription:true}` | `0` |
+| **error** | `{schema_version, status:"error", error_type, message, screen_excerpt}` | `1` |
+
+`subscription_active` is `true` for a subscribed claude scrape and `null` for
+codex (no subscription concept). The **no_subscription arm is a SUCCESS** (the
+panel rendered, the account just has no plan limits) — exit `0`, and it omits
+`usage`/`subscription_active` entirely; its presence is the signal. The error
+arm covers real parse drift, a panel that never rendered, or a scrape crash
+(empty `screen_excerpt` when no screen rendered). Tier/multiplier resolution and
+envelope assembly are NOT this util's job — they live in the keeper worker.
 
 ## Layout
 
@@ -23,8 +54,9 @@ All state lives under `~/.local/state/agentusage/`:
   and failure across all accounts. One JSON object per line. Unbounded; no
   rotation today.
 
-There is no cross-instance lock. Two daemons would race the same state files.
-Run one at a time.
+There is no cross-instance lock on the envelope writes — the keeper worker is
+the single producer and serializes its own scrapes. Run exactly one producer
+against this state tree.
 
 ## TypeScript API
 
@@ -60,9 +92,10 @@ const names = listProfiles();    // configured profile names from config.yaml
   a broken picker must never block a launch. `"default"` is itself a real
   account id, so the fallback and a legitimate pick are the same string.
 
-The daemon (`daemon.py`, `scrape.py`, `parse_*.py`) stays flat at the repo
-root and runs in-place via `uv run python daemon.py` — it is the *producer*
-of the envelopes the reader consumes.
+The scrape mechanics (`scrape.py`, `parse_*.py`) stay flat at the repo root;
+the `agentusage.scrape_cli` package wraps them as the one-shot util the keeper
+worker shells out to. The worker is the *producer* of the envelopes this reader
+consumes.
 
 ## Development
 
