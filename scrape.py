@@ -101,6 +101,9 @@ TARGETS = {
         # sentinel so the parser sees the complete line.
         "appear": "Weekly limit:",
         "appear_settle": 1.0,
+        # Optional second Codex-Spark quota bucket; if present, wait for its
+        # header and one extra settle so both spark rows finish rendering.
+        "appear_optional": "Codex-Spark limit:",
         "gone": None,
     },
 }

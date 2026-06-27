@@ -51,6 +51,18 @@ VALID_PANEL = """\
 │  Esc to dismiss
 """
 
+SPARK_PANEL = """\
+│  Token usage:  1,234 used
+│
+│  5h limit:   [████░░░░] 99% left (resets 14:05)
+│  Weekly limit:  [██░░░░░░] 29% left (resets 18:28 on 30 May)
+│  GPT-5.3-Codex-Spark limit:
+│  5h limit:   [████░░░░] 73% left (resets 23:59)
+│  Weekly limit:  [██░░░░░░] 52% left (resets 21:00 on 28 Jun)
+│
+│  Esc to dismiss
+"""
+
 
 def test_parse_valid_panel_inverts_percent_for_both_windows() -> None:
     """`percent_used` is the inversion of the reported percent-left for both
@@ -73,6 +85,26 @@ def test_parse_valid_panel_resolves_resets_at_with_pinned_offset() -> None:
     assert (
         out["week"]["resets_at"] == datetime(2026, 5, 30, 18, 28, tzinfo=TZ).isoformat()
     )
+
+
+def test_parse_spark_block_when_present() -> None:
+    """Codex may render a second Codex-Spark bucket with its own 5h/week rows."""
+    out = parse(SPARK_PANEL, now=NOW)
+    assert set(out) == {"session", "week", "codex_spark_session", "codex_spark_week"}
+    assert out["codex_spark_session"]["percent_used"] == 100 - 73
+    assert out["codex_spark_session"]["resets_at"] == datetime(
+        2026, 5, 15, 23, 59, tzinfo=TZ
+    ).isoformat()
+    assert out["codex_spark_week"]["percent_used"] == 100 - 52
+    assert out["codex_spark_week"]["resets_at"] == datetime(
+        2026, 6, 28, 21, 0, tzinfo=TZ
+    ).isoformat()
+
+
+def test_spark_header_requires_complete_spark_rows() -> None:
+    text = VALID_PANEL + "│  GPT-5.3-Codex-Spark limit:\n"
+    with pytest.raises(CodexStatusParseError):
+        parse(text, now=NOW)
 
 
 def test_parse_missing_sentinel_raises() -> None:

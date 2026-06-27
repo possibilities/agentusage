@@ -27,7 +27,7 @@ diagnostics/tracebacks to stderr, and writes NO state files. The integer
 
 | arm | stdout shape | exit |
 | --- | --- | --- |
-| **ok / subscribed** | `{schema_version, status:"ok", usage:{session, week[, sonnet_week]}, subscription_active}` | `0` |
+| **ok / subscribed** | `{schema_version, status:"ok", usage:{session, week[, sonnet_week][, codex_spark_session, codex_spark_week]}, subscription_active}` | `0` |
 | **ok / no_subscription** | `{schema_version, status:"ok", no_subscription:true}` | `0` |
 | **error** | `{schema_version, status:"error", error_type, message, screen_excerpt}` | `1` |
 
@@ -194,13 +194,23 @@ times by the daemon at parse time.
   "week": {
     "percent_used": 71,
     "resets_at": "2026-05-30T18:28:00-07:00"
+  },
+  "codex_spark_session": {
+    "percent_used": 27,
+    "resets_at": "2026-05-29T23:59:00-07:00"
+  },
+  "codex_spark_week": {
+    "percent_used": 48,
+    "resets_at": "2026-05-30T21:00:00-07:00"
   }
 }
 ```
 
 - `session` (5h limit) and `week` (weekly limit) are both always present on a
   codex success.
-- No `sonnet_week`. Codex has no per-model breakdown.
+- `codex_spark_session` and `codex_spark_week` are optional — present when the
+  TUI renders the GPT-5.3-Codex-Spark limit section.
+- No `sonnet_week`; that bucket is Claude-only.
 - Codex `percent_used` is an integer (the TUI shows whole percentages); claude
   may include a single decimal.
 

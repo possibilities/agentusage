@@ -13,7 +13,8 @@ live in the TS worker, NOT here — this util is scrape+parse only.
 JSON contract (stdout is exactly one of these objects, nothing else):
 
     ok / subscribed:
-        {schema_version, status:"ok", usage:{session, week[, sonnet_week]},
+        {schema_version, status:"ok",
+         usage:{session, week[, sonnet_week][, codex_spark_session, codex_spark_week]},
          subscription_active}
 
     ok / no_subscription (the NoActiveSubscription SUCCESS arm — claude only):

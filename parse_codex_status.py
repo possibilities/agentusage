@@ -6,7 +6,8 @@ partial data.
 
 Codex displays reset times in the user's local timezone (24h clock, no label),
 confirmed by comparing scrape output against the chatgpt.com/codex/settings/usage
-web UI. We resolve against the system local timezone at parse time.
+web UI. We resolve against the system local timezone at parse time. The optional
+Codex-Spark section is emitted as `codex_spark_session` + `codex_spark_week`.
 """
 import re
 from datetime import datetime, timedelta
@@ -17,6 +18,7 @@ class CodexStatusParseError(Exception):
 
 
 PANEL_SENTINEL = "5h limit:"
+SPARK_SENTINEL = "Codex-Spark limit:"
 
 # │  5h limit:   [████] 99% left (resets 14:05)
 FIVE_HOUR_RE = re.compile(
@@ -57,6 +59,33 @@ def _resolve_date_time(day: int, month_name: str, hour: int, minute: int, now: d
     return candidate
 
 
+def _parse_five_hour(text: str, now: datetime, label: str) -> dict:
+    m = FIVE_HOUR_RE.search(text)
+    if not m:
+        raise CodexStatusParseError(f"{label} 5h limit line not found or didn't match")
+    pct_left = int(m.group(1))
+    h, mi = int(m.group(2)), int(m.group(3))
+    resets_at = _resolve_today_time(h, mi, now)
+    return {
+        "percent_used": 100 - pct_left,
+        "resets_at": resets_at.isoformat(),
+    }
+
+
+def _parse_weekly(text: str, now: datetime, label: str) -> dict:
+    m = WEEKLY_RE.search(text)
+    if not m:
+        raise CodexStatusParseError(f"{label} Weekly limit line not found or didn't match")
+    pct_left = int(m.group(1))
+    h, mi = int(m.group(2)), int(m.group(3))
+    day, month_name = int(m.group(4)), m.group(5)
+    resets_at = _resolve_date_time(day, month_name, h, mi, now)
+    return {
+        "percent_used": 100 - pct_left,
+        "resets_at": resets_at.isoformat(),
+    }
+
+
 def parse(text: str, *, now: datetime | None = None) -> dict:
     if PANEL_SENTINEL not in text:
         raise CodexStatusParseError(
@@ -66,27 +95,14 @@ def parse(text: str, *, now: datetime | None = None) -> dict:
     now = now or datetime.now().astimezone()
     out: dict = {}
 
-    m = FIVE_HOUR_RE.search(text)
-    if not m:
-        raise CodexStatusParseError("5h limit line not found or didn't match")
-    pct_left = int(m.group(1))
-    h, mi = int(m.group(2)), int(m.group(3))
-    resets_at = _resolve_today_time(h, mi, now)
-    out["session"] = {
-        "percent_used": 100 - pct_left,
-        "resets_at": resets_at.isoformat(),
-    }
+    spark_idx = text.find(SPARK_SENTINEL)
+    primary_text = text if spark_idx < 0 else text[:spark_idx]
+    out["session"] = _parse_five_hour(primary_text, now, "primary")
+    out["week"] = _parse_weekly(primary_text, now, "primary")
 
-    m = WEEKLY_RE.search(text)
-    if not m:
-        raise CodexStatusParseError("Weekly limit line not found or didn't match")
-    pct_left = int(m.group(1))
-    h, mi = int(m.group(2)), int(m.group(3))
-    day, month_name = int(m.group(4)), m.group(5)
-    resets_at = _resolve_date_time(day, month_name, h, mi, now)
-    out["week"] = {
-        "percent_used": 100 - pct_left,
-        "resets_at": resets_at.isoformat(),
-    }
+    if spark_idx >= 0:
+        spark_text = text[spark_idx:]
+        out["codex_spark_session"] = _parse_five_hour(spark_text, now, "Codex-Spark")
+        out["codex_spark_week"] = _parse_weekly(spark_text, now, "Codex-Spark")
 
     return out
