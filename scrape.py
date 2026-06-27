@@ -10,10 +10,12 @@ Targets:
 
 import json
 import os
+import shutil
 import signal
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import pexpect
@@ -81,11 +83,12 @@ TARGETS = {
         # fresh sandbox cwd triggers a one-time approval prompt that our
         # pexpect flow doesn't dismiss, causing the child to exit early.
         #
-        # Use the brew/npm install (the pnpm copy lags and triggers a
-        # self-update loop: each launch detects npm-global is newer than
-        # pnpm-global, runs `npm install -g`, and exits "please restart" —
-        # never touching the pnpm binary we just launched).
-        "command": "/opt/homebrew/bin/codex",
+        # The binary path is resolved at launch by _resolve_codex_command():
+        # prefer the newest nvm install (its sibling node is available), avoid
+        # stale pnpm shims unless they are the only option, and fall back to
+        # PATH. A hardcoded Homebrew path rots on machines that install Codex
+        # through npm/pnpm/nvm instead.
+        "command": "codex",
         "extra_args": ["--dangerously-bypass-approvals-and-sandbox"],
         "slash": "/status",
         # Codex's Ink TUI takes ~3-4s to mount and route keystrokes;
@@ -93,10 +96,11 @@ TARGETS = {
         # in the input field rather than firing the slash command.
         "ready_wait": 5.0,
         # Wait for the LAST line of the panel ("Weekly limit:") rather than
-        # the first ("5h limit:"). The panel paints top-down, so waiting on
-        # the first line can return mid-render — leaving the Weekly line
-        # half-drawn for the parser regex to miss.
+        # the first ("5h limit:"). The panel paints top-down, and the label can
+        # appear before the reset suffix finishes; settle briefly after the
+        # sentinel so the parser sees the complete line.
         "appear": "Weekly limit:",
+        "appear_settle": 1.0,
         "gone": None,
     },
 }
@@ -167,6 +171,82 @@ def _ensure_codex_dir_trusted(dir_path: str) -> None:
     cfg.write_text(text + stanza)
 
 
+def _node_version_key(path: Path) -> tuple[int, ...]:
+    """Sort key for ~/.nvm/versions/node/vX.Y.Z/bin/codex candidates."""
+    version = path.parent.parent.name
+    if version.startswith("v"):
+        version = version[1:]
+    parts: list[int] = []
+    for part in version.split("."):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(-1)
+    return tuple(parts)
+
+
+def _executable(path: str) -> bool:
+    return Path(path).is_file() and os.access(path, os.X_OK)
+
+
+def _resolve_codex_command(
+    *,
+    home: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    which_codex: str | None = None,
+) -> str:
+    """Resolve a stable Codex CLI path for non-interactive scraper launches.
+
+    LaunchAgents usually have a stripped PATH, while user shells may point at a
+    stale pnpm shim that opens Codex's self-update prompt instead of the TUI. The
+    scraper wants the newest real install it can find. `AGENTUSAGE_CODEX_COMMAND`
+    remains an explicit escape hatch; the CLI's `--command` override is handled
+    before this helper is called.
+    """
+    home = home or Path.home()
+    if env is None:
+        env = os.environ
+
+    explicit = (env.get("AGENTUSAGE_CODEX_COMMAND") or "").strip()
+    if explicit:
+        return explicit
+
+    candidates: list[str] = []
+
+    nvm_root = home / ".nvm" / "versions" / "node"
+    if nvm_root.exists():
+        nvm_codex = sorted(
+            nvm_root.glob("*/bin/codex"), key=_node_version_key, reverse=True
+        )
+        candidates.extend(str(path) for path in nvm_codex)
+
+    found = which_codex
+    if found is None:
+        found = shutil.which("codex", path=env.get("PATH"))
+    if found and "/Library/pnpm/" not in found:
+        candidates.append(found)
+
+    candidates.extend(
+        [
+            "/Applications/Codex.app/Contents/Resources/codex",
+            "/opt/homebrew/bin/codex",
+        ]
+    )
+
+    if found:
+        candidates.append(found)
+    candidates.append(str(home / "Library" / "pnpm" / "bin" / "codex"))
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if _executable(candidate):
+            return candidate
+    return "codex"
+
+
 # ---------- PTY / pyte helpers ---------------------------------------------
 
 
@@ -225,6 +305,18 @@ def pump_while_text(child, screen, stream, needle, max_seconds=SENTINEL_TIMEOUT)
     return not _on_screen(screen, needle)
 
 
+def pump_for(child, stream, max_seconds: float) -> None:
+    deadline = time.monotonic() + max_seconds
+    while time.monotonic() < deadline:
+        try:
+            chunk = child.read_nonblocking(size=8192, timeout=0.2)
+            stream.feed(chunk)
+        except pexpect.TIMEOUT:
+            continue
+        except pexpect.EOF:
+            return
+
+
 def send_slash_command(child, stream, slash: str) -> None:
     # Clear any partially typed input from an earlier swallowed send, then type
     # the slash command with a quiet pump before Enter so Ink can render matches.
@@ -266,6 +358,18 @@ def scrape(
     env["LINES"] = str(spawn_rows)
     env["COLUMNS"] = str(spawn_cols)
 
+    spawn_command = command if command is not None else target["command"]
+    assert isinstance(spawn_command, str)
+    if target_name == "codex" and command is None:
+        spawn_command = _resolve_codex_command(env=env)
+
+    # Node-backed shims commonly use `#!/usr/bin/env node`; prepend the chosen
+    # binary's directory so a stripped LaunchAgent PATH can still find sibling
+    # `node` when spawning an absolute nvm-managed `codex`.
+    if os.path.isabs(spawn_command):
+        command_dir = str(Path(spawn_command).parent)
+        env["PATH"] = f"{command_dir}{os.pathsep}{env.get('PATH', '')}"
+
     config_dir: Path | None = None
     if target_name == "claude":
         args, profile = _extract_claude_profile(args)
@@ -292,7 +396,6 @@ def scrape(
         if target_name == "codex":
             _ensure_codex_dir_trusted(tmpdir_real)
 
-        spawn_command = command if command is not None else target["command"]
         child = pexpect.spawn(
             spawn_command,
             args=args,
@@ -348,6 +451,10 @@ def scrape(
                         f"warning: sentinel {target['appear']!r} never appeared",
                         file=sys.stderr,
                     )
+                appear_settle = target.get("appear_settle")
+                if appeared and isinstance(appear_settle, (int, float)) and appear_settle > 0:
+                    pump_for(child, stream, max_seconds=float(appear_settle))
+
                 # Best-effort wait for a conditional follow-up row that
                 # paints after `appear` (e.g. claude's "Current week
                 # (Sonnet only)" bar, present only when Sonnet usage > 0%).
@@ -368,13 +475,7 @@ def scrape(
                         # later. Bounded settle so they land before we
                         # snapshot, without letting the breakdown phase
                         # scroll bars off pyte's buffer.
-                        deadline = time.monotonic() + 1.0
-                        while time.monotonic() < deadline:
-                            try:
-                                chunk = child.read_nonblocking(size=8192, timeout=0.2)
-                                stream.feed(chunk)
-                            except (pexpect.TIMEOUT, pexpect.EOF):
-                                break
+                        pump_for(child, stream, max_seconds=1.0)
             else:
                 send_slash_command(child, stream, slash)
             if target["gone"]:
