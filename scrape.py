@@ -21,7 +21,10 @@ import pyte
 
 COLS, ROWS = 300, 200
 QUIET_SECONDS = 0.6
-SENTINEL_TIMEOUT = 90.0
+# Keep the full two-attempt sentinel budget inside keeper's 60s spawn timeout so
+# a panel that never renders returns a structured parse error + screen excerpt
+# instead of being SIGKILLed as runner_failure:timed_out.
+SENTINEL_TIMEOUT = 15.0
 SLASH_RETRIES = 2
 
 # Best-effort wait for an optional follow-up row that paints after the
@@ -66,6 +69,10 @@ TARGETS = {
         # primary `appear` sentinel never matches AND this one does, we
         # snapshot immediately instead of burning the full retry budget.
         "appear_nosub": "% of usage",
+        # Terminal error rendered by some accounts instead of usage bars. Treat
+        # it as "panel settled" so the parser can return a structured error
+        # promptly instead of waiting for the full appear-sentinel timeout.
+        "appear_error": "Usage endpoint is rate limited",
         "gone": None,
     },
     "codex": {
@@ -176,19 +183,31 @@ def pump_until_idle(child, stream, quiet_seconds=QUIET_SECONDS):
             return
 
 
-def pump_until_text(child, screen, stream, needle, max_seconds=SENTINEL_TIMEOUT):
+def pump_until_any_text(child, screen, stream, needles, max_seconds=SENTINEL_TIMEOUT):
+    active = [needle for needle in needles if needle]
     deadline = time.monotonic() + max_seconds
     while time.monotonic() < deadline:
-        if _on_screen(screen, needle):
-            return True
+        for needle in active:
+            if _on_screen(screen, needle):
+                return needle
         try:
             chunk = child.read_nonblocking(size=8192, timeout=0.2)
             stream.feed(chunk)
         except pexpect.TIMEOUT:
             continue
         except pexpect.EOF:
-            return _on_screen(screen, needle)
-    return _on_screen(screen, needle)
+            for needle in active:
+                if _on_screen(screen, needle):
+                    return needle
+            return None
+    for needle in active:
+        if _on_screen(screen, needle):
+            return needle
+    return None
+
+
+def pump_until_text(child, screen, stream, needle, max_seconds=SENTINEL_TIMEOUT):
+    return pump_until_any_text(child, screen, stream, [needle], max_seconds) == needle
 
 
 def pump_while_text(child, screen, stream, needle, max_seconds=SENTINEL_TIMEOUT):
@@ -282,12 +301,11 @@ def scrape(
             timeout=10,
             cwd=tmpdir,
             env=env,  # type: ignore[arg-type]  # pexpect stubs require _Environ, dict[str,str] works
-            # New session => the python child becomes the process-group leader.
-            # The grandchild `claude`/`codex` TUI inherits that pgid, so a
-            # killpg in the finally below reaps the whole group. Without setsid,
-            # child.terminate() signals only the python child and the TUI
-            # survives, leaking a live process every scrape.
-            preexec_fn=os.setsid,
+            # pexpect's forkpty already gives the spawned command its own
+            # session/process group on macOS. Do not call os.setsid here: the
+            # child is already a process-group leader, so setsid fails with
+            # EPERM and the scrape never starts. The finally block still killpgs
+            # child.pid's group to reap the TUI and any descendants.
         )
 
         try:
@@ -298,24 +316,34 @@ def scrape(
             if target["appear"]:
                 appeared = False
                 nosub_short_circuit = False
+                terminal_short_circuit = False
                 appear_nosub = target.get("appear_nosub")
+                appear_error = target.get("appear_error")
                 for attempt in range(SLASH_RETRIES):
                     send_slash_command(child, stream, slash)
-                    appeared = pump_until_text(child, screen, stream, target["appear"])
-                    if appeared:
+                    matched = pump_until_any_text(
+                        child,
+                        screen,
+                        stream,
+                        [target["appear"], appear_nosub, appear_error],
+                    )
+                    if matched == target["appear"]:
+                        appeared = True
                         break
-                    # Primary sentinel missed — before spending the next
-                    # retry/timeout, check the no-subscription breakdown.
                     # On no-sub accounts the bars never paint so the retry
                     # budget would otherwise burn ~180s every cycle.
-                    # ORDER MATTERS: `appeared` is False here, so this can
-                    # only fire when the subscribed path didn't match.
-                    if appear_nosub and _on_screen(screen, appear_nosub):
+                    if appear_nosub and matched == appear_nosub:
                         nosub_short_circuit = True
+                        break
+                    # Some accounts render a terminal /usage error instead of
+                    # bars. Snapshot immediately and let the parser emit the
+                    # structured error + excerpt.
+                    if appear_error and matched == appear_error:
+                        terminal_short_circuit = True
                         break
                     if attempt + 1 < SLASH_RETRIES:
                         pump_until_idle(child, stream, quiet_seconds=2.0)
-                if not appeared and not nosub_short_circuit:
+                if not appeared and not nosub_short_circuit and not terminal_short_circuit:
                     print(
                         f"warning: sentinel {target['appear']!r} never appeared",
                         file=sys.stderr,
@@ -377,9 +405,9 @@ def scrape(
                     pass
             # Unconditional process-group reap. A bare terminate() above signals
             # only the python child; the grandchild `claude`/`codex` TUI shares
-            # the setsid process group, so SIGKILL the whole group to guarantee
-            # no TUI survives a parent kill. Idempotent if the group already
-            # exited (ProcessLookupError) — best-effort, never re-raises.
+            # the forkpty-created process group, so SIGKILL the whole group to
+            # guarantee no TUI survives a parent kill. Idempotent if the group
+            # already exited (ProcessLookupError) — best-effort, never re-raises.
             if child.pid is not None:
                 try:
                     os.killpg(os.getpgid(child.pid), signal.SIGKILL)

@@ -28,6 +28,10 @@ class ClaudeUsageParseError(Exception):
     """Raised when the /usage panel doesn't match the expected shape."""
 
 
+class ClaudeUsageEndpointRateLimited(Exception):
+    """Raised when the /usage panel reports its data endpoint is rate-limited."""
+
+
 class NoActiveSubscription(Exception):
     """Raised when the /usage panel rendered but the account has no plan limits.
 
@@ -41,10 +45,16 @@ PANEL_HEADER = "Settings  Status   Config   Usage   Stats"
 
 # Shared sentinel for the no-subscription usage-contribution breakdown.
 # Used both here (to distinguish no-sub from real format drift) AND in
-# scrape.py's appear-sentinel retry loop to short-circuit the ~180s wait.
+# scrape.py's appear-sentinel retry loop to short-circuit the wait.
 # The two paths MUST key on the same literal — if you change this, change
 # scrape.TARGETS["claude"]["appear_nosub"] in lockstep.
 NO_SUB_SENTINEL = "% of usage"
+
+# API-billing orgs render no limit bars and may omit the contribution breakdown.
+# Treat that as no-subscription unless the panel rendered a transient endpoint
+# rate-limit error instead.
+API_BILLING_SENTINEL = "API Usage Billing"
+USAGE_ENDPOINT_RATE_LIMIT_SENTINEL = "Usage endpoint is rate limited"
 
 REQUIRED_LABELS = {
     "session": "Current session",
@@ -247,12 +257,24 @@ def parse(text: str, *, now: datetime | None = None) -> dict:
 
         return out
 
-    # No bars — either no subscription (panel opened, breakdown rendered) or
-    # the panel genuinely never rendered (real failure / format drift).
+    # No bars — either no subscription (panel opened, breakdown rendered), a
+    # transient endpoint rate-limit, or the panel genuinely never rendered (real
+    # failure / format drift).
+    if USAGE_ENDPOINT_RATE_LIMIT_SENTINEL in text:
+        raise ClaudeUsageEndpointRateLimited(
+            "claude /usage endpoint is rate limited — retry later"
+        )
+
     if NO_SUB_SENTINEL in text:
         raise NoActiveSubscription(
             "claude /usage panel rendered the usage-contribution breakdown "
             "with no rate-limit bars — account has no active subscription"
+        )
+
+    if API_BILLING_SENTINEL in text:
+        raise NoActiveSubscription(
+            "claude /usage panel rendered API Usage Billing with no "
+            "rate-limit bars — account has no active subscription limits"
         )
 
     raise ClaudeUsageParseError(

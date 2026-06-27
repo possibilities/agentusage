@@ -21,6 +21,62 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import scrape  # noqa: E402
 
 
+class _FakeChild:
+    pid = None
+
+    def sendcontrol(self, _key: str) -> None:
+        return None
+
+    def expect(self, *_args, **_kwargs) -> int:
+        return 0
+
+    def terminate(self, *, force: bool = False) -> None:
+        return None
+
+
+def test_pump_until_any_text_returns_first_present_sentinel() -> None:
+    class Screen:
+        display = ["", "Error: Usage endpoint is rate limited. Please try again."]
+
+    matched = scrape.pump_until_any_text(
+        None,
+        Screen(),
+        None,
+        ["Current week (all models)", "Usage endpoint is rate limited"],
+        max_seconds=0,
+    )
+
+    assert matched == "Usage endpoint is rate limited"
+
+
+def test_scrape_does_not_pass_setsid_preexec(monkeypatch: pytest.MonkeyPatch) -> None:
+    """forkpty already creates a process group; os.setsid preexec fails on macOS."""
+    seen_kwargs: dict[str, object] = {}
+
+    def fake_spawn(*_args, **kwargs):
+        seen_kwargs.update(kwargs)
+        return _FakeChild()
+
+    monkeypatch.setattr(scrape.pexpect, "spawn", fake_spawn)
+    monkeypatch.setattr(scrape, "pump_until_idle", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(scrape, "send_slash_command", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        scrape,
+        "pump_until_any_text",
+        lambda *_args, **_kwargs: scrape.TARGETS["claude"]["appear"],
+    )
+
+    def fake_pump_until_text(*args, **_kwargs):
+        needle = args[3]
+        return needle != scrape.TARGETS["claude"].get("appear_optional")
+
+    monkeypatch.setattr(scrape, "pump_until_text", fake_pump_until_text)
+
+    scrape.scrape("claude", [], command="/bin/true")
+
+    assert "preexec_fn" not in seen_kwargs
+
+
 @pytest.mark.parametrize(
     ("args", "expected_remaining", "expected_profile"),
     [

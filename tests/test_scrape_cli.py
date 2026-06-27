@@ -125,12 +125,14 @@ def test_scrape_crash_error_arm_empty_excerpt(monkeypatch, capsys) -> None:
 
 
 def test_passthrough_translation() -> None:
-    # claude routes --profile through the agentwrap-profile shim scrape() reads;
-    # codex takes no passthrough.
+    # Named Claude profiles route through the agentwrap-profile shim scrape()
+    # reads. The default account is native ~/.claude, not ~/.claude-profiles/default.
+    # Codex takes no passthrough.
     assert scrape_cli._passthrough_for("claude", "multi-1") == [
         "--agentwrap-profile",
         "multi-1",
     ]
+    assert scrape_cli._passthrough_for("claude", "default") == []
     assert scrape_cli._passthrough_for("codex", "codex") == []
 
 

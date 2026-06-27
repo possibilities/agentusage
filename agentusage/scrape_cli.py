@@ -88,7 +88,7 @@ def _passthrough_for(target: str, profile: str) -> list[str]:
     <name>` into a CLAUDE_CONFIG_DIR env var. Codex has no profile concept and
     takes no passthrough.
     """
-    if target == "claude":
+    if target == "claude" and profile != "default":
         return ["--agentwrap-profile", profile]
     return []
 

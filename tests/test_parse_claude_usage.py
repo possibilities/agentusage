@@ -24,6 +24,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from parse_claude_usage import (  # noqa: E402
+    ClaudeUsageEndpointRateLimited,
     ClaudeUsageParseError,
     NoActiveSubscription,
     _resolve_session,
@@ -60,6 +61,25 @@ NO_SUB_SCREEN = """\
 
    d to day · w to week
    Esc to cancel
+"""
+
+
+API_BILLING_NO_BARS_SCREEN = """\
+╭─── Claude Code v2.1.195 ─────────────────────────────────────────────
+│ Opus 4.8 (1M context) with xh… · API Usage Billing │
+│ · daddystoriesforfun@gmail.com's Organization      │
+╰──────────────────────────────────────────────────────────────────────
+   Settings  Status   Config   usage   Stats
+   Session
+   Total cost:            $0.0000
+   Usage:                 0 input, 0 output, 0 cache read, 0 cache write
+   Esc to cancel
+"""
+
+
+API_BILLING_ENDPOINT_RATE_LIMIT_SCREEN = API_BILLING_NO_BARS_SCREEN + """\
+   Error: Usage endpoint is rate limited. Please try again in a moment.
+   r to retry · Esc to cancel
 """
 
 
@@ -114,6 +134,16 @@ def test_no_subscription_screen_raises_no_active_subscription() -> None:
     misses the distinction if this regresses."""
     with pytest.raises(NoActiveSubscription):
         parse(NO_SUB_SCREEN, now=NOW)
+
+
+def test_api_billing_without_bars_raises_no_active_subscription() -> None:
+    with pytest.raises(NoActiveSubscription):
+        parse(API_BILLING_NO_BARS_SCREEN, now=NOW)
+
+
+def test_api_billing_endpoint_rate_limit_has_dedicated_error() -> None:
+    with pytest.raises(ClaudeUsageEndpointRateLimited):
+        parse(API_BILLING_ENDPOINT_RATE_LIMIT_SCREEN, now=NOW)
 
 
 def test_subscribed_screen_parses_session_and_week() -> None:
