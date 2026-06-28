@@ -47,8 +47,8 @@ def _capture(capsys) -> tuple[dict, str]:
 
 
 def test_subscribed_claude_ok_arm(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(scrape_cli, "scrape", lambda *a, **k: "rendered panel")
-    monkeypatch.setitem(scrape_cli.PARSERS, "claude", lambda text: SUBSCRIBED_USAGE)
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: "rendered panel")
+    monkeypatch.setitem(scrape_cli.PARSERS, "claude", lambda _: SUBSCRIBED_USAGE)
 
     rc = scrape_cli.run("claude", "default", None, None, None)
 
@@ -63,8 +63,8 @@ def test_subscribed_claude_ok_arm(monkeypatch, capsys) -> None:
 
 
 def test_codex_ok_arm_has_null_subscription(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(scrape_cli, "scrape", lambda *a, **k: "rendered panel")
-    monkeypatch.setitem(scrape_cli.PARSERS, "codex", lambda text: SUBSCRIBED_USAGE)
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: "rendered panel")
+    monkeypatch.setitem(scrape_cli.PARSERS, "codex", lambda _: SUBSCRIBED_USAGE)
 
     rc = scrape_cli.run("codex", "codex", None, None, None)
 
@@ -76,10 +76,10 @@ def test_codex_ok_arm_has_null_subscription(monkeypatch, capsys) -> None:
 
 
 def test_no_subscription_ok_arm(monkeypatch, capsys) -> None:
-    def _raise_no_sub(text):
+    def _raise_no_sub(_):
         raise NoActiveSubscription("no plan limits")
 
-    monkeypatch.setattr(scrape_cli, "scrape", lambda *a, **k: "breakdown panel")
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: "breakdown panel")
     monkeypatch.setitem(scrape_cli.PARSERS, "claude", _raise_no_sub)
 
     rc = scrape_cli.run("claude", "default", None, None, None)
@@ -95,11 +95,11 @@ def test_no_subscription_ok_arm(monkeypatch, capsys) -> None:
 
 
 def test_parse_drift_error_arm(monkeypatch, capsys) -> None:
-    def _raise_parse_error(text):
+    def _raise_parse_error(_):
         raise ClaudeUsageParseError("panel format changed")
 
     rendered = "line one\nline two\nline three"
-    monkeypatch.setattr(scrape_cli, "scrape", lambda *a, **k: rendered)
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: rendered)
     monkeypatch.setitem(scrape_cli.PARSERS, "claude", _raise_parse_error)
 
     rc = scrape_cli.run("claude", "default", None, None, None)
@@ -118,14 +118,14 @@ def test_parse_drift_error_arm(monkeypatch, capsys) -> None:
 
 
 def test_scrape_crash_error_arm_empty_excerpt(monkeypatch, capsys) -> None:
-    def _raise_scrape(*a, **k):
+    def _raise_scrape(*_, **__):
         raise RuntimeError("binary not found")
 
     monkeypatch.setattr(scrape_cli, "scrape", _raise_scrape)
 
     rc = scrape_cli.run("claude", "default", None, None, None)
 
-    payload, err = _capture(capsys)
+    payload, _ = _capture(capsys)
     # A scrape crash before any screen renders is the error arm with an empty
     # excerpt (there is no rendered screen to excerpt).
     assert rc == 1
@@ -185,10 +185,10 @@ _CLASSIFY_CASES = [
 def test_error_kind_classification(
     monkeypatch, capsys, target, rendered, exc, expected_kind
 ) -> None:
-    def _raise(text):
+    def _raise(_):
         raise exc
 
-    monkeypatch.setattr(scrape_cli, "scrape", lambda *a, **k: rendered)
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: rendered)
     monkeypatch.setitem(scrape_cli.PARSERS, target, _raise)
 
     profile = "default" if target == "claude" else "codex"
@@ -210,10 +210,10 @@ def test_endpoint_throttle_classifies_upstream_even_with_panel(
     # but the kind is upstream_limited, never format_changed.
     rendered = f"{PANEL_HEADER}\nUsage endpoint is rate limited"
 
-    def _raise(text):
+    def _raise(_):
         raise ClaudeUsageEndpointRateLimited("endpoint throttled")
 
-    monkeypatch.setattr(scrape_cli, "scrape", lambda *a, **k: rendered)
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: rendered)
     monkeypatch.setitem(scrape_cli.PARSERS, "claude", _raise)
 
     scrape_cli.run("claude", "default", None, None, None)
@@ -252,8 +252,8 @@ def test_passthrough_translation() -> None:
 def test_writes_no_state(monkeypatch, capsys, tmp_path) -> None:
     # The util is stateless. Run it with HOME pointed at an empty tmp dir and
     # assert nothing was written there.
-    monkeypatch.setattr(scrape_cli, "scrape", lambda *a, **k: "panel")
-    monkeypatch.setitem(scrape_cli.PARSERS, "claude", lambda text: SUBSCRIBED_USAGE)
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: "panel")
+    monkeypatch.setitem(scrape_cli.PARSERS, "claude", lambda _: SUBSCRIBED_USAGE)
     monkeypatch.setenv("HOME", str(tmp_path))
 
     scrape_cli.run("claude", "default", None, None, None)
@@ -271,7 +271,7 @@ def test_screen_excerpt_elides_long_panels() -> None:
     assert excerpt[-1] == "row 99"
 
 
-def test_main_requires_target_and_profile(capsys) -> None:
+def test_main_requires_target_and_profile() -> None:
     with pytest.raises(SystemExit):
         scrape_cli.main(["--target", "claude"])
     with pytest.raises(SystemExit):
