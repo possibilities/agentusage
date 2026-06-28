@@ -19,7 +19,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agentusage import scrape_cli  # noqa: E402
-from parse_claude_usage import ClaudeUsageParseError, NoActiveSubscription  # noqa: E402
+from parse_claude_usage import (  # noqa: E402
+    PANEL_HEADER,
+    ClaudeUsageEndpointRateLimited,
+    ClaudeUsageParseError,
+    NoActiveSubscription,
+)
+from parse_codex_status import (  # noqa: E402
+    PANEL_SENTINEL,
+    CodexStatusParseError,
+)
 
 SUBSCRIBED_USAGE = {
     "session": {"percent_used": 12.0, "resets_at": "2026-05-29T17:00:00-04:00"},
@@ -100,6 +109,8 @@ def test_parse_drift_error_arm(monkeypatch, capsys) -> None:
     assert payload["status"] == "error"
     assert payload["error_type"] == "ClaudeUsageParseError"
     assert payload["message"] == "panel format changed"
+    # No panel header in the rendered rows → the panel never rendered.
+    assert payload["error_kind"] == "panel_missing"
     # screen_excerpt surfaces the rendered rows for human diagnosis.
     assert payload["screen_excerpt"] == ["line one", "line two", "line three"]
     # Tracebacks go to stderr, never stdout.
@@ -121,7 +132,109 @@ def test_scrape_crash_error_arm_empty_excerpt(monkeypatch, capsys) -> None:
     assert payload["status"] == "error"
     assert payload["error_type"] == "RuntimeError"
     assert payload["message"] == "binary not found"
+    assert payload["error_kind"] == "scrape_failed"
     assert payload["screen_excerpt"] == []
+
+
+# target, rendered screen, parser exception, expected error_kind.
+# Panel evidence (claude header / codex `5h limit:`) is what separates real
+# format drift from a panel that never rendered.
+_CLAUDE_PANEL = f"{PANEL_HEADER}\nCurrent session\nsomething unexpected"
+_CODEX_PANEL = "Codex usage\n5h limit:  [????] garbled (resets ??)"
+
+_CLASSIFY_CASES = [
+    pytest.param(
+        "claude",
+        _CLAUDE_PANEL,
+        ClaudeUsageParseError("bars drifted"),
+        "format_changed",
+        id="claude-drift-with-panel",
+    ),
+    pytest.param(
+        "claude",
+        "totally unrelated screen\nno header here",
+        ClaudeUsageParseError("panel never rendered"),
+        "panel_missing",
+        id="claude-missing-panel",
+    ),
+    pytest.param(
+        "claude",
+        "Usage endpoint is rate limited",
+        ClaudeUsageEndpointRateLimited("endpoint throttled"),
+        "upstream_limited",
+        id="claude-endpoint-throttle",
+    ),
+    pytest.param(
+        "codex",
+        _CODEX_PANEL,
+        CodexStatusParseError("weekly line drifted"),
+        "format_changed",
+        id="codex-drift-with-panel",
+    ),
+    pytest.param(
+        "codex",
+        "some other codex screen\nnothing parseable",
+        CodexStatusParseError("panel never rendered"),
+        "panel_missing",
+        id="codex-missing-panel",
+    ),
+]
+
+
+@pytest.mark.parametrize("target, rendered, exc, expected_kind", _CLASSIFY_CASES)
+def test_error_kind_classification(
+    monkeypatch, capsys, target, rendered, exc, expected_kind
+) -> None:
+    def _raise(text):
+        raise exc
+
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *a, **k: rendered)
+    monkeypatch.setitem(scrape_cli.PARSERS, target, _raise)
+
+    profile = "default" if target == "claude" else "codex"
+    rc = scrape_cli.run(target, profile, None, None, None)
+
+    payload, _ = _capture(capsys)
+    assert rc == 1
+    assert payload["status"] == "error"
+    assert payload["error_kind"] == expected_kind
+    # The detailed diagnostic truth survives alongside the classification.
+    assert payload["error_type"] == type(exc).__name__
+    assert payload["message"] == str(exc)
+
+
+def test_endpoint_throttle_classifies_upstream_even_with_panel(
+    monkeypatch, capsys
+) -> None:
+    # Endpoint throttling wins over panel evidence: the panel header is present
+    # but the kind is upstream_limited, never format_changed.
+    rendered = f"{PANEL_HEADER}\nUsage endpoint is rate limited"
+
+    def _raise(text):
+        raise ClaudeUsageEndpointRateLimited("endpoint throttled")
+
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *a, **k: rendered)
+    monkeypatch.setitem(scrape_cli.PARSERS, "claude", _raise)
+
+    scrape_cli.run("claude", "default", None, None, None)
+
+    payload, _ = _capture(capsys)
+    assert payload["error_kind"] == "upstream_limited"
+
+
+def test_codex_weekly_reset_drift_classifies_as_format_changed() -> None:
+    # The current codex weekly reset shape drifts from the parser's WEEKLY_RE but
+    # the `5h limit:` sentinel still renders — so it's format drift, not a missing
+    # panel. Asserted against the real parser (fixing it is follow-up work).
+    rendered = (
+        "Codex usage\n"
+        "5h limit:   [####] 99% left (resets 14:05)\n"
+        "Weekly limit:  resets next Monday\n"  # new shape the parser rejects
+    )
+    assert PANEL_SENTINEL in rendered
+    with pytest.raises(CodexStatusParseError):
+        scrape_cli.PARSERS["codex"](rendered)
+    assert scrape_cli._has_panel_evidence("codex", rendered) is True
 
 
 def test_passthrough_translation() -> None:

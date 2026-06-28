@@ -29,7 +29,7 @@ diagnostics/tracebacks to stderr, and writes NO state files. The integer
 | --- | --- | --- |
 | **ok / subscribed** | `{schema_version, status:"ok", usage:{session, week[, sonnet_week][, codex_spark_session, codex_spark_week]}, subscription_active}` | `0` |
 | **ok / no_subscription** | `{schema_version, status:"ok", no_subscription:true}` | `0` |
-| **error** | `{schema_version, status:"error", error_type, message, screen_excerpt}` | `1` |
+| **error** | `{schema_version, status:"error", error_kind, error_type, message, screen_excerpt}` | `1` |
 
 `subscription_active` is `true` for a subscribed claude scrape and `null` for
 codex (no subscription concept). The **no_subscription arm is a SUCCESS** (the
@@ -38,6 +38,27 @@ panel rendered, the account just has no plan limits) — exit `0`, and it omits
 arm covers real parse drift, a panel that never rendered, or a scrape crash
 (empty `screen_excerpt` when no screen rendered). Tier/multiplier resolution and
 envelope assembly are NOT this util's job — they live in the keeper worker.
+
+`error_kind` is a STABLE machine classification (the language seam keeper's
+`UsageErrorKind` keys on) that separates scraper faults from target TUI format
+drift, while `error_type`/`message`/`screen_excerpt` stay the detailed
+diagnostic truth for humans:
+
+| `error_kind` | meaning |
+| --- | --- |
+| `scrape_failed` | the scrape crashed before any screen rendered (binary missing, PTY/spawn fault); `screen_excerpt` is empty. |
+| `upstream_limited` | the target reported its OWN usage endpoint is throttled (claude `/usage` endpoint rate limit); transient. |
+| `format_changed` | the panel rendered (target panel evidence present) but its shape drifted from what the parser expects. |
+| `panel_missing` | the panel never rendered (no target panel evidence); the parser saw none of the screen it needs. |
+
+Panel evidence is the literal proving the right screen opened: claude's `/usage`
+tab-strip header, codex's `/status` `5h limit:` row. The classifier never claims
+more than the screen proves — a parse failure without panel evidence is
+`panel_missing`, not `format_changed`. `error_kind` was added as an additive
+optional field under `schema_version 1`: keeper coerces an absent kind to `null`
+and derives a fallback, so the field ships without a lockstep version bump.
+keeper mints a fifth kind (`runner_failed`) itself when the scrape seam can't
+obtain a contract at all; this util never emits it.
 
 ## Layout
 

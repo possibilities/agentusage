@@ -21,7 +21,24 @@ JSON contract (stdout is exactly one of these objects, nothing else):
         {schema_version, status:"ok", no_subscription:true}
 
     error (parse drift, panel never rendered, scrape crash):
-        {schema_version, status:"error", error_type, message, screen_excerpt}
+        {schema_version, status:"error", error_kind, error_type, message, screen_excerpt}
+
+`error_kind` is a STABLE machine classification (the language seam keeper's
+UsageErrorKind union keys on) that separates scraper/runner faults from target
+TUI format drift, while `error_type` / `message` / `screen_excerpt` stay the
+detailed diagnostic truth for humans:
+
+    scrape_failed     the scrape crashed before any screen rendered (binary
+                      missing, PTY/spawn fault).
+    upstream_limited  the target reported its OWN usage endpoint is throttled
+                      (claude /usage endpoint rate limit); transient.
+    format_changed    the panel rendered (target panel evidence present) but its
+                      shape drifted from what the parser expects.
+    panel_missing     the panel never rendered (no target panel evidence); the
+                      parser saw none of the screen it needs.
+
+keeper mints a fifth value (`runner_failed`) itself when the scrape SEAM can't
+obtain a contract at all; this util never emits it.
 
 Arm-to-exit-code mapping (getting this wrong corrupts the worker's branch logic):
 
@@ -58,8 +75,18 @@ from scrape import scrape  # noqa: E402
 # Bumped whenever the contract's top-level key set or per-field semantics change.
 # The keeper worker gates on this integer. Independent of the on-disk ENVELOPE
 # schema version (the worker owns the envelope; this util owns only the scrape
-# contract).
+# contract). `error_kind` was added to the error arm as an ADDITIVE optional
+# field (keeper coerces an absent kind to null), so it ships under v1 rather than
+# forcing a lockstep version bump — see keeper's asUsageErrorKind fallback.
 SCHEMA_VERSION = 1
+
+# Stable error-arm classification vocabulary — the language seam keeper's
+# UsageErrorKind union keys on. keeper mints `runner_failed` itself; this util
+# emits exactly these four.
+ERROR_KIND_SCRAPE_FAILED = "scrape_failed"
+ERROR_KIND_UPSTREAM_LIMITED = "upstream_limited"
+ERROR_KIND_FORMAT_CHANGED = "format_changed"
+ERROR_KIND_PANEL_MISSING = "panel_missing"
 
 PARSERS = {
     "claude": parse_claude_usage.parse,
@@ -111,14 +138,45 @@ def _ok_no_subscription() -> dict:
     }
 
 
-def _error(error_type: str, message: str, screen_excerpt: list[str]) -> dict:
+def _error(
+    error_type: str, message: str, screen_excerpt: list[str], error_kind: str
+) -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "error",
+        "error_kind": error_kind,
         "error_type": error_type,
         "message": message,
         "screen_excerpt": screen_excerpt,
     }
+
+
+def _has_panel_evidence(target: str, rendered: str) -> bool:
+    """True when the target's usage/status panel demonstrably rendered.
+
+    Panel evidence is the literal proving the right screen opened: claude's
+    /usage tab strip header, codex's /status `5h limit:` row. A parser failure
+    WITH it is real format drift (the panel rendered, its shape changed); WITHOUT
+    it the panel never rendered. The claude header match is case-insensitive to
+    match the parser's own relaxed gate (tab-strip casing varies between scrapes).
+    """
+    if target == "claude":
+        return parse_claude_usage.PANEL_HEADER.lower() in rendered.lower()
+    return parse_codex_status.PANEL_SENTINEL in rendered
+
+
+def _classify_parse_error(target: str, exc: Exception, rendered: str) -> str:
+    """Map a parser exception + the rendered screen to a stable error_kind.
+
+    The classifier never claims more than the screen proves: an endpoint
+    rate-limit sentinel is `upstream_limited`; a parser failure with target panel
+    evidence is `format_changed`; one without is `panel_missing`.
+    """
+    if isinstance(exc, parse_claude_usage.ClaudeUsageEndpointRateLimited):
+        return ERROR_KIND_UPSTREAM_LIMITED
+    if _has_panel_evidence(target, rendered):
+        return ERROR_KIND_FORMAT_CHANGED
+    return ERROR_KIND_PANEL_MISSING
 
 
 def _emit(payload: dict) -> None:
@@ -132,7 +190,9 @@ def _emit(payload: dict) -> None:
     sys.stdout.flush()
 
 
-def run(target: str, profile: str, command: str | None, rows: int | None, cols: int | None) -> int:
+def run(
+    target: str, profile: str, command: str | None, rows: int | None, cols: int | None
+) -> int:
     """Scrape one account, emit one JSON object, return the process exit code."""
     parser = PARSERS[target]
     passthrough = _passthrough_for(target, profile)
@@ -143,7 +203,8 @@ def run(target: str, profile: str, command: str | None, rows: int | None, cols: 
         rendered = scrape(target, passthrough, command=command, rows=rows, cols=cols)
     except Exception as exc:  # noqa: BLE001 — any scrape failure maps to the error arm
         traceback.print_exc(file=sys.stderr)
-        _emit(_error(type(exc).__name__, str(exc), []))
+        # Crash before any screen renders → scrape_failed, empty excerpt.
+        _emit(_error(type(exc).__name__, str(exc), [], ERROR_KIND_SCRAPE_FAILED))
         return 1
 
     # Branch the parse the same way the daemon did: NoActiveSubscription is a
@@ -156,7 +217,10 @@ def run(target: str, profile: str, command: str | None, rows: int | None, cols: 
         return 0
     except Exception as exc:  # noqa: BLE001 — parse drift -> error arm
         traceback.print_exc(file=sys.stderr)
-        _emit(_error(type(exc).__name__, str(exc), _screen_excerpt(rendered)))
+        error_kind = _classify_parse_error(target, exc, rendered)
+        _emit(
+            _error(type(exc).__name__, str(exc), _screen_excerpt(rendered), error_kind)
+        )
         return 1
 
     # Codex has no subscription concept (null); a subscribed claude scrape is
