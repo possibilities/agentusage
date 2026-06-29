@@ -21,6 +21,8 @@ from pathlib import Path
 import pexpect
 import pyte
 
+from parse_claude_usage import SignedOut
+
 COLS, ROWS = 300, 200
 QUIET_SECONDS = 0.6
 # Keep the full two-attempt sentinel budget inside keeper's 60s spawn timeout so
@@ -75,6 +77,17 @@ TARGETS = {
         # it as "panel settled" so the parser can return a structured error
         # promptly instead of waiting for the full appear-sentinel timeout.
         "appear_error": "Usage endpoint is rate limited",
+        # OAuth sign-in fingerprint for a logged-out profile. A 2-of-3 quorum
+        # over the joined display (see _detect_signed_out) classifies the
+        # account as signed_out PRE-SEND, before /usage is typed into the OAuth
+        # "Paste code here" field. No single needle suffices: "Welcome to Claude
+        # Code" can paint off the auth screen, so it only counts toward the
+        # quorum alongside the paste prompt or the authorize URL.
+        "signed_out_sentinels": (
+            "Paste code here",
+            "/oauth/authorize",
+            "Welcome to Claude Code",
+        ),
         "gone": None,
     },
     "codex": {
@@ -257,6 +270,48 @@ def _on_screen(screen, needle):
     return any(needle in line for line in screen.display)
 
 
+# pyte stores private DEC modes left-shifted by 5 (its Stream marks `?`-prefixed
+# modes this way): DECAWM 7 -> 224, DECTCEM 25 -> 800. The alternate-screen
+# buffer is private mode 1049 (1047 on older apps); a full-screen Ink TUI like
+# claude/codex switches into it on boot, so its presence in screen.mode proves
+# the TUI took the whole screen rather than a sentinel sitting in scrollback.
+_PRIVATE_MODE_SHIFT = 5
+_ALT_SCREEN_MODES = frozenset(code << _PRIVATE_MODE_SHIFT for code in (1047, 1049))
+
+
+def _alt_screen_active(screen) -> bool:
+    return bool(_ALT_SCREEN_MODES.intersection(screen.mode))
+
+
+def _joined_display(display_lines) -> tuple[str, str]:
+    """Return (newline_joined, dewrapped) search corpora for sentinel matching.
+
+    `newline_joined` keeps row structure for a sentinel that sits on one row;
+    `dewrapped` concatenates the rows with no separator so a sentinel a terminal
+    wrap split across two rows still matches (pyte fills a wrapped row to full
+    width, so rstrip never eats the seam).
+    """
+    stripped = [line.rstrip() for line in display_lines]
+    return "\n".join(stripped), "".join(stripped)
+
+
+def _detect_signed_out(screen, sentinels, *, min_hits: int = 2) -> bool:
+    """True when the post-pyte alt-screen shows the OAuth sign-in fingerprint.
+
+    Requires a `min_hits`-of-N sentinel quorum over the joined `screen.display`
+    so one stray needle can't false-positive and a wrap-split needle still
+    counts. Gated on the alt-screen being active so a sentinel sitting in the
+    normal-buffer scrollback (or an adversarial ANSI cursor-jump that never took
+    the screen) can't spoof a sign-in. Reads only the rendered display, never
+    raw child bytes.
+    """
+    if not _alt_screen_active(screen):
+        return False
+    newline_joined, dewrapped = _joined_display(screen.display)
+    hits = sum(1 for s in sentinels if s in newline_joined or s in dewrapped)
+    return hits >= min_hits
+
+
 def pump_until_idle(child, stream, quiet_seconds=QUIET_SECONDS):
     while True:
         try:
@@ -419,6 +474,22 @@ def scrape(
                 child, stream, quiet_seconds=target.get("ready_wait", QUIET_SECONDS)
             )
 
+            # Pre-send sign-in gate: a logged-out profile renders the OAuth
+            # screen, not a usage panel. Classify it BEFORE send_slash_command,
+            # which does ctrl+u then types `/usage`+Enter into whatever field
+            # has focus — on the sign-in screen that field is the OAuth "Paste
+            # code here" input, so a post-send check would already have poisoned
+            # it with a bogus auth code. Living inside this try means a detector
+            # throw propagates to the caller's scrape_failed arm, never crashes.
+            signed_out_sentinels = target.get("signed_out_sentinels")
+            if signed_out_sentinels and _detect_signed_out(
+                screen, signed_out_sentinels
+            ):
+                raise SignedOut(
+                    "claude OAuth sign-in screen detected pre-send — "
+                    "profile is logged out"
+                )
+
             if target["appear"]:
                 appeared = False
                 nosub_short_circuit = False
@@ -449,13 +520,21 @@ def scrape(
                         break
                     if attempt + 1 < SLASH_RETRIES:
                         pump_until_idle(child, stream, quiet_seconds=2.0)
-                if not appeared and not nosub_short_circuit and not terminal_short_circuit:
+                if (
+                    not appeared
+                    and not nosub_short_circuit
+                    and not terminal_short_circuit
+                ):
                     print(
                         f"warning: sentinel {target['appear']!r} never appeared",
                         file=sys.stderr,
                     )
                 appear_settle = target.get("appear_settle")
-                if appeared and isinstance(appear_settle, (int, float)) and appear_settle > 0:
+                if (
+                    appeared
+                    and isinstance(appear_settle, (int, float))
+                    and appear_settle > 0
+                ):
                     pump_for(child, stream, max_seconds=float(appear_settle))
 
                 # Best-effort wait for a conditional follow-up row that

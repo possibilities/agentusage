@@ -24,6 +24,7 @@ from parse_claude_usage import (  # noqa: E402
     ClaudeUsageEndpointRateLimited,
     ClaudeUsageParseError,
     NoActiveSubscription,
+    SignedOut,
 )
 from parse_codex_status import (  # noqa: E402
     PANEL_SENTINEL,
@@ -92,6 +93,50 @@ def test_no_subscription_ok_arm(monkeypatch, capsys) -> None:
     assert payload["no_subscription"] is True
     assert "usage" not in payload
     assert "subscription_active" not in payload
+
+
+def test_signed_out_ok_arm(monkeypatch, capsys) -> None:
+    def _raise_signed_out(*_, **__):
+        raise SignedOut("OAuth sign-in screen detected pre-send")
+
+    # scrape() raises SignedOut PRE-SEND for a logged-out profile; run() catches
+    # it before the parser ever sees a screen.
+    monkeypatch.setattr(scrape_cli, "scrape", _raise_signed_out)
+
+    rc = scrape_cli.run("claude", "default", None, None, None)
+
+    payload, _ = _capture(capsys)
+    # SignedOut is a SUCCESS arm: exit 0, signed_out:true, and NO usage /
+    # subscription_active / no_subscription keys. SCHEMA_VERSION stays 1.
+    assert rc == 0
+    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == scrape_cli.SCHEMA_VERSION
+    assert payload["status"] == "ok"
+    assert payload["signed_out"] is True
+    assert "usage" not in payload
+    assert "subscription_active" not in payload
+    assert "no_subscription" not in payload
+
+
+def test_signed_out_detector_throw_degrades_to_scrape_failed(
+    monkeypatch, capsys
+) -> None:
+    # An UNEXPECTED detector throw (not SignedOut) must degrade to the existing
+    # scrape_failed arm, never crash the util. scrape() lets the throw propagate
+    # from inside its try; run()'s generic handler maps it to scrape_failed.
+    def _detector_bug(*_, **__):
+        raise RuntimeError("detector blew up")
+
+    monkeypatch.setattr(scrape_cli, "scrape", _detector_bug)
+
+    rc = scrape_cli.run("claude", "default", None, None, None)
+
+    payload, _ = _capture(capsys)
+    assert rc == 1
+    assert payload["status"] == "error"
+    assert payload["error_kind"] == "scrape_failed"
+    assert payload["error_type"] == "RuntimeError"
+    assert payload["screen_excerpt"] == []
 
 
 def test_parse_drift_error_arm(monkeypatch, capsys) -> None:

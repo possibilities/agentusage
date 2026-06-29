@@ -12,14 +12,140 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
+import pyte
 
 # Repo lays flat (no `src/`); make the modules importable without an editable
 # install. Mirrors the sibling test files' pattern.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import scrape  # noqa: E402
+
+# Sentinels the claude target fingerprints the OAuth sign-in screen with.
+SIGNIN_SENTINELS = scrape.TARGETS["claude"]["signed_out_sentinels"]
+
+
+def _alt_render(lines: list[str], *, cols: int = 80, rows: int = 24, alt: bool = True):
+    """Feed `lines` through a real pyte Screen and return it.
+
+    Mirrors the production path: bytes -> ByteStream -> Screen, with the same
+    alternate-screen enter sequence (CSI ? 1049 h) the Ink TUIs emit on boot so
+    `_alt_screen_active` sees the buffer the detector gates on.
+    """
+    screen = pyte.Screen(cols, rows)
+    stream = pyte.ByteStream(screen)
+    if alt:
+        stream.feed(b"\x1b[?1049h")
+    stream.feed("\r\n".join(lines).encode())
+    return screen
+
+
+def test_detect_signed_out_quorum_classifies_signin() -> None:
+    # Two of three sentinels present (paste prompt + authorize URL, no banner).
+    screen = _alt_render(
+        [
+            "Sign in to continue",
+            "Browser didn't open? Visit:",
+            "https://claude.ai/oauth/authorize?client_id=abc&scope=read",
+            "",
+            "Paste code here > ",
+        ]
+    )
+    assert scrape._detect_signed_out(screen, SIGNIN_SENTINELS) is True
+
+
+def test_detect_signed_out_matches_wrap_split_url() -> None:
+    # Narrow terminal wraps the authorize URL mid-token: "/oauth/authorize" is
+    # split across two rows and sits on NO single display line, yet the dewrapped
+    # corpus reconstructs it. Paired with the paste prompt that's a 2-of-3 quorum.
+    screen = _alt_render(
+        [
+            "Visit https://claude.ai/oauth/authorize?code=1",
+            "Paste code here > ",
+        ],
+        cols=30,
+    )
+    assert not any("/oauth/authorize" in line for line in screen.display)
+    assert scrape._detect_signed_out(screen, SIGNIN_SENTINELS) is True
+
+
+def test_detect_signed_out_requires_alt_screen() -> None:
+    # Same sign-in content but the TUI never took the alt-screen buffer — a
+    # sentinel in the normal buffer / scrollback must not spoof a sign-in.
+    screen = _alt_render(
+        [
+            "https://claude.ai/oauth/authorize?client_id=abc",
+            "Paste code here > ",
+        ],
+        alt=False,
+    )
+    assert scrape._detect_signed_out(screen, SIGNIN_SENTINELS) is False
+
+
+def test_detect_signed_out_single_needle_not_enough() -> None:
+    # The banner alone (1 of 3) can paint off the auth screen; it must not trip.
+    screen = _alt_render(["Welcome to Claude Code", "Tips for getting started:"])
+    assert scrape._detect_signed_out(screen, SIGNIN_SENTINELS) is False
+
+
+def test_detect_signed_out_ignores_trust_dialog() -> None:
+    # A logged-out profile can also hit the trust dialog; it carries none of the
+    # OAuth sentinels, so it must not classify as signed_out.
+    screen = _alt_render(
+        [
+            "Do you trust the files in this folder?",
+            "/private/tmp/agentusage-scrape-xyz",
+            "",
+            "1. Yes, proceed",
+            "2. No, exit",
+        ]
+    )
+    assert scrape._detect_signed_out(screen, SIGNIN_SENTINELS) is False
+
+
+def test_detect_signed_out_ignores_slow_panel() -> None:
+    # A merely-slow /usage panel still rendering its header is not a sign-in.
+    screen = _alt_render(
+        [
+            "Settings  Status   Config   Usage   Stats",
+            "",
+            "Loading usage...",
+        ]
+    )
+    assert scrape._detect_signed_out(screen, SIGNIN_SENTINELS) is False
+
+
+def test_scrape_raises_signed_out_pre_send(monkeypatch: pytest.MonkeyPatch) -> None:
+    # When the detector fires, scrape() raises SignedOut BEFORE send_slash_command
+    # — proving /usage is never typed into the OAuth paste field.
+    monkeypatch.setattr(scrape.pexpect, "spawn", lambda *_a, **_k: _FakeChild())
+    monkeypatch.setattr(scrape, "pump_until_idle", lambda *_a, **_k: None)
+    monkeypatch.setattr(scrape, "_detect_signed_out", lambda *_a, **_k: True)
+
+    def _fail_if_sent(*_a, **_k):
+        raise AssertionError("send_slash_command ran after sign-in detection")
+
+    monkeypatch.setattr(scrape, "send_slash_command", _fail_if_sent)
+
+    with pytest.raises(scrape.SignedOut):
+        scrape.scrape("claude", [], command="/bin/true")
+
+
+def test_scrape_detector_exception_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An unexpected detector throw propagates out of scrape() (cleanup still runs
+    # in finally) so the caller maps it to the scrape_failed arm — never crashes.
+    monkeypatch.setattr(scrape.pexpect, "spawn", lambda *_a, **_k: _FakeChild())
+    monkeypatch.setattr(scrape, "pump_until_idle", lambda *_a, **_k: None)
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("detector blew up")
+
+    monkeypatch.setattr(scrape, "_detect_signed_out", _boom)
+
+    with pytest.raises(RuntimeError, match="detector blew up"):
+        scrape.scrape("claude", [], command="/bin/true")
 
 
 class _FakeChild:
@@ -138,6 +264,7 @@ def test_scrape_prepends_spawn_command_dir_to_path(
 
     env = seen_kwargs["env"]
     assert isinstance(env, dict)
+    env = cast("dict[str, str]", env)
     assert env["PATH"].split(os.pathsep)[0] == str(command.parent)
 
 

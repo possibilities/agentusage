@@ -20,6 +20,13 @@ JSON contract (stdout is exactly one of these objects, nothing else):
     ok / no_subscription (the NoActiveSubscription SUCCESS arm — claude only):
         {schema_version, status:"ok", no_subscription:true}
 
+    ok / signed_out (the SignedOut SUCCESS arm — claude only):
+        {schema_version, status:"ok", signed_out:true}
+        A logged-out profile renders the OAuth sign-in screen; scrape() detects
+        it PRE-SEND (before /usage is typed into the paste field) and raises
+        SignedOut. Additive optional field on the ok arm, so SCHEMA_VERSION
+        stays 1 (the no_subscription / error_kind precedent).
+
     error (parse drift, panel never rendered, scrape crash):
         {schema_version, status:"error", error_kind, error_type, message, screen_excerpt}
 
@@ -44,11 +51,12 @@ Arm-to-exit-code mapping (getting this wrong corrupts the worker's branch logic)
 
     ok (subscribed)         exit 0
     ok (no_subscription)    exit 0   <- NoActiveSubscription is a SUCCESS, not an error
+    ok (signed_out)         exit 0   <- SignedOut is a SUCCESS, not an error
     error                   exit 1
 
 `subscription_active` is True for a subscribed claude scrape, None for codex
-(no subscription concept). The no_subscription arm omits `usage` /
-`subscription_active` entirely — its presence IS the no-sub signal.
+(no subscription concept). The no_subscription and signed_out arms omit `usage`
+/ `subscription_active` entirely — the presence of their flag IS the signal.
 """
 
 from __future__ import annotations
@@ -69,7 +77,7 @@ if _REPO_ROOT not in sys.path:
 
 import parse_claude_usage  # noqa: E402
 import parse_codex_status  # noqa: E402
-from parse_claude_usage import NoActiveSubscription  # noqa: E402
+from parse_claude_usage import NoActiveSubscription, SignedOut  # noqa: E402
 from scrape import scrape  # noqa: E402
 
 # Bumped whenever the contract's top-level key set or per-field semantics change.
@@ -138,6 +146,14 @@ def _ok_no_subscription() -> dict:
     }
 
 
+def _ok_signed_out() -> dict:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "status": "ok",
+        "signed_out": True,
+    }
+
+
 def _error(
     error_type: str, message: str, screen_excerpt: list[str], error_kind: str
 ) -> dict:
@@ -201,9 +217,15 @@ def run(
     # PTY error). Treat that as the error arm with an empty excerpt.
     try:
         rendered = scrape(target, passthrough, command=command, rows=rows, cols=cols)
+    except SignedOut:
+        # A logged-out profile is detected pre-send inside scrape() and is a
+        # SUCCESS read (panel never needed to render): exit 0, signed_out:true,
+        # no usage / subscription_active keys. Sibling of the no_subscription arm.
+        _emit(_ok_signed_out())
+        return 0
     except Exception as exc:  # noqa: BLE001 — any scrape failure maps to the error arm
         traceback.print_exc(file=sys.stderr)
-        # Crash before any screen renders → scrape_failed, empty excerpt.
+        # Crash before any screen renders (incl. a detector throw) → scrape_failed.
         _emit(_error(type(exc).__name__, str(exc), [], ERROR_KIND_SCRAPE_FAILED))
         return 1
 

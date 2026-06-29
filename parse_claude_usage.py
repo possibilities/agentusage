@@ -41,6 +41,19 @@ class NoActiveSubscription(Exception):
     """
 
 
+class SignedOut(Exception):
+    """Raised when the profile is logged out and renders the OAuth sign-in screen.
+
+    Unlike the other exceptions here, this is NOT raised by :func:`parse` — a
+    logged-out profile never reaches the parser. ``scrape()`` detects the
+    sign-in screen PRE-SEND (before it types ``/usage`` into the OAuth paste
+    field) and raises this so the caller emits a successful ``signed_out`` read
+    rather than burning the full sentinel-retry budget on a panel that will
+    never render. The class lives here to keep the claude-usage exception
+    vocabulary in one place, mirroring :class:`NoActiveSubscription`.
+    """
+
+
 PANEL_HEADER = "Settings  Status   Config   Usage   Stats"
 
 # Shared sentinel for the no-subscription usage-contribution breakdown.
