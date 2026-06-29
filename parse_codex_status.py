@@ -9,6 +9,7 @@ confirmed by comparing scrape output against the chatgpt.com/codex/settings/usag
 web UI. We resolve against the system local timezone at parse time. The optional
 Codex-Spark section is emitted as `codex_spark_session` + `codex_spark_week`.
 """
+
 import re
 from datetime import datetime, timedelta
 
@@ -20,19 +21,35 @@ class CodexStatusParseError(Exception):
 PANEL_SENTINEL = "5h limit:"
 SPARK_SENTINEL = "Codex-Spark limit:"
 
-# │  5h limit:   [████] 99% left (resets 14:05)
-FIVE_HOUR_RE = re.compile(
-    r"5h limit:.*?(\d+)%\s+left\s+\(resets\s+(\d{1,2}):(\d{2})\)"
+# Both rows render percent-left plus a reset clock whose date suffix is
+# optional: codex emits `resets HH:MM` or `resets HH:MM on DD Mon` on either
+# the 5h or the weekly row. Date-less values resolve via today/tomorrow,
+# date-bearing values via this-year/next-year.
+RESET_SUFFIX = (
+    r"(\d+)%\s+left\s+\(resets\s+(\d{1,2}):(\d{2})"
+    r"(?:\s+on\s+(\d{1,2})\s+([A-Za-z]+))?\)"
 )
-# │  Weekly limit:  [██░░] 29% left (resets 18:28 on 30 May)
-WEEKLY_RE = re.compile(
-    r"Weekly limit:.*?(\d+)%\s+left\s+\(resets\s+(\d{1,2}):(\d{2})\s+on\s+(\d{1,2})\s+([A-Za-z]+)\)"
-)
+# │  5h limit:   [████] 99% left (resets 14:05)  /  (resets 01:18 on 29 Jun)
+FIVE_HOUR_RE = re.compile(r"5h limit:.*?" + RESET_SUFFIX)
+# │  Weekly limit:  [██░░] 29% left (resets 18:28)  /  (resets 18:28 on 30 May)
+WEEKLY_RE = re.compile(r"Weekly limit:.*?" + RESET_SUFFIX)
 MONTHS = {
     m: i
     for i, m in enumerate(
-        ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+        [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ],
         start=1,
     )
 }
@@ -46,7 +63,9 @@ def _resolve_today_time(hour: int, minute: int, now: datetime) -> datetime:
     return candidate
 
 
-def _resolve_date_time(day: int, month_name: str, hour: int, minute: int, now: datetime) -> datetime:
+def _resolve_date_time(
+    day: int, month_name: str, hour: int, minute: int, now: datetime
+) -> datetime:
     """Next occurrence of DD Mon HH:MM in local time — this year or next."""
     mon = month_name.title()[:3]
     if mon not in MONTHS:
@@ -59,31 +78,33 @@ def _resolve_date_time(day: int, month_name: str, hour: int, minute: int, now: d
     return candidate
 
 
-def _parse_five_hour(text: str, now: datetime, label: str) -> dict:
-    m = FIVE_HOUR_RE.search(text)
+def _parse_limit_row(pattern: re.Pattern, text: str, now: datetime, what: str) -> dict:
+    """Parse one limit row's percent-left and reset suffix.
+
+    Resolves a date-less `resets HH:MM` against today/tomorrow and a
+    date-bearing `resets HH:MM on DD Mon` against this-year/next-year.
+    """
+    m = pattern.search(text)
     if not m:
-        raise CodexStatusParseError(f"{label} 5h limit line not found or didn't match")
+        raise CodexStatusParseError(f"{what} line not found or didn't match")
     pct_left = int(m.group(1))
     h, mi = int(m.group(2)), int(m.group(3))
-    resets_at = _resolve_today_time(h, mi, now)
+    if m.group(4) is not None:
+        resets_at = _resolve_date_time(int(m.group(4)), m.group(5), h, mi, now)
+    else:
+        resets_at = _resolve_today_time(h, mi, now)
     return {
         "percent_used": 100 - pct_left,
         "resets_at": resets_at.isoformat(),
     }
+
+
+def _parse_five_hour(text: str, now: datetime, label: str) -> dict:
+    return _parse_limit_row(FIVE_HOUR_RE, text, now, f"{label} 5h limit")
 
 
 def _parse_weekly(text: str, now: datetime, label: str) -> dict:
-    m = WEEKLY_RE.search(text)
-    if not m:
-        raise CodexStatusParseError(f"{label} Weekly limit line not found or didn't match")
-    pct_left = int(m.group(1))
-    h, mi = int(m.group(2)), int(m.group(3))
-    day, month_name = int(m.group(4)), m.group(5)
-    resets_at = _resolve_date_time(day, month_name, h, mi, now)
-    return {
-        "percent_used": 100 - pct_left,
-        "resets_at": resets_at.isoformat(),
-    }
+    return _parse_limit_row(WEEKLY_RE, text, now, f"{label} Weekly limit")
 
 
 def parse(text: str, *, now: datetime | None = None) -> dict:

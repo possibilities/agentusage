@@ -92,13 +92,15 @@ def test_parse_spark_block_when_present() -> None:
     out = parse(SPARK_PANEL, now=NOW)
     assert set(out) == {"session", "week", "codex_spark_session", "codex_spark_week"}
     assert out["codex_spark_session"]["percent_used"] == 100 - 73
-    assert out["codex_spark_session"]["resets_at"] == datetime(
-        2026, 5, 15, 23, 59, tzinfo=TZ
-    ).isoformat()
+    assert (
+        out["codex_spark_session"]["resets_at"]
+        == datetime(2026, 5, 15, 23, 59, tzinfo=TZ).isoformat()
+    )
     assert out["codex_spark_week"]["percent_used"] == 100 - 52
-    assert out["codex_spark_week"]["resets_at"] == datetime(
-        2026, 6, 28, 21, 0, tzinfo=TZ
-    ).isoformat()
+    assert (
+        out["codex_spark_week"]["resets_at"]
+        == datetime(2026, 6, 28, 21, 0, tzinfo=TZ).isoformat()
+    )
 
 
 def test_spark_header_requires_complete_spark_rows() -> None:
@@ -130,14 +132,106 @@ def test_parse_missing_weekly_row_raises() -> None:
         parse(text, now=NOW)
 
 
-def test_parse_malformed_weekly_row_raises() -> None:
-    """Weekly sentinel present but missing the `on DD Mon` date tail."""
+def test_parse_date_less_weekly_resolves_today_tomorrow() -> None:
+    """A weekly row without the `on DD Mon` tail is valid and resolves its
+    reset clock with the date-less today/tomorrow rule."""
     text = """\
 │  5h limit:   [████] 99% left (resets 14:05)
 │  Weekly limit:  [██░░] 29% left (resets 18:28)
 """
+    out = parse(text, now=NOW)
+    assert out["week"]["percent_used"] == 100 - 29
+    # 18:28 today is after 12:00 now → stays today, same -04:00 offset.
+    assert (
+        out["week"]["resets_at"] == datetime(2026, 5, 15, 18, 28, tzinfo=TZ).isoformat()
+    )
+
+
+def test_parse_malformed_weekly_reset_suffix_raises() -> None:
+    """A reset suffix with a day but no month is malformed drift → raises."""
+    text = """\
+│  5h limit:   [████] 99% left (resets 14:05)
+│  Weekly limit:  [██░░] 29% left (resets 18:28 on 30)
+"""
     with pytest.raises(CodexStatusParseError):
         parse(text, now=NOW)
+
+
+# Every reset-suffix shape the parser must now accept on either row, across
+# the primary and Spark blocks: date-less → today/tomorrow, dated → year roll.
+@pytest.mark.parametrize(
+    ("five_hour_reset", "weekly_reset", "five_hour_at", "weekly_at"),
+    [
+        (
+            "14:05",
+            "18:28",
+            datetime(2026, 5, 15, 14, 5, tzinfo=TZ),
+            datetime(2026, 5, 15, 18, 28, tzinfo=TZ),
+        ),
+        (
+            "14:05 on 29 Jun",
+            "20:18 on 5 Jul",
+            datetime(2026, 6, 29, 14, 5, tzinfo=TZ),
+            datetime(2026, 7, 5, 20, 18, tzinfo=TZ),
+        ),
+        (
+            "14:05",
+            "20:18 on 5 Jul",
+            datetime(2026, 5, 15, 14, 5, tzinfo=TZ),
+            datetime(2026, 7, 5, 20, 18, tzinfo=TZ),
+        ),
+        (
+            "14:05 on 29 Jun",
+            "18:28",
+            datetime(2026, 6, 29, 14, 5, tzinfo=TZ),
+            datetime(2026, 5, 15, 18, 28, tzinfo=TZ),
+        ),
+    ],
+)
+def test_parse_accepts_either_reset_suffix_shape_on_both_rows(
+    five_hour_reset: str, weekly_reset: str, five_hour_at: datetime, weekly_at: datetime
+) -> None:
+    text = (
+        f"│  5h limit:   [████] 99% left (resets {five_hour_reset})\n"
+        f"│  Weekly limit:  [██░░] 29% left (resets {weekly_reset})\n"
+    )
+    out = parse(text, now=NOW)
+    assert out["session"]["resets_at"] == five_hour_at.isoformat()
+    assert out["week"]["resets_at"] == weekly_at.isoformat()
+
+
+# Mirrors /Users/mike/.local/state/agentusage/codex.error.json: the live drift
+# where both primary rows AND both Spark rows render `resets HH:MM on DD Mon`.
+LIVE_DATED_PANEL = """\
+│  5h limit:                    [████████████████████] 98% left (resets 01:18 on 29 Jun)
+│  Weekly limit:                [████████████████████] 100% left (resets 20:18 on 5 Jul)
+│  GPT-5.3-Codex-Spark limit:
+│  5h limit:                    [████████████████████] 100% left (resets 01:28 on 29 Jun)
+│  Weekly limit:                [████████████████████] 100% left (resets 20:28 on 5 Jul)
+"""
+
+
+def test_parse_live_dated_panel_regression() -> None:
+    """The captured live panel where every row carries an `on DD Mon` tail —
+    the shape that broke the old date-less-5h / dated-weekly split."""
+    out = parse(LIVE_DATED_PANEL, now=NOW)
+    assert set(out) == {"session", "week", "codex_spark_session", "codex_spark_week"}
+    assert out["session"]["percent_used"] == 100 - 98
+    assert (
+        out["session"]["resets_at"]
+        == datetime(2026, 6, 29, 1, 18, tzinfo=TZ).isoformat()
+    )
+    assert (
+        out["week"]["resets_at"] == datetime(2026, 7, 5, 20, 18, tzinfo=TZ).isoformat()
+    )
+    assert (
+        out["codex_spark_session"]["resets_at"]
+        == datetime(2026, 6, 29, 1, 28, tzinfo=TZ).isoformat()
+    )
+    assert (
+        out["codex_spark_week"]["resets_at"]
+        == datetime(2026, 7, 5, 20, 28, tzinfo=TZ).isoformat()
+    )
 
 
 def test_resolve_today_time_passed_rolls_to_tomorrow() -> None:
