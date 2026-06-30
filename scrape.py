@@ -317,7 +317,7 @@ def pump_until_idle(child, stream, quiet_seconds=QUIET_SECONDS):
         try:
             chunk = child.read_nonblocking(size=8192, timeout=quiet_seconds)
             stream.feed(chunk)
-        except (pexpect.TIMEOUT, pexpect.EOF):
+        except (pexpect.TIMEOUT, pexpect.EOF, OSError):
             return
 
 
@@ -333,7 +333,7 @@ def pump_until_any_text(child, screen, stream, needles, max_seconds=SENTINEL_TIM
             stream.feed(chunk)
         except pexpect.TIMEOUT:
             continue
-        except pexpect.EOF:
+        except (pexpect.EOF, OSError):
             for needle in active:
                 if _on_screen(screen, needle):
                     return needle
@@ -358,7 +358,7 @@ def pump_while_text(child, screen, stream, needle, max_seconds=SENTINEL_TIMEOUT)
             stream.feed(chunk)
         except pexpect.TIMEOUT:
             continue
-        except pexpect.EOF:
+        except (pexpect.EOF, OSError):
             return not _on_screen(screen, needle)
     return not _on_screen(screen, needle)
 
@@ -371,7 +371,7 @@ def pump_for(child, stream, max_seconds: float) -> None:
             stream.feed(chunk)
         except pexpect.TIMEOUT:
             continue
-        except pexpect.EOF:
+        except (pexpect.EOF, OSError):
             return
 
 

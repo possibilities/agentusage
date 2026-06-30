@@ -179,6 +179,32 @@ def test_pump_until_any_text_returns_first_present_sentinel() -> None:
     assert matched == "Usage endpoint is rate limited"
 
 
+def test_pump_helpers_treat_pty_eio_as_closed_output() -> None:
+    class EioChild:
+        def read_nonblocking(self, *_args, **_kwargs) -> bytes:
+            raise OSError(5, "Input/output error")
+
+    class Screen:
+        display = ["ready sentinel"]
+
+    class Stream:
+        def feed(self, _chunk: bytes) -> None:
+            raise AssertionError("no bytes should feed after PTY EIO")
+
+    child = EioChild()
+    stream = Stream()
+
+    scrape.pump_until_idle(child, stream, quiet_seconds=0)
+    assert (
+        scrape.pump_until_any_text(
+            child, Screen(), stream, ["missing"], max_seconds=1
+        )
+        is None
+    )
+    assert scrape.pump_while_text(child, Screen(), stream, "ready sentinel") is False
+    scrape.pump_for(child, stream, max_seconds=1)
+
+
 def _touch_executable(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\nexit 0\n")
