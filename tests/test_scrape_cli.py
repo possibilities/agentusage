@@ -1,9 +1,10 @@
 """Contract coverage for the one-shot scrape CLI.
 
 Asserts the discriminated JSON contract shape + exit code for each arm
-(subscribed ok / no_subscription ok / error), plus that stdout carries exactly
-ONE JSON object and the util writes NO state. The real scrape is monkeypatched
-out — NO live TUI spawns in the default run (the `live` marker covers that).
+(subscribed ok / no_subscription ok / signed_out ok / error), plus that stdout
+carries exactly ONE JSON object and the util writes NO state. The real scrape is
+monkeypatched out — NO live TUI spawns in the default run (the `live` marker
+covers that).
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -81,6 +83,7 @@ def test_no_subscription_ok_arm(monkeypatch, capsys) -> None:
         raise NoActiveSubscription("no plan limits")
 
     monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: "breakdown panel")
+    monkeypatch.setattr(scrape_cli, "_claude_auth_logged_in", lambda *_: True)
     monkeypatch.setitem(scrape_cli.PARSERS, "claude", _raise_no_sub)
 
     rc = scrape_cli.run("claude", "default", None, None, None)
@@ -93,6 +96,87 @@ def test_no_subscription_ok_arm(monkeypatch, capsys) -> None:
     assert payload["no_subscription"] is True
     assert "usage" not in payload
     assert "subscription_active" not in payload
+
+
+def test_no_subscription_logged_out_auth_status_emits_signed_out(
+    monkeypatch, capsys
+) -> None:
+    def _raise_no_sub(_):
+        raise NoActiveSubscription("no quota bars")
+
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: "api billing panel")
+    monkeypatch.setattr(scrape_cli, "_claude_auth_logged_in", lambda *_: False)
+    monkeypatch.setitem(scrape_cli.PARSERS, "claude", _raise_no_sub)
+
+    rc = scrape_cli.run("claude", "multi-claude-1", None, None, None)
+
+    payload, _ = _capture(capsys)
+    assert rc == 0
+    assert payload["status"] == "ok"
+    assert payload["signed_out"] is True
+    assert "no_subscription" not in payload
+    assert "usage" not in payload
+    assert "subscription_active" not in payload
+
+
+def test_no_subscription_inconclusive_auth_status_stays_no_subscription(
+    monkeypatch, capsys
+) -> None:
+    def _raise_no_sub(_):
+        raise NoActiveSubscription("no quota bars")
+
+    monkeypatch.setattr(scrape_cli, "scrape", lambda *_, **__: "api billing panel")
+    monkeypatch.setattr(scrape_cli, "_claude_auth_logged_in", lambda *_: None)
+    monkeypatch.setitem(scrape_cli.PARSERS, "claude", _raise_no_sub)
+
+    rc = scrape_cli.run("claude", "multi-claude-1", None, None, None)
+
+    payload, _ = _capture(capsys)
+    assert rc == 0
+    assert payload["status"] == "ok"
+    assert payload["no_subscription"] is True
+    assert "signed_out" not in payload
+
+
+def test_claude_auth_logged_in_uses_named_profile_dir(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def _fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(stdout='{"loggedIn": false}\n')
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(scrape_cli.subprocess, "run", _fake_run)
+
+    logged_in = scrape_cli._claude_auth_logged_in("multi-claude-1", "/bin/claude")
+
+    assert logged_in is False
+    args, kwargs = calls[0]
+    assert args == ["/bin/claude", "auth", "status"]
+    assert kwargs["env"]["CLAUDE_CONFIG_DIR"] == str(
+        tmp_path / ".claude-profiles" / "multi-claude-1"
+    )
+    assert kwargs["capture_output"] is True
+    assert kwargs["check"] is False
+
+
+def test_claude_auth_logged_in_default_profile_unsets_config_dir(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def _fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(stdout='{"loggedIn": true}\n')
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/wrong/profile")
+    monkeypatch.setattr(scrape_cli.subprocess, "run", _fake_run)
+
+    logged_in = scrape_cli._claude_auth_logged_in("default", "claude")
+
+    assert logged_in is True
+    _, kwargs = calls[0]
+    assert "CLAUDE_CONFIG_DIR" not in kwargs["env"]
 
 
 def test_signed_out_ok_arm(monkeypatch, capsys) -> None:

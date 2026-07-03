@@ -20,12 +20,12 @@ JSON contract (stdout is exactly one of these objects, nothing else):
     ok / no_subscription (the NoActiveSubscription SUCCESS arm — claude only):
         {schema_version, status:"ok", no_subscription:true}
 
-    ok / signed_out (the SignedOut SUCCESS arm — claude only):
+    ok / signed_out (the logged-out SUCCESS arm — claude only):
         {schema_version, status:"ok", signed_out:true}
-        A logged-out profile renders the OAuth sign-in screen; scrape() detects
-        it PRE-SEND (before /usage is typed into the paste field) and raises
-        SignedOut. Additive optional field on the ok arm, so SCHEMA_VERSION
-        stays 1 (the no_subscription / error_kind precedent).
+        Logged-out profiles are detected either from the OAuth sign-in screen
+        before /usage is sent, or by confirming `claude auth status` when /usage
+        renders no quota bars. Additive optional field on the ok arm, so
+        SCHEMA_VERSION stays 1 (the no_subscription / error_kind precedent).
 
     error (parse drift, panel never rendered, scrape crash):
         {schema_version, status:"error", error_kind, error_type, message, screen_excerpt}
@@ -51,7 +51,7 @@ Arm-to-exit-code mapping (getting this wrong corrupts the worker's branch logic)
 
     ok (subscribed)         exit 0
     ok (no_subscription)    exit 0   <- NoActiveSubscription is a SUCCESS, not an error
-    ok (signed_out)         exit 0   <- SignedOut is a SUCCESS, not an error
+    ok (signed_out)         exit 0   <- logged-out is a SUCCESS, not an error
     error                   exit 1
 
 `subscription_active` is True for a subscribed claude scrape, None for codex
@@ -63,6 +63,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -78,7 +80,7 @@ if _REPO_ROOT not in sys.path:
 import parse_claude_usage  # noqa: E402
 import parse_codex_status  # noqa: E402
 from parse_claude_usage import NoActiveSubscription, SignedOut  # noqa: E402
-from scrape import scrape  # noqa: E402
+from scrape import TARGETS, scrape  # noqa: E402
 
 # Bumped whenever the contract's top-level key set or per-field semantics change.
 # The keeper worker gates on this integer. Independent of the on-disk ENVELOPE
@@ -152,6 +154,47 @@ def _ok_signed_out() -> dict:
         "status": "ok",
         "signed_out": True,
     }
+
+
+def _default_claude_command() -> str:
+    raw = TARGETS["claude"].get("command")
+    return raw if isinstance(raw, str) else "claude"
+
+
+def _claude_auth_logged_in(profile: str, command: str | None) -> bool | None:
+    """Return Claude auth status for a profile, or None when inconclusive.
+
+    The default account is native `~/.claude` (no `CLAUDE_CONFIG_DIR`); named
+    accounts live under `~/.claude-profiles/<profile>`. The helper is a
+    best-effort classifier for no-bar /usage screens: a clear logged-out result
+    becomes the signed_out success arm, while any failed probe leaves the parser's
+    no_subscription classification intact.
+    """
+    cmd = command or _default_claude_command()
+    env = os.environ.copy()
+    if profile == "default":
+        env.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        env["CLAUDE_CONFIG_DIR"] = str(Path.home() / ".claude-profiles" / profile)
+    if os.path.isabs(cmd):
+        env["PATH"] = f"{Path(cmd).parent}{os.pathsep}{env.get('PATH', '')}"
+    try:
+        proc = subprocess.run(
+            [cmd, "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    try:
+        payload = json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        return None
+    logged_in = payload.get("loggedIn") if isinstance(payload, dict) else None
+    return logged_in if isinstance(logged_in, bool) else None
 
 
 def _error(
@@ -235,7 +278,10 @@ def run(
     try:
         usage = parser(rendered)
     except NoActiveSubscription:
-        _emit(_ok_no_subscription())
+        if target == "claude" and _claude_auth_logged_in(profile, command) is False:
+            _emit(_ok_signed_out())
+        else:
+            _emit(_ok_no_subscription())
         return 0
     except Exception as exc:  # noqa: BLE001 — parse drift -> error arm
         traceback.print_exc(file=sys.stderr)
