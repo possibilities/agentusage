@@ -1,7 +1,6 @@
 # 0001 — tmux capture driver for the Bun scrape core
 
-- Status: accepted (spike GO). Date: 2026-07-06. Deciders: fn-9 epic.
-- Host: macOS 25.5 arm64, tmux `next-3.8`, bun `1.3.14`, `@js-temporal/polyfill` `0.5.1`.
+- Status: accepted (spike GO). Date: 2026-07-06. Deciders: fn-9 epic. Host: macOS 25.5 arm64, tmux `next-3.8`, bun `1.3.14`, `@js-temporal/polyfill` `0.5.1`.
 
 ## Context
 
@@ -14,24 +13,25 @@ fallback if gates (1)-(3) diverged: bun-pty + @xterm/headless (not needed).
 
 ## Decision — GO (tmux driver; fallback not consumed)
 
-All de-risk gates passed on the corpus AND a live claude scrape. Driver MUST:
+All gates passed (corpus + live claude scrape); implemented in `src/scrape.ts`:
 
-- **Server:** dedicated `tmux -L agentusage-scrape`.
-- **TERM (load-bearing):** generate a one-line `set -g default-terminal
-  "xterm-256color"` and pass via `-f <conf>`. tmux **ignores `-e TERM`** (forces
-  pane TERM from `default-terminal`); `set-option` post-`start-server` is too
-  late (a session-less server exits). Config must precede `new-session`.
-- **Spawn:** `new-session -d -s <n> -x <cols> -y <rows> -c <tmpdir> -e
-  CLAUDE_CONFIG_DIR=<p> -e LINES=<rows> -e COLUMNS=<cols> <cmd>` (`-e` injects
-  everything except TERM).
-- **Per-session scoping (`-t <n>`, never `-g` — shared server):** `set-option -t
-  <n> status off`, `set-option -t <n> escape-time 0`.
-- **Alt gate:** `display-message -p -t <n> '#{alternate_on}'` == 1 (replaces
-  pyte's alt-screen gate before the signed-out quorum).
-- **Capture:** `capture-pane -p -J -t <n>` (never `-a`).
-- **Slash:** three `send-keys` — `C-u`, then `-l '<slash>'` (literal), `Enter`.
-- **Idle:** 3 identical 0.2s `capture-pane -pJ` snapshots = settled; deadline-bounded.
-- **Cleanup:** `send-keys C-c` ×2, then `kill-session`.
+- **Server / TERM:** dedicated `tmux -L agentusage-scrape`; TERM via a one-line
+  `default-terminal "xterm-256color"` in a `-f <conf>` sourced before
+  `new-session` (tmux ignores `-e TERM`; a post-`start-server` set is too late).
+- **Probe + sweep:** a missing binary or parseable version < 3.2 throws a typed
+  error → the CLI's `scrape_failed` (lenient: `next-3.8` passes); then kill
+  sessions older than 180s (3× the 60s budget) — only a SIGKILLed orphan does,
+  a concurrent fresh sibling survives.
+- **Spawn:** `new-session -d -s <target>-<profile>-<pid>-<mono> -x/-y -c <tmpdir>
+  -e <K>=<V>… <cmd> <args…>`; `-e` injects the full env except TERM (Python's
+  `os.environ.copy()` + `CLAUDE_CONFIG_DIR`/`LINES`/`COLUMNS`/`PATH`) so a shared
+  server's stale globals can't leak. Per-session (`-t`, never `-g`): `status
+  off`, `escape-time 0`.
+- **Drive:** `#{alternate_on}` == 1 gates the signed-out quorum; slash is three
+  `send-keys` (`C-u`, `-l '<slash>'`, `Enter`); idle = N identical 0.2s
+  `capture-pane -pJ` snaps (N = round(quiet/0.2), min 3), deadline-bounded;
+  `#{pane_dead}` is the pexpect-EOF that stops the pumps.
+- **Capture / cleanup:** `capture-pane -p -J` (never `-a`), rstripped + newline-joined; then `send-keys C-c` ×2 and `kill-session`.
 
 ## Spike evidence
 
