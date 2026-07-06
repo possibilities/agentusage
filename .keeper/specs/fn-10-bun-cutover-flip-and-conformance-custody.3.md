@@ -37,5 +37,5 @@ Make the corpus self-sufficient once Python is gone. (1) Freeze rendered screens
 - [ ] The pytest parity gate remains green and untouched — custody artifacts are additive this epic
 
 ## Done summary
-
+Froze per-case screen.txt (provenance recorded), added in-process bun parse-conformance over the frozen screens, a standalone bun run conformance end-to-end runner (corpus + auth forks + mount-delay + reaping + writes-no-state/argv-error, temp-file capture, skip->fail promotion), and tests/generate.ts regenerating goldens byte-identically. bun test 103 pass; conformance 24/24 under REQUIRE_CONFORMANCE=1; parity gate 45 pass untouched.
 ## Evidence
