@@ -34,5 +34,5 @@ Task 7's dual-run is the gate; here, drive one ok and one error scenario by hand
 - [ ] `bun run <bin>` works from any cwd (no repo-root assumption beyond its own imports)
 
 ## Done summary
-
+Ported scrape_cli.py to src/scrape-cli.ts (identical argv, four contract arms 0/0/0/1, auth probe, error-kind classification, AGENTUSAGE_NOW threading) and registered the agentusage-scrape bin. Bun and Python CLIs print semantically-equal JSON with equal exit codes across subscribed/no-sub/signed-out(x2)/parse-drift; lint+typecheck clean, pytest 122 green.
 ## Evidence
