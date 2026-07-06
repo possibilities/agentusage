@@ -1,0 +1,17 @@
+{
+  "bundles": [],
+  "created_at": "2026-07-06T09:20:30.190000Z",
+  "depends_on": [
+    "fn-10-bun-cutover-flip-and-conformance-custody.1",
+    "fn-10-bun-cutover-flip-and-conformance-custody.2"
+  ],
+  "epic": "fn-10-bun-cutover-flip-and-conformance-custody",
+  "id": "fn-10-bun-cutover-flip-and-conformance-custody.3",
+  "model": "opus",
+  "priority": null,
+  "snippets": [],
+  "target_repo": "/Users/mike/code/agentusage",
+  "tier": "xhigh",
+  "title": "Conformance custody to bun",
+  "updated_at": "2026-07-06T09:20:30.190000Z"
+}
