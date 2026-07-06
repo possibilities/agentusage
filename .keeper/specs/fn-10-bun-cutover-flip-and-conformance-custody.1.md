@@ -35,5 +35,5 @@ Give `run()` an injectable deps parameter (optional, defaulting to the real `scr
 - [ ] `bun run test` exists and passes without tmux present and without spawning any subprocess
 
 ## Done summary
-
+Deps-seam refactor (inject scrape/auth/emit into run(), spawn probe into claudeAuthLoggedIn, export detectSignedOut behind a tmux probe seam) + translated the surviving pytest internals into pure in-process src/ bun:test siblings; bun test green (88), parity gate green, no production behavior changed.
 ## Evidence
