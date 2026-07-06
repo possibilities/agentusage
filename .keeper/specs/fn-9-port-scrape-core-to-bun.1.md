@@ -40,5 +40,5 @@ Stand up the Bun/TypeScript surface in this repo, styled to keeper conventions: 
 - [ ] `uv run pytest` remains green with zero edits to test files
 
 ## Done summary
-
+Stood up the Bun/TS surface (package.json, tsconfig, biome, bun.lock, node_modules gitignore) styled to keeper conventions with lint/typecheck scripts, and ported the claude/codex reset-time resolvers to a Temporal wrapper (src/reset-time.ts) with 22 bun:test cases mirroring the pytest resolver assertions. Flipped CLAUDE.md/README.md Python-only claims to the dual-runtime truth (Python remains authoritative). uv run pytest stays green (117) with zero test edits.
 ## Evidence
