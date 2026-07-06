@@ -39,5 +39,5 @@ A thin pytest smoke (not the parity module yet): spawn the Python CLI with `--co
 - [ ] Fake TUI answers `auth status` with configurable loggedIn JSON and ignores unknown flags
 
 ## Done summary
-
+Built the language-neutral conformance corpus (14 claude+codex cases incl. wrap-split and spinner structural cases) with Python-generated expected JSON/exit codes, a multi-modal fake TUI, a live raw-byte recorder, and a smoke test that drives the real pexpect+pyte CLI path end-to-end.
 ## Evidence
