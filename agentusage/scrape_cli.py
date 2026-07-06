@@ -67,6 +67,7 @@ import os
 import subprocess
 import sys
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 # Make the flat repo-root modules (scrape, parse_*) importable regardless of the
@@ -249,6 +250,23 @@ def _emit(payload: dict) -> None:
     sys.stdout.flush()
 
 
+def _now_from_env() -> datetime | None:
+    """Parse the AGENTUSAGE_NOW clock-injection seam, or None for the wall clock.
+
+    Offset-bearing ISO (e.g. ``2026-05-29T12:00:00-04:00``); threaded as ``now=``
+    into the parser so reset times resolve against a pinned instant. Absent →
+    None → the parser is called exactly as before and each defaults to
+    ``datetime.now()``. A test/generation seam only (the conformance corpus and
+    parity harness pin the clock through it); production never sets it, and the
+    keeper worker owns no clock here. A malformed value raises ValueError, which
+    run() maps to the scrape_failed arm — mirroring the Bun CLI's buildNow.
+    """
+    raw = os.environ.get("AGENTUSAGE_NOW")
+    if not raw:
+        return None
+    return datetime.fromisoformat(raw)
+
+
 def run(
     target: str, profile: str, command: str | None, rows: int | None, cols: int | None
 ) -> int:
@@ -259,6 +277,7 @@ def run(
     # The scrape itself can fail before any screen renders (binary missing,
     # PTY error). Treat that as the error arm with an empty excerpt.
     try:
+        now = _now_from_env()
         rendered = scrape(target, passthrough, command=command, rows=rows, cols=cols)
     except SignedOut:
         # A logged-out profile is detected pre-send inside scrape() and is a
@@ -274,9 +293,11 @@ def run(
 
     # Branch the parse the same way the daemon did: NoActiveSubscription is a
     # SUCCESS (panel rendered, account just has no plan limits), everything else
-    # is real parse failure / format drift.
+    # is real parse failure / format drift. Thread the pinned clock only when the
+    # seam is set so the default path stays the exact one-arg call existing
+    # parser mocks rely on.
     try:
-        usage = parser(rendered)
+        usage = parser(rendered) if now is None else parser(rendered, now=now)
     except NoActiveSubscription:
         if target == "claude" and _claude_auth_logged_in(profile, command) is False:
             _emit(_ok_signed_out())
