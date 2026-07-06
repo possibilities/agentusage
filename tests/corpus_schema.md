@@ -160,3 +160,75 @@ end-to-end — the same pinned `now` the generator resolves at the parser level.
 | `codex-ok`                       | ok / subscribed | 0    |
 | `codex-ok-spark`                 | ok / subscribed | 0    |
 | `codex-weekly-drift`             | ok / subscribed | 0    |
+
+## Operator runbook: the bun soak (`scripts/soak-report.ts`)
+
+This is a separate concern from the corpus above — the corpus is offline
+conformance; this runbook is for the LIVE operator phase after the epic lands,
+which flips one real profile's runtime and watches it soak. Recorded here (the
+epic's other doc space) rather than in a new file, per the epic's docs-gaps
+note.
+
+**Flip.** Per-profile, set `usage_scraper_runtime: bun` as a config override in
+keeper (env or config — env wins). The shipped default stays `uv` everywhere;
+an invalid override value fails closed to `uv`. Nothing else changes: the
+daemon boot gate needs no edit, and every other profile keeps scraping via
+`uv run … agentusage.scrape_cli` untouched.
+
+**Rollback.** Clear the override. The next cycle resumes `uv` for that profile
+with zero code changes — the override is the entire blast radius.
+
+**Requirements before trusting a soak verdict:**
+
+- Run the flipped profile through the **LaunchAgent**, not an ad-hoc shell —
+  `launchd`'s stripped env and its own process lifecycle are what the flip has
+  to survive in practice.
+- The soak window must span **at least one real sleep/wake** — the tmux
+  scrape driver's server is ephemeral across sleep/wake (create-if-absent
+  per scrape already handles it), and that's exactly the transition a shell
+  session never exercises.
+- **Privacy:** only turn on `StandardOutPath`/`StandardErrorPath` redirection
+  for the duration of the soak window, then turn it back off. The scrape
+  util's stdout is the usage JSON contract, which is account-identifying —
+  it must not sit logged indefinitely.
+
+**Reading the evidence.** Run the report read-only against the live state dir
+(never write, never scrape):
+
+```sh
+bun scripts/soak-report.ts --since 48h --baseline 7d
+```
+
+`--since` is the soak window (default trailing 24h; a duration like `48h`/`7d`
+or an absolute ISO instant — e.g. the flip timestamp). `--baseline` is a
+second window of that duration immediately BEFORE `--since` starts — the
+trailing `uv` history for the same profile(s), compared without ever
+double-scraping the rate-limited `/usage` panel live. Add `--profile <id>` to
+scope to the flipped profile(s), `--json` for a machine-readable form.
+
+The report's `latency` figures are a **schedule-drift proxy**, not a raw
+per-attempt duration (the runtime logs no such field): how much later than its
+own prior `next_fetch_at` each attempt actually fired, bucketed against the
+60s scrape wall-clock budget. `budgetTimeoutCount` (rendered as
+`explicit-budget-timeouts`) is the direct, non-proxy signal — a `scrape_failed`
+whose message names the SIGKILL budget explicitly.
+
+**Numeric exit criteria** (clean soak — all of):
+
+- **N consecutive clean cycles per profile.** No fixed N is baked into the
+  tool; the operator picks N appropriate to the profile's cadence (a
+  `streak` of `.` in the report's `[…]` sequence, `current=ok` with
+  `currentRun >= N`) and states it when reading the report.
+- **Zero contract regressions vs baseline** — the bun-window `error_kind`
+  histogram introduces no kind absent from the baseline window at a
+  comparable-or-lower rate; a bun-only error kind is a clean-soak blocker.
+- **No orphaned tmux sessions** — the report's orphaned-tmux count is `0`
+  throughout the window (sessions on `-L agentusage-scrape` older than 180s,
+  the same 3x-budget threshold the scrape driver itself sweeps at).
+- **Latency within budget** — the bun window's `p95` schedule-drift and
+  `explicit-budget-timeouts` are not materially worse than the baseline
+  window's.
+
+Any single miss is a failed soak: clear the override (rollback, above) and
+debug the bun leg with zero production impact — the uv leg never stopped
+being authoritative for that profile.
