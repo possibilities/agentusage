@@ -179,6 +179,77 @@ def test_claude_auth_logged_in_default_profile_unsets_config_dir(
     assert "CLAUDE_CONFIG_DIR" not in kwargs["env"]
 
 
+def test_default_claude_command_falls_back_for_non_string(monkeypatch) -> None:
+    monkeypatch.setitem(scrape_cli.TARGETS["claude"], "command", ["not", "a", "string"])
+
+    assert scrape_cli._default_claude_command() == "claude"
+
+
+def test_claude_auth_logged_in_returns_none_on_probe_failure(monkeypatch) -> None:
+    def _raise(*_args, **_kwargs):
+        raise OSError("missing binary")
+
+    monkeypatch.setattr(scrape_cli.subprocess, "run", _raise)
+
+    assert scrape_cli._claude_auth_logged_in("default", "claude") is None
+
+
+def test_claude_auth_logged_in_returns_none_on_bad_json(monkeypatch) -> None:
+    monkeypatch.setattr(
+        scrape_cli.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="not json"),
+    )
+
+    assert scrape_cli._claude_auth_logged_in("default", "claude") is None
+
+
+def test_claude_auth_logged_in_returns_none_on_non_bool_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        scrape_cli.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout='{"loggedIn": "yes"}\n'),
+    )
+
+    assert scrape_cli._claude_auth_logged_in("default", "claude") is None
+
+
+def test_main_forwards_args_to_run(monkeypatch) -> None:
+    calls = []
+
+    def _fake_run(**kwargs):
+        calls.append(kwargs)
+        return 7
+
+    monkeypatch.setattr(scrape_cli, "run", _fake_run)
+
+    rc = scrape_cli.main(
+        [
+            "--target",
+            "codex",
+            "--profile",
+            "codex-profile",
+            "--command",
+            "/bin/codex",
+            "--rows",
+            "41",
+            "--cols",
+            "120",
+        ]
+    )
+
+    assert rc == 7
+    assert calls == [
+        {
+            "target": "codex",
+            "profile": "codex-profile",
+            "command": "/bin/codex",
+            "rows": 41,
+            "cols": 120,
+        }
+    ]
+
+
 def test_signed_out_ok_arm(monkeypatch, capsys) -> None:
     def _raise_signed_out(*_, **__):
         raise SignedOut("OAuth sign-in screen detected pre-send")

@@ -24,6 +24,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from parse_claude_usage import (  # noqa: E402
+    PANEL_HEADER,
     ClaudeUsageEndpointRateLimited,
     ClaudeUsageParseError,
     NoActiveSubscription,
@@ -77,10 +78,13 @@ API_BILLING_NO_BARS_SCREEN = """\
 """
 
 
-API_BILLING_ENDPOINT_RATE_LIMIT_SCREEN = API_BILLING_NO_BARS_SCREEN + """\
+API_BILLING_ENDPOINT_RATE_LIMIT_SCREEN = (
+    API_BILLING_NO_BARS_SCREEN
+    + """\
    Error: Usage endpoint is rate limited. Please try again in a moment.
    r to retry · Esc to cancel
 """
+)
 
 
 # Captured shape of a normal subscribed account's /usage panel: rate-limit
@@ -199,6 +203,50 @@ def test_empty_panel_raises_parse_error() -> None:
         parse("some unrelated screen with no bars and no breakdown", now=NOW)
 
 
+def test_subscribed_panel_missing_header_raises_parse_error() -> None:
+    with pytest.raises(ClaudeUsageParseError, match="panel header not found"):
+        parse(SUBSCRIBED_SCREEN.replace(PANEL_HEADER, "Settings Config Usage"), now=NOW)
+
+
+def test_required_block_with_too_few_lines_raises_parse_error() -> None:
+    text = f"""\
+  {PANEL_HEADER}
+
+  Current session
+  42% used
+"""
+    with pytest.raises(ClaudeUsageParseError, match="missing percent/reset lines"):
+        parse(text, now=NOW)
+
+
+def test_missing_required_label_raises_parse_error() -> None:
+    text = f"""\
+  {PANEL_HEADER}
+
+  Current week (all models)
+  [██░░░░░░░░░░░░░░] 17% used
+  Resets May 31 at 9am (America/New_York)
+"""
+    with pytest.raises(ClaudeUsageParseError, match="required label not found"):
+        parse(text, now=NOW)
+
+
+def test_malformed_percent_line_raises_parse_error() -> None:
+    text = f"""\
+  {PANEL_HEADER}
+
+  Current session
+  usage is unavailable
+  Resets 3pm (America/New_York)
+
+  Current week (all models)
+  [██░░░░░░░░░░░░░░] 17% used
+  Resets May 31 at 9am (America/New_York)
+"""
+    with pytest.raises(ClaudeUsageParseError, match="percent line did not match"):
+        parse(text, now=NOW)
+
+
 # `derive_lift_at` is consumed by daemon.py to populate the top-level
 # envelope field, so its contract is part of the client-facing shape and
 # warrants direct unit coverage with hand-built window dicts (avoids the
@@ -266,6 +314,15 @@ def test_derive_lift_at_handles_over_100_percent() -> None:
     session_reset = "2026-05-29T15:00:00-04:00"
     usage = {
         "session": {"percent_used": 105.0, "resets_at": session_reset},
+    }
+    assert derive_lift_at(usage) == session_reset
+
+
+def test_derive_lift_at_ignores_non_window_values() -> None:
+    session_reset = "2026-05-29T15:00:00-04:00"
+    usage = {
+        "metadata": "not a usage window",
+        "session": {"percent_used": 100.0, "resets_at": session_reset},
     }
     assert derive_lift_at(usage) == session_reset
 
@@ -353,3 +410,9 @@ def test_resolve_week_unknown_month_raises() -> None:
     """An unparseable month name raises the strict error."""
     with pytest.raises(ClaudeUsageParseError):
         _resolve_week("Smarch 5 at 9am", TZ, NOW)
+
+
+def test_resolve_week_unknown_three_letter_month_raises() -> None:
+    """A regex-valid but unknown month abbreviation raises the month error."""
+    with pytest.raises(ClaudeUsageParseError, match="unknown month"):
+        _resolve_week("Foo 5 at 9am", TZ, NOW)
