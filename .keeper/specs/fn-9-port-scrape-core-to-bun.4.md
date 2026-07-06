@@ -36,5 +36,5 @@ Spike evidence (capture diffs, alternate_on transcripts, timing logs) goes into 
 - [ ] The Temporal bracket-suffix question is answered with a one-line reproducible check
 
 ## Done summary
-
+Spike verdict GO: tmux driver on -L agentusage-scrape. ADR 0001 records the exact invocation shape (default-terminal via -f config since -e TERM is ignored; per-session status/escape-time scoping) and per-check evidence — TERM strategy, capture-text equivalence (13/14 corpus byte-identical; wrap-split rejoined favorably by -J), alternate_on flip, snapshot-idle (settles on stable, deadline-bounded on live spinner), 300x200 geometry, -e env injection, Temporal bracket-suffix accepted without ! — plus a live claude scrape across all three arms (subscribed bars, rate-limited, no-subscription).
 ## Evidence
