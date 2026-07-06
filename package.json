@@ -1,0 +1,18 @@
+{
+  "name": "agentusage",
+  "private": true,
+  "type": "module",
+  "description": "Scrape a Claude/Codex account's usage panel and print a discriminated JSON contract",
+  "scripts": {
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.2",
+    "bun-types": "^1.3.14",
+    "typescript": "^6.0.3"
+  }
+}

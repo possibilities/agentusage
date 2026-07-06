@@ -2,21 +2,25 @@ agentusage — one-shot Claude/Codex usage scrape util. Scrapes a single account
 `/usage` (Claude) or `/status` (Codex) panel and prints a discriminated JSON
 contract; writes no state.
 
-Python-only repo. The entry point is `agentusage.scrape_cli` — a stateless
-ONE-SHOT util: keeper's `usage-scraper-worker` shells out to it once per account
+Dual-runtime repo, mid-port. The **Python implementation is currently the
+authoritative runtime**: keeper's `usage-scraper-worker` shells out to
+`agentusage.scrape_cli` once per account
 (`uv run --project ~/code/agentusage python -m agentusage.scrape_cli …`), and the
 worker owns all orchestration (scheduling, idle/cooldown gating, tier/multiplier
 resolution, envelope assembly) plus the `~/.local/state/agentusage/<id>.json`
-envelope writes. The credit-weighted profile picker that reads those envelopes is
-vendored into keeper (`src/usage-picker.ts` + `src/usage-flock.ts`); this repo no
-longer ships TypeScript and keeper no longer resolves `file:../agentusage`.
+envelope writes. A native Bun/TypeScript scrape core (`src/`) is being ported
+against the identical stdout contract, proven at parity inside the still-
+authoritative pytest suite; nothing consumes it yet. The credit-weighted profile
+picker that reads those envelopes is vendored into keeper (`src/usage-picker.ts`
++ `src/usage-flock.ts`); keeper no longer resolves `file:../agentusage`.
 
 ## Repo facts
 
 - **`AGENTS.md` is a symlink to this file.** Edit in place; never `rm`+recreate.
-- **`pyproject.toml` is the sole authoritative manifest** (Python-only repo). Its
-  one-line `description` describes the whole app. Keep it in sync if the app's
-  purpose shifts.
+- **Two manifests, one app** (dual-runtime port): `pyproject.toml` for the
+  authoritative Python runtime, `package.json` for the Bun/TS port. Each carries
+  a one-line verb-phrase `description` of the whole app; keep both in sync if the
+  app's purpose shifts.
 - **Forward-facing advice only** in comments and docs: state current behavior and
   invariants, not change history (which lives in the diff).
 

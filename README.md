@@ -84,10 +84,15 @@ against this state tree.
 The credit-weighted profile picker (`pickProfile`/`listProfiles` + the `flock`
 helper) that reads these envelopes used to live in this repo as a TypeScript
 reader. It is now **vendored into keeper** (`src/usage-picker.ts` +
-`src/usage-flock.ts`), where keeper's launch path consumes it directly. This
-repo no longer ships any TypeScript — it is Python-only. The envelope + ledger
-on-disk contract documented here is unchanged, so the in-keeper picker and any
-other reader stay agnostic to it.
+`src/usage-flock.ts`), where keeper's launch path consumes it directly. The
+envelope + ledger on-disk contract documented here is unchanged, so the
+in-keeper picker and any other reader stay agnostic to it.
+
+The repo is now **dual-runtime**: the Python implementation under the repo root
+is the authoritative scrape runtime, and a native Bun/TypeScript scrape core
+(`src/`) is being ported against the identical stdout contract. The Bun port is
+additive and not yet consumed by keeper — Python remains authoritative until a
+follow-up cutover.
 
 The scrape mechanics (`scrape.py`, `parse_*.py`) stay flat at the repo root;
 the `agentusage.scrape_cli` package wraps them as the one-shot util the keeper
@@ -97,10 +102,14 @@ picker consumes.
 ## Development
 
 The project pins Python **3.11** (`.python-version`); `uv sync` rebuilds the
-venv against it. Run the test suite with `uv run pytest` — it's fast and
-fully offline (no real TUI, no network). Tests that spawn a real claude/codex
-TUI are tagged with the `live` marker and excluded by default; run them
-opt-in with `uv run pytest -m live`.
+venv against it. Run the authoritative test suite with `uv run pytest` — it's
+fast and fully offline (no real TUI, no network). Tests that spawn a real
+claude/codex TUI are tagged with the `live` marker and excluded by default; run
+them opt-in with `uv run pytest -m live`.
+
+The Bun/TypeScript scrape core under `src/` is checked with `bun run lint`
+(Biome) and `bun run typecheck` (`tsc --noEmit`); its unit tests run with
+`bun test`.
 
 ## Forward-compatibility contract
 
