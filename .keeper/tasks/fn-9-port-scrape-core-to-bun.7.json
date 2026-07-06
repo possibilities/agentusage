@@ -1,0 +1,18 @@
+{
+  "bundles": [],
+  "created_at": "2026-07-06T06:14:23.669000Z",
+  "depends_on": [
+    "fn-9-port-scrape-core-to-bun.2",
+    "fn-9-port-scrape-core-to-bun.3",
+    "fn-9-port-scrape-core-to-bun.6"
+  ],
+  "epic": "fn-9-port-scrape-core-to-bun",
+  "id": "fn-9-port-scrape-core-to-bun.7",
+  "model": "opus",
+  "priority": null,
+  "snippets": [],
+  "target_repo": "/Users/mike/code/agentusage",
+  "tier": "xhigh",
+  "title": "Dual run conformance harness",
+  "updated_at": "2026-07-06T06:14:23.669000Z"
+}
