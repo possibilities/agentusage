@@ -37,5 +37,5 @@ Real coverage arrives with the parity module (task 7); here, a handful of bun:te
 - [ ] Sentinel literals are exported from exactly one module (no duplicate string constants across src/)
 
 ## Done summary
-
+Ported parse_claude_usage.py and parse_codex_status.py 1:1 to strict TS parsers (src/parse-claude-usage.ts, src/parse-codex-status.ts) over the task-1 reset-time wrapper, with single-sourced exported sentinels and deriveLiftAt. Added src/parse-bridge.ts mapping thrown named errors to Python exception-class error_type strings. bun test (39), typecheck, biome, and pytest (117) all green.
 ## Evidence
