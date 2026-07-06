@@ -31,5 +31,5 @@ Port tests/fake_tui.py to a bun script with identical observable behavior: multi
 - [ ] No test path spawns fake_tui.py anymore
 
 ## Done summary
-
+Ported tests/fake_tui.py to tests/fake-tui.ts (bun) with byte-identical behavior; repointed conftest.py and test_corpus_smoke.py at it. Dual-run parity suite green (22 passed, zero skips under AGENTUSAGE_REQUIRE_PARITY=1) driving the bun fake through both CLIs; nothing spawns fake_tui.py anymore.
 ## Evidence
