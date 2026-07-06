@@ -35,5 +35,5 @@ Add `usage_scraper_runtime` to keeper's config resolution mirroring the existing
 - [ ] Shipped default remains uv — merging this task changes no production behavior
 
 ## Done summary
-
+Added the usage_scraper_runtime uv|bun toggle: resolveUsageScraperRuntimeKind resolves env-over-config, fail-closed to uv (default uv), and resolveUsageScraperRuntime became a uv|bun discriminated union whose bun leg needs only the project dir (bun path defaults to process.execPath) so a flip spawns without touching the boot gate. buildScrapeArgs emits the full per-leg argv (bun targets <dir>/src/scrape-cli.ts) and runScrape injects tmux's dir onto the child PATH; fast tests cover the resolver matrix + both argv branches, a slow test proves a real bun-leg round-trip.
 ## Evidence
