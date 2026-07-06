@@ -33,5 +33,5 @@ Run against the live state dir on this box (uv-produced envelopes) and confirm s
 - [ ] The runbook states flip mechanism (override, default uv), rollback (clear the override), launchd requirement, sleep/wake requirement, privacy note, and the numeric exit criteria
 
 ## Done summary
-
+Added scripts/soak-report.ts (read-only per-profile success/arm/error_kind/latency/streak evidence + orphaned-tmux check from ~/.local/state/agentusage, --since/--baseline windows for a uv-vs-bun comparison) and appended the operator soak runbook to tests/corpus_schema.md.
 ## Evidence
