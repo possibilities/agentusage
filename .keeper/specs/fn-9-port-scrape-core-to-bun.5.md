@@ -38,5 +38,5 @@ Developable against the fake TUI: `bun src/scrape.ts` behind a thin debug entry 
 - [ ] docs/adr/0001 is finalized (status accepted, exercised path recorded)
 
 ## Done summary
-
+Ported scrape() onto a tmux driver (tmux -L agentusage-scrape) in src/scrape.ts: sentinel state machine, trust pre-marking, codex-command resolution, snapshot-idle, leak sweep, tmux probe, and #{pane_dead} closed-output signal. Verified against the fake TUI (subscribed parses to the expected contract, signed-out short-circuits pre-send, missing tmux yields the typed error, sweep reaps a SIGKILL leak while a fresh session survives). Finalized ADR 0001.
 ## Evidence

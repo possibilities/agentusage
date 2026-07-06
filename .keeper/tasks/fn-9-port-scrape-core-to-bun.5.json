@@ -13,5 +13,6 @@
   "target_repo": "/Users/mike/code/agentusage",
   "tier": "xhigh",
   "title": "Tmux scrape driver",
-  "updated_at": "2026-07-06T06:16:13.640000Z"
+  "updated_at": "2026-07-06T07:31:27.431000Z",
+  "worker_done_at": "2026-07-06T07:31:27.431000Z"
 }
