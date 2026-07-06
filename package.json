@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "description": "Scrape a Claude/Codex account's usage panel and print a discriminated JSON contract",
+  "bin": {
+    "agentusage-scrape": "./src/scrape-cli.ts"
+  },
   "scripts": {
     "lint": "biome check .",
     "typecheck": "tsc --noEmit"
