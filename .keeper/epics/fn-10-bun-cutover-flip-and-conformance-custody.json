@@ -6,7 +6,7 @@
     "fn-1131-harness-session-adoption-path"
   ],
   "id": "fn-10-bun-cutover-flip-and-conformance-custody",
-  "last_validated_at": "2026-07-06T09:20:41.451000Z",
+  "last_validated_at": "2026-07-06T09:22:03.131000Z",
   "primary_repo": "/Users/mike/code/agentusage",
   "snippets": [],
   "status": "open",
@@ -15,5 +15,5 @@
     "/Users/mike/code/agentusage",
     "/Users/mike/code/keeper"
   ],
-  "updated_at": "2026-07-06T09:20:41.339000Z"
+  "updated_at": "2026-07-06T09:22:03.131000Z"
 }
