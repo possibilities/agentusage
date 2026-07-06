@@ -64,15 +64,16 @@ uv run python tests/fixtures/corpus/generate.py
 Claude reset times resolve in the SYSTEM-LOCAL zone (`datetime.astimezone()`),
 so the generator pins `TZ` to each case's `tz` before generating, and a replay
 harness MUST export the same `TZ`. Codex keeps `now`'s own fixed offset, so its
-reset times are `TZ`-independent. The CLI does not yet thread an injectable
-clock (a later task adds that seam); until it does, the reset-bearing
-`expected.json` values are generated at the parser level with the same pinned
-`now` the future CLI seam will thread through, so they stay reproducible
-end-to-end once it lands.
+reset times are `TZ`-independent. The CLI threads an injectable clock via the
+`AGENTUSAGE_NOW` env seam (offset-bearing ISO), so replaying a case with
+`AGENTUSAGE_NOW=<case.now>` reproduces the reset-bearing `expected.json`
+end-to-end — the same pinned `now` the generator resolves at the parser level.
+`test_dual_run_cli.py` exercises exactly this against both runtimes.
 
 ## Replaying a case (how a harness drives it)
 
-1. Export `TZ=<case.tz>` and `AGENTUSAGE_FAKE_CASE=<absolute case dir>`.
+1. Export `TZ=<case.tz>`, `AGENTUSAGE_NOW=<case.now>`, and
+   `AGENTUSAGE_FAKE_CASE=<absolute case dir>`.
 2. Invoke the CLI with `case.argv` plus `--command <path to tests/fake_tui.py>`.
 3. The fake enters the alt screen, then either paints immediately
    (`paint_on_boot`) or waits for the scraper's ctrl-U + `/slash` + CR before
