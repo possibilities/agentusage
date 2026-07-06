@@ -36,7 +36,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
 SRC_DIR = REPO_ROOT / "src"
 CORPUS_DIR = TESTS_DIR / "fixtures" / "corpus"
-FAKE_TUI = TESTS_DIR / "fake_tui.py"
+FAKE_TUI = TESTS_DIR / "fake-tui.ts"
 
 # The scrape CLIs under comparison. Python is authoritative; the Bun port speaks
 # the identical stdout contract. The bridge is the parse-only surface the

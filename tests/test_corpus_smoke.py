@@ -7,7 +7,7 @@ argv, and drives the real pexpect + pyte + parser stack to the expected ok arm
 for a subscribed claude case and a codex case (whose `extra_args` exercise the
 unknown-flag tolerance through the TUI path).
 
-Kept offline and deterministic: the only child spawned is `tests/fake_tui.py`,
+Kept offline and deterministic: the only child spawned is `tests/fake-tui.ts`,
 selected via the `--command` override and the `AGENTUSAGE_FAKE_CASE` env var.
 """
 
@@ -23,7 +23,7 @@ import pytest
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parent
-_FAKE_TUI = _TESTS_DIR / "fake_tui.py"
+_FAKE_TUI = _TESTS_DIR / "fake-tui.ts"
 _CORPUS_DIR = _TESTS_DIR / "fixtures" / "corpus"
 
 
@@ -69,7 +69,7 @@ def test_fake_tui_auth_status_reports_configured_logged_in(
     env = os.environ.copy()
     env["AGENTUSAGE_FAKE_CASE"] = str(case_dir)
     proc = subprocess.run(
-        [sys.executable, str(_FAKE_TUI), "auth", "status"],
+        [str(_FAKE_TUI), "auth", "status"],
         capture_output=True,
         text=True,
         env=env,
@@ -86,7 +86,7 @@ def test_fake_tui_auth_status_ignores_unknown_flags(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["AGENTUSAGE_FAKE_CASE"] = str(case_dir)
     proc = subprocess.run(
-        [sys.executable, str(_FAKE_TUI), "auth", "status", "--bogus-unknown-flag"],
+        [str(_FAKE_TUI), "auth", "status", "--bogus-unknown-flag"],
         capture_output=True,
         text=True,
         env=env,
