@@ -7,6 +7,8 @@
     "agentusage-scrape": "./src/scrape-cli.ts"
   },
   "scripts": {
+    "test": "bun test src",
+    "conformance": "bun scripts/conformance.ts",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit"
   },

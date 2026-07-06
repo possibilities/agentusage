@@ -2,8 +2,9 @@
 """Regenerate the conformance corpus both runtimes consume.
 
 The corpus is the versioned cross-runtime contract: one directory per scenario
-carrying the raw ANSI transcript the fake TUI replays, the pinned ``now`` / ``TZ``
-and CLI argv shape, and the expected discriminated-contract JSON + exit code.
+carrying the raw ANSI transcript the fake TUI replays, the frozen pyte-rendered
+``screen.txt`` the parsers consume, the pinned ``now`` / ``TZ`` and CLI argv
+shape, and the expected discriminated-contract JSON + exit code.
 
 Canonical implementation is Python: expected outputs are GENERATED here by
 feeding each transcript through the real pyte render path (mirroring
@@ -410,6 +411,14 @@ def _write_case(scenario: dict) -> None:
     case_dir.mkdir(parents=True, exist_ok=True)
 
     (case_dir / "transcript.ansi").write_bytes(scenario["transcript"])
+
+    # Freeze the pyte-rendered screen the parsers consume, so the corpus stays
+    # self-sufficient once Python is gone: the bun parse-conformance module and
+    # generate.ts re-derive expected.json from this frozen text, subprocess- and
+    # tmux-free. It is exactly the text scrape.scrape hands the parser (newline-
+    # joined rstripped display) plus a trailing newline the readers strip back.
+    _, rendered = _render(scenario["transcript"], scenario["cols"], scenario["rows"])
+    (case_dir / "screen.txt").write_text(rendered + "\n")
 
     payload, exit_code = _expected(scenario)
     (case_dir / "expected.json").write_text(

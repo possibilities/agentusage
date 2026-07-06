@@ -216,9 +216,38 @@ export function classifyParseError(
  * classification intact. The default account is native ~/.claude (no
  * CLAUDE_CONFIG_DIR); named accounts live under ~/.claude-profiles/<profile>.
  */
+/**
+ * Runs `<cmd> auth status` and hands back its stdout. Injectable so the auth
+ * classifier is testable without spawning claude; the default spawns the real
+ * probe with a hard 15s timeout, draining stdout and stderr concurrently to
+ * dodge a backpressure deadlock on a chatty child (Bun docs).
+ */
+export type AuthProbe = (
+  argv: string[],
+  env: Record<string, string>,
+) => Promise<{ stdout: string }>;
+
+const spawnAuthProbe: AuthProbe = async (argv, env) => {
+  const proc = Bun.spawn(argv, {
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    timeout: 15_000,
+    killSignal: "SIGKILL",
+  });
+  const [out] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  await proc.exited;
+  return { stdout: out };
+};
+
 export async function claudeAuthLoggedIn(
   profile: string,
   command: string | null,
+  probe: AuthProbe = spawnAuthProbe,
 ): Promise<boolean | null> {
   const cmd = command ?? defaultClaudeCommand();
   const env: Record<string, string> = {};
@@ -238,22 +267,7 @@ export async function claudeAuthLoggedIn(
 
   let stdout: string;
   try {
-    const proc = Bun.spawn([cmd, "auth", "status"], {
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
-      stdin: "ignore",
-      timeout: 15_000,
-      killSignal: "SIGKILL",
-    });
-    // Drain stdout and stderr concurrently — serial reads risk a backpressure
-    // deadlock on a chatty child (Bun docs).
-    const [out] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    stdout = out;
+    ({ stdout } = await probe([cmd, "auth", "status"], env));
   } catch {
     return null;
   }
@@ -303,6 +317,18 @@ async function emit(payload: Record<string, unknown>): Promise<void> {
 
 // ---------- core flow -------------------------------------------------------
 
+/**
+ * Injectable collaborators for {@link run}. Defaults are the real scrape driver,
+ * the claude auth classifier, and the stdout {@link emit}. A test overrides them
+ * to drive every arm in-process — capturing the emitted payload object rather
+ * than reading a stdout pipe, which stays empty inside bun test (Bun#24690).
+ */
+export interface RunDeps {
+  scrape: typeof scrape;
+  claudeAuthLoggedIn: typeof claudeAuthLoggedIn;
+  emit: typeof emit;
+}
+
 /** Scrape one account, emit one JSON object, resolve to the process exit code. */
 export async function run(
   target: Target,
@@ -310,6 +336,7 @@ export async function run(
   command: string | null,
   rows: number | null,
   cols: number | null,
+  deps: RunDeps = { scrape, claudeAuthLoggedIn, emit },
 ): Promise<number> {
   const parser = PARSERS[target];
   const passthrough = passthroughFor(target, profile);
@@ -322,14 +349,14 @@ export async function run(
   let rendered: string;
   try {
     now = buildNow(target, nowArg);
-    rendered = await scrape(target, passthrough, { command, rows, cols });
+    rendered = await deps.scrape(target, passthrough, { command, rows, cols });
   } catch (err) {
     if (err instanceof SignedOut) {
-      await emit(okSignedOut());
+      await deps.emit(okSignedOut());
       return 0;
     }
     reportError(err);
-    await emit(
+    await deps.emit(
       errorArm(errName(err), errMessage(err), [], ERROR_KIND_SCRAPE_FAILED),
     );
     return 1;
@@ -344,17 +371,17 @@ export async function run(
     if (err instanceof NoActiveSubscription) {
       if (
         target === "claude" &&
-        (await claudeAuthLoggedIn(profile, command)) === false
+        (await deps.claudeAuthLoggedIn(profile, command)) === false
       ) {
-        await emit(okSignedOut());
+        await deps.emit(okSignedOut());
       } else {
-        await emit(okNoSubscription());
+        await deps.emit(okNoSubscription());
       }
       return 0;
     }
     reportError(err);
     const errorKind = classifyParseError(target, err, rendered);
-    await emit(
+    await deps.emit(
       errorArm(
         errName(err),
         errMessage(err),
@@ -368,7 +395,7 @@ export async function run(
   // Codex has no subscription concept (null); a subscribed claude scrape is
   // always subscription_active=true (the no-sub case raised above).
   const subscriptionActive: boolean | null = target === "claude" ? true : null;
-  await emit(okSubscribed(usage, subscriptionActive));
+  await deps.emit(okSubscribed(usage, subscriptionActive));
   return 0;
 }
 
@@ -436,13 +463,16 @@ function parseArgv(argv: string[]): ParsedArgs | { error: string } {
   return { target, profile, command, rows, cols };
 }
 
-export async function main(argv: string[]): Promise<number> {
+export async function main(
+  argv: string[],
+  runFn: typeof run = run,
+): Promise<number> {
   const parsed = parseArgv(argv);
   if ("error" in parsed) {
     process.stderr.write(`${parsed.error}\n`);
     return 2;
   }
-  return run(
+  return runFn(
     parsed.target,
     parsed.profile,
     parsed.command,
