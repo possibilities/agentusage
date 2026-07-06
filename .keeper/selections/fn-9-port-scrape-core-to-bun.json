@@ -1,0 +1,72 @@
+{
+  "cells": [
+    {
+      "confidence": 0.8,
+      "label_source": "heuristic-guided",
+      "model": "opus",
+      "rationale": "Stands up a new dual-runtime surface and a DST/fold-sensitive Temporal wrapper whose wall-clock math must match Python exactly, so a wrong abstraction propagates into every parser.",
+      "task_id": "fn-9-port-scrape-core-to-bun.1",
+      "tier": "xhigh"
+    },
+    {
+      "confidence": 0.82,
+      "label_source": "heuristic-guided",
+      "model": "opus",
+      "rationale": "A 1:1 parser port with subtle branching precedence, regex-translation drift, and exact error_type/JSON-number parity against the wire contract makes this contract-touching, high-blast-radius work.",
+      "task_id": "fn-9-port-scrape-core-to-bun.2",
+      "tier": "xhigh"
+    },
+    {
+      "confidence": 0.62,
+      "label_source": "heuristic-guided",
+      "model": "opus",
+      "rationale": "Corpus and fake-TUI construction follows existing fixtures with Python-generated expected outputs, but the load-bearing paint gate and wrap-split/spinner structural cases need careful cross-module reasoning best kept on opus.",
+      "task_id": "fn-9-port-scrape-core-to-bun.3",
+      "tier": "high"
+    },
+    {
+      "confidence": 0.78,
+      "label_source": "heuristic-guided",
+      "model": "opus",
+      "rationale": "The early-proof spike carries real uncertainty and its go/no-go verdict names the driver stack, so a wrong call propagates across the epic.",
+      "task_id": "fn-9-port-scrape-core-to-bun.4",
+      "tier": "xhigh"
+    },
+    {
+      "confidence": 0.84,
+      "label_source": "heuristic-guided",
+      "model": "opus",
+      "rationale": "The full 1:1 tmux driver port with the subtlest quiet-window-to-snapshot mapping, shared-server invariants, and reaping is the epic's highest-blast-radius implementation.",
+      "task_id": "fn-9-port-scrape-core-to-bun.5",
+      "tier": "xhigh"
+    },
+    {
+      "confidence": 0.79,
+      "label_source": "heuristic-guided",
+      "model": "opus",
+      "rationale": "Porting the CLI arm/exit mapping where key-presence and the subscription tri-state are exactly what keeper validates is contract-touching work where a silent mistake folds to runner_failure.",
+      "task_id": "fn-9-port-scrape-core-to-bun.6",
+      "tier": "xhigh"
+    },
+    {
+      "confidence": 0.77,
+      "label_source": "heuristic-guided",
+      "model": "opus",
+      "rationale": "The cross-runtime conformance harness is the epic's proof surface, requiring deep-equality parity, skip-discipline correctness, and DST-boundary reasoning across paired subprocesses.",
+      "task_id": "fn-9-port-scrape-core-to-bun.7",
+      "tier": "xhigh"
+    }
+  ],
+  "config_hash": "0f78fc31c0896a8db68ce0899843a2e4c6102f5d25e5fb9c630d74194ce144c8",
+  "created_at": "2026-07-06T06:16:13.640000Z",
+  "epic_id": "fn-9-port-scrape-core-to-bun",
+  "input_hash": "7624e5f4e98f0cdafcf15108ebe7422606ac48619071cf815b6f1dc8e4b95db5",
+  "outcome": "completed",
+  "schema_version": 1,
+  "selector": {
+    "harness": "subagent",
+    "model": "plan:model-selector"
+  },
+  "shuffle_seed": 1982129652,
+  "verdict_raw": null
+}
