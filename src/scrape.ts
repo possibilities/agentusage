@@ -259,9 +259,11 @@ export function resolveCodexCommand(opts?: {
   home?: string;
   env?: Record<string, string | undefined>;
   whichCodex?: string | null;
+  isExecutable?: (path: string) => boolean;
 }): string {
   const home = opts?.home ?? homedir();
   const env = opts?.env ?? process.env;
+  const executable = opts?.isExecutable ?? isExecutable;
 
   const explicit = (env.AGENTUSAGE_CODEX_COMMAND ?? "").trim();
   if (explicit) {
@@ -305,7 +307,7 @@ export function resolveCodexCommand(opts?: {
       continue;
     }
     seen.add(candidate);
-    if (isExecutable(candidate)) {
+    if (executable(candidate)) {
       return candidate;
     }
   }
@@ -618,6 +620,27 @@ async function pumpFor(session: string, maxSeconds: number): Promise<void> {
 }
 
 /**
+ * tmux surfaces {@link detectSignedOut} reads the screen through. Injectable so
+ * the quorum logic stays unit-testable without a live tmux server; the default
+ * drives the real pane. `alternateOn` reports the alt-screen gate; `capturePane`
+ * returns a `-J` joined capture and its exit code.
+ */
+export interface SignInProbe {
+  alternateOn: (session: string) => Promise<boolean>;
+  capturePane: (
+    session: string,
+  ) => Promise<{ stdout: string; exitCode: number }>;
+}
+
+const tmuxSignInProbe: SignInProbe = {
+  alternateOn,
+  capturePane: (session) =>
+    runTmux(["capture-pane", "-p", "-J", "-t", session]).then(
+      ({ stdout, exitCode }) => ({ stdout, exitCode }),
+    ),
+};
+
+/**
  * True when the alt-screen shows the OAuth sign-in fingerprint: a `minHits`-of-N
  * sentinel quorum over the rendered display so one stray needle can't
  * false-positive and a wrap-split needle still counts. Gated on the alt-screen
@@ -625,21 +648,16 @@ async function pumpFor(session: string, maxSeconds: number): Promise<void> {
  * `-J` already rejoins wrapped rows, so the newline-joined corpus usually
  * suffices; the dewrapped corpus is a belt-and-suspenders for any residual wrap.
  */
-async function detectSignedOut(
+export async function detectSignedOut(
   session: string,
   sentinels: readonly string[],
   minHits = 2,
+  probe: SignInProbe = tmuxSignInProbe,
 ): Promise<boolean> {
-  if (!(await alternateOn(session))) {
+  if (!(await probe.alternateOn(session))) {
     return false;
   }
-  const { stdout, exitCode } = await runTmux([
-    "capture-pane",
-    "-p",
-    "-J",
-    "-t",
-    session,
-  ]);
+  const { stdout, exitCode } = await probe.capturePane(session);
   if (exitCode !== 0) {
     return false;
   }
