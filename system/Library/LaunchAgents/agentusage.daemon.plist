@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- agentusage-installer-owned: agentusage.daemon.v1
+     Template rendered by scripts/install.sh; double-underscore tokens are
+     replaced with XML-escaped absolute values at install time. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>agentusage.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__AGENTUSAGE_PROGRAM__</string>
+		<string>run</string>
+	</array>
+	<!-- No credential belongs here: launchctl print discloses a service's
+	     environment. The provider binaries are pinned absolutely because
+	     launchd does not source shell rc files, so PATH alone cannot be
+	     trusted to reach uv- and nvm-managed tools. -->
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>__AGENTUSAGE_HOME__</string>
+		<key>PATH</key>
+		<string>__AGENTUSAGE_PATH__</string>
+		<key>AGENTUSAGE_CSWAP_BIN</key>
+		<string>__AGENTUSAGE_CSWAP_BIN__</string>
+		<key>AGENTUSAGE_CODEX_SWAP_BIN</key>
+		<string>__AGENTUSAGE_CODEX_SWAP_BIN__</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<!-- Standard, not Background: balance callers block on observation
+	     freshness, and Background QoS is starved first under contention. -->
+	<key>ProcessType</key>
+	<string>Standard</string>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>StandardOutPath</key>
+	<string>__AGENTUSAGE_LOG__</string>
+	<key>StandardErrorPath</key>
+	<string>__AGENTUSAGE_LOG__</string>
+</dict>
+</plist>
