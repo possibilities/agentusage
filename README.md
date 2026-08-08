@@ -73,6 +73,8 @@ surface renders absent/empty/stale states honestly until accounts exist.
 ```
 agentusage                       live TUI (q quit · r refresh · j/k scroll · g/G ends)
 agentusage usage --snapshot      one frame + agentusage-meta line (auto when piped)
+agentusage usage --watch         force the TUI even when piped or non-TTY
+agentusage usage --timeout 5s    wait up to <dur> for a first sidecar before rendering
 agentusage usage --json          both observations, machine-readable
 agentusage status [--json]       health, focus states, would-choose previews
 agentusage balance claude [...]  pick a Claude account (records a reservation)
@@ -95,9 +97,11 @@ required for Fable intent), Fable conservation (Fable launches chase the
 lowest Fable utilization; non-Fable launches prefer Fable-less accounts, then
 the most-burned Fable), +5 pp pressure per live reservation (90 s TTL),
 least-recently-selected then lexicographic tie-breaks, focus overlay.
-`--dry-run` previews without reserving. Refuses (`observation-stale`) rather
-than guessing when the sidecar is older than 5 minutes — one bounded refresh
-is attempted first.
+`--dry-run` previews without reserving; `--account <route|cN>` pins the pick
+(reason `requested-account`) but still runs the eligibility gate, refusing
+`requested-unknown` / `requested-ineligible` rather than launching into an
+exhausted account. Refuses (`observation-stale`) rather than guessing when the
+sidecar is older than 5 minutes — one bounded refresh is attempted first.
 
 **Codex** — `agentusage balance codex --json [--strategy best|next-available]
 [--claim]` delegates to `codex-swap select`; with `--claim` the result carries
@@ -125,6 +129,12 @@ agentusage focus fable set c1 current-reset        # …until that reset time (a
 agentusage focus non-fable set c0 absolute 2026-08-12T00:00:00Z
 agentusage focus fable clear
 ```
+
+`set` warns when the target is not currently launch-eligible; `--require-eligible`
+turns that warning into a refusal. The two observed lifetimes read the reset out
+of the live Fable window, so they need a fresh healthy observation;
+`--expect-reset <UTC>` asserts which reset you meant and fails `reset-mismatch`
+if the window has already rolled underneath you.
 
 An active Fable focus also **fences its target out of the non-Fable pool**, so
 generic launches stop draining the account you are conserving for Fable.
