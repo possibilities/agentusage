@@ -108,6 +108,13 @@ sidecar is older than 5 minutes — one bounded refresh is attempted first.
 a lease to consume via `codex-swap run --claim <lease-id> -- …`, otherwise
 launch with `codex-swap run --account <accountKey> -- …`.
 
+**Pi** — pi launches ride the codex pool: the same
+`agentusage balance codex --json [--claim]` picks the account, then launch
+with `codex-swap pi run --claim <lease-id> -- <pi args…>` (or
+`codex-swap pi run --account <accountKey> -- …`). Accounts must be linked
+once with `codex-swap pi link`; unlinked accounts refuse pi launches
+(codex-swap ADR 0005).
+
 **Spark** — `agentusage balance codex --model gpt-5.3-codex-spark --json`
 selects locally on **spark-lane headroom** (min of the lane's 5 h and weekly
 remaining), ignoring main-quota exhaustion entirely — spark is an independent
