@@ -1,8 +1,14 @@
 #!/usr/bin/env bun
-import { MAX_OUTPUT_BYTES, OBSERVATION_FRESHNESS_CEILING_MS, RECOVERY_TIMEOUT_MS } from "./constants.ts";
+import {
+  CODEX_OBSERVATION_FRESHNESS_CEILING_MS,
+  MAX_OUTPUT_BYTES,
+  OBSERVATION_FRESHNESS_CEILING_MS,
+  RECOVERY_TIMEOUT_MS,
+} from "./constants.ts";
 import { type Observation } from "./claude/types.ts";
+import { laneHeadroomPercent, mainLane, type CodexObservation } from "./codex/types.ts";
 import { selectClaudeRoute, resolveRouteRef } from "./balance/claude.ts";
-import { selectCodexAccount, selectCodexSpark } from "./balance/codex.ts";
+import { codexAuthEligible, selectCodexAccount, selectCodexSpark } from "./balance/codex.ts";
 import {
   readClaudeObservation,
   readCodexObservation,
@@ -13,17 +19,25 @@ import { cswapArgv, statePaths, type StatePaths } from "./paths.ts";
 import { runBounded } from "./proc.ts";
 import { linesToText, renderFrameLines } from "./render.ts";
 import {
+  effectiveClaudeFullFocus,
+  effectiveCodexFullFocus,
   effectiveFableFocus,
   effectiveNonFableFocus,
   materializeFocusPolicy,
+  materializeFullFocusPolicy,
   normalizeRouteId,
   readFocusLeaf,
+  readFullFocusLeaf,
+  resolveObservedCodexWeeklyReset,
   resolveObservedFableReset,
+  resolveObservedWeekReset,
   writeFocusLeaf,
   type AccountFocusLifetime,
+  type CurrentResetFocusResult,
   type FableFocusLifetime,
   type FableFocusPolicy,
   type FocusDelivery,
+  type FullFocusLifetime,
 } from "./focus.ts";
 import { buildViewModel } from "./view.ts";
 import { daemonRun, daemonStatus } from "./daemon.ts";
@@ -38,6 +52,8 @@ Usage:
   agentusage balance codex [--model <m>] [--strategy best|next-available] [--claim] [--json]
   agentusage focus fable   show|set|clear [<route|cN> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
   agentusage focus non-fable show|set|clear [<route|cN> permanent|absolute [deadline]] [--require-eligible] [--json]
+  agentusage focus claude  show|set|clear [<route|cN> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
+  agentusage focus codex   show|set|clear [<accountKey> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
   agentusage recover <route|cN> [--json]
   agentusage refresh [claude|codex|all] [--json]
   agentusage daemon run|status
@@ -46,6 +62,9 @@ Usage:
 The usage viewer is sidecar-backed and daemon-independent. Balance chooses an
 account for a launcher and prints it — launching stays with the launcher
 (cswap run <slot> --share-history / codex-swap run --account <key>).
+A provider focus (focus claude|codex) pins every launch for that provider to
+one account and overrides the fable/non-fable focuses; its observed lifetimes
+follow the weekly window.
 `;
 
 interface Flags {
@@ -110,12 +129,33 @@ async function ensureFreshClaude(paths: StatePaths, env: NodeJS.ProcessEnv): Pro
   return refreshed.value ?? current;
 }
 
-function readFocusStates(paths: StatePaths, observation: Observation | null, nowMs: number) {
+async function ensureFreshCodex(paths: StatePaths, env: NodeJS.ProcessEnv): Promise<CodexObservation | null> {
+  const current = readCodexObservation(paths);
+  const nowMs = Date.now();
+  if (
+    current !== null &&
+    current.health === "ok" &&
+    nowMs - current.observed_at_ms <= CODEX_OBSERVATION_FRESHNESS_CEILING_MS
+  ) {
+    return current;
+  }
+  const refreshed = await refreshCodexObservation(paths, { env });
+  return refreshed.value ?? current;
+}
+
+function readFocusStates(
+  paths: StatePaths,
+  observation: Observation | null,
+  codexObservation: CodexObservation | null,
+  nowMs: number,
+) {
   const fableDelivery = readFocusLeaf(paths.fableFocusLeaf, true) as FocusDelivery<FableFocusPolicy>;
   const nonFableDelivery = readFocusLeaf(paths.nonFableFocusLeaf, false);
   return {
     fable: effectiveFableFocus(fableDelivery, observation, nowMs),
     nonFable: effectiveNonFableFocus(nonFableDelivery, nowMs),
+    claudeFull: effectiveClaudeFullFocus(readFullFocusLeaf(paths.claudeFullFocusLeaf, "claude"), observation, nowMs),
+    codexFull: effectiveCodexFullFocus(readFullFocusLeaf(paths.codexFullFocusLeaf, "codex"), codexObservation, nowMs),
   };
 }
 
@@ -170,8 +210,16 @@ async function usageCommand(args: string[]): Promise<number> {
   const nowMs = Date.now();
   const claude = readClaudeObservation(paths);
   const codex = readCodexObservation(paths);
-  const focus = readFocusStates(paths, claude, nowMs);
-  const vm = buildViewModel({ claude, codex, fable: focus.fable, nonFable: focus.nonFable, nowMs });
+  const focus = readFocusStates(paths, claude, codex, nowMs);
+  const vm = buildViewModel({
+    claude,
+    codex,
+    fable: focus.fable,
+    nonFable: focus.nonFable,
+    claudeFull: focus.claudeFull,
+    codexFull: focus.codexFull,
+    nowMs,
+  });
   const width = process.stdout.columns ?? 100;
   process.stdout.write(linesToText(renderFrameLines(vm, Math.min(width, 120)), colorEnabled()));
   const meta = {
@@ -193,13 +241,15 @@ async function statusCommand(args: string[]): Promise<number> {
   const nowMs = Date.now();
   const claude = readClaudeObservation(paths);
   const codex = readCodexObservation(paths);
-  const focus = readFocusStates(paths, claude, nowMs);
+  const focus = readFocusStates(paths, claude, codex, nowMs);
+  const codexFocusTarget =
+    focus.codexFull.state === "active" && focus.codexFull.policy !== null ? focus.codexFull.policy.target : null;
 
   const claudePreview =
     claude === null ? null : selectClaudeRoute({ observation: claude, paths, nowMs, dryRun: true });
   const claudeFablePreview =
     claude === null ? null : selectClaudeRoute({ observation: claude, paths, nowMs, dryRun: true, fableIntent: true });
-  const sparkPreview = codex === null ? null : selectCodexSpark(codex, nowMs);
+  const sparkPreview = codex === null ? null : selectCodexSpark(codex, nowMs, codexFocusTarget);
 
   if (flags.booleans.has("json")) {
     emitJson({
@@ -218,6 +268,8 @@ async function statusCommand(args: string[]): Promise<number> {
               accounts: codex.accounts.length,
               recommendation: codex.recommendation,
             },
+      claude_focus: focus.claudeFull,
+      codex_focus: focus.codexFull,
       fable_focus: focus.fable,
       non_fable_focus: focus.nonFable,
       previews: { claude: claudePreview, claude_fable: claudeFablePreview, codex_spark: sparkPreview },
@@ -230,6 +282,14 @@ async function statusCommand(args: string[]): Promise<number> {
   };
   describe("claude", claude === null ? "no observation" : `${claude.health} · ${Math.round((nowMs - claude.observed_at_ms) / 1000)}s old · ${claude.routes.length} routes`);
   describe("codex", codex === null ? "no observation" : `${codex.health} · ${Math.round((nowMs - codex.observed_at_ms) / 1000)}s old · ${codex.accounts.length} accounts`);
+  describe(
+    "claude focus",
+    focus.claudeFull.state === "off" ? "off" : `${focus.claudeFull.state} → ${focus.claudeFull.policy?.target ?? "?"}`,
+  );
+  describe(
+    "codex focus",
+    focus.codexFull.state === "off" ? "off" : `${focus.codexFull.state} → ${focus.codexFull.policy?.target ?? "?"}`,
+  );
   describe(
     "fable focus",
     focus.fable.state === "off" ? "off" : `${focus.fable.state} → ${focus.fable.policy?.target_route ?? "?"}`,
@@ -303,22 +363,27 @@ async function balanceCommand(args: string[]): Promise<number> {
   if (flags === null) return 2;
   const model = flags.strings.get("model") ?? null;
   const spark = model !== null && /spark/iu.test(model);
+  const fullDelivery = readFullFocusLeaf(paths.codexFullFocusLeaf, "codex");
   if (spark) {
-    let observation = readCodexObservation(paths);
-    const nowMs = Date.now();
-    if (observation === null || observation.health !== "ok" || nowMs - observation.observed_at_ms > OBSERVATION_FRESHNESS_CEILING_MS) {
-      const refreshed = await refreshCodexObservation(paths, { env: process.env });
-      observation = refreshed.value ?? observation;
-    }
+    const observation = await ensureFreshCodex(paths, process.env);
     if (observation === null) {
       const failure = { schema_version: 1, provider: "codex", ok: false, refusal: "observation-unavailable", detail: "no codex observation (is codex-swap installed?)" };
       if (flags.booleans.has("json")) emitJson(failure);
       else console.error(`agentusage: ${failure.detail}`);
       return 1;
     }
-    const selection = selectCodexSpark(observation);
-    if (flags.booleans.has("json")) emitJson({ schema_version: 1, provider: "codex", ...selection });
-    else if (selection.ok) {
+    const nowMs = Date.now();
+    const codexFocus = effectiveCodexFullFocus(fullDelivery, observation, nowMs);
+    const focusTarget = codexFocus.state === "active" && codexFocus.policy !== null ? codexFocus.policy.target : null;
+    const selection = selectCodexSpark(observation, nowMs, focusTarget);
+    if (flags.booleans.has("json")) {
+      emitJson({
+        schema_version: 1,
+        provider: "codex",
+        focus: { state: codexFocus.state, target: codexFocus.policy?.target ?? null },
+        ...selection,
+      });
+    } else if (selection.ok) {
       console.log(`${selection.accountKey} — ${selection.reason} (${selection.score}% spark headroom)`);
       console.log(`launch: codex-swap run --account ${selection.accountKey} -- --model ${model} <codex args>`);
     } else {
@@ -333,14 +398,28 @@ async function balanceCommand(args: string[]): Promise<number> {
     console.error("agentusage balance codex: --strategy must be best|next-available");
     return 2;
   }
+  const nowMs = Date.now();
+  // A pending focus policy needs a fresh observation to gate its target; the
+  // plain delegate path keeps working from whatever the sidecar has.
+  const observation =
+    fullDelivery.policy !== null ? await ensureFreshCodex(paths, process.env) : readCodexObservation(paths);
+  const codexFocus = effectiveCodexFullFocus(fullDelivery, observation, nowMs);
   const selection = await selectCodexAccount({
     strategy: strategyValue as "best" | "next-available" | undefined,
     claim: flags.booleans.has("claim"),
     allowUnknown: flags.booleans.has("allow-unknown"),
-    observation: readCodexObservation(paths),
+    observation,
+    focus: codexFocus,
+    nowMs,
   });
-  if (flags.booleans.has("json")) emitJson({ schema_version: 1, provider: "codex", ...selection });
-  else if (selection.ok) {
+  if (flags.booleans.has("json")) {
+    emitJson({
+      schema_version: 1,
+      provider: "codex",
+      focus: { state: codexFocus.state, target: codexFocus.policy?.target ?? null },
+      ...selection,
+    });
+  } else if (selection.ok) {
     const lease = selection.lease === null ? "" : ` (lease ${selection.lease.leaseId}, expires ${selection.lease.expiresAt ?? "?"})`;
     console.log(`${selection.accountKey} — ${selection.reason}${lease}`);
     console.log(
@@ -360,8 +439,8 @@ async function balanceCommand(args: string[]): Promise<number> {
 
 async function focusCommand(args: string[]): Promise<number> {
   const kind = args[0];
-  if (kind !== "fable" && kind !== "non-fable") {
-    console.error("agentusage focus: expected fable|non-fable");
+  if (kind !== "fable" && kind !== "non-fable" && kind !== "claude" && kind !== "codex") {
+    console.error("agentusage focus: expected fable|non-fable|claude|codex");
     return 2;
   }
   const action = args[1];
@@ -372,8 +451,9 @@ async function focusCommand(args: string[]): Promise<number> {
   const flags = parseFlags(args.slice(2), ["json", "require-eligible"], ["expect-reset"]);
   if (flags === null) return 2;
   const paths = statePaths(process.env);
-  const leafPath = kind === "fable" ? paths.fableFocusLeaf : paths.nonFableFocusLeaf;
   const nowMs = Date.now();
+  if (kind === "claude" || kind === "codex") return fullFocusAction(kind, action, flags, paths, nowMs);
+  const leafPath = kind === "fable" ? paths.fableFocusLeaf : paths.nonFableFocusLeaf;
 
   if (action === "show") {
     const observation = readClaudeObservation(paths);
@@ -470,6 +550,134 @@ async function focusCommand(args: string[]): Promise<number> {
   }
   if (flags.booleans.has("json")) emitJson({ schema_version: 1, kind, target_route: targetRoute, lifetime });
   else console.log(`${kind} focus → ${targetRoute} (${lifetime.kind})`);
+  return 0;
+}
+
+function parseAbsoluteDeadline(
+  deadline: string | undefined,
+  nowMs: number,
+): { ok: true; iso: string } | { ok: false; code: number; message: string } {
+  if (deadline === undefined) return { ok: false, code: 2, message: "absolute lifetime requires a UTC deadline" };
+  const deadlineMs = Date.parse(deadline);
+  if (!Number.isFinite(deadlineMs) || !/(?:[zZ]|[+-]\d{2}:?\d{2})$/u.test(deadline)) {
+    return { ok: false, code: 2, message: `bad UTC deadline ${deadline}` };
+  }
+  if (deadlineMs <= nowMs) return { ok: false, code: 1, message: "deadline is already elapsed" };
+  return { ok: true, iso: new Date(deadlineMs).toISOString() };
+}
+
+async function fullFocusAction(
+  provider: "claude" | "codex",
+  action: "show" | "set" | "clear",
+  flags: Flags,
+  paths: StatePaths,
+  nowMs: number,
+): Promise<number> {
+  const leafPath = provider === "claude" ? paths.claudeFullFocusLeaf : paths.codexFullFocusLeaf;
+
+  if (action === "show") {
+    const delivery = readFullFocusLeaf(leafPath, provider);
+    const status =
+      provider === "claude"
+        ? effectiveClaudeFullFocus(delivery, readClaudeObservation(paths), nowMs)
+        : effectiveCodexFullFocus(delivery, readCodexObservation(paths), nowMs);
+    if (flags.booleans.has("json")) emitJson({ schema_version: 1, kind: provider, ...status });
+    else if (status.state === "off") console.log(`${provider} focus: off`);
+    else {
+      console.log(
+        `${provider} focus: ${status.state}${status.policy === null ? "" : ` → ${status.policy.target} (${status.policy.lifetime.kind})`}${
+          status.diagnostic === "none" ? "" : ` [${status.diagnostic}]`
+        }`,
+      );
+    }
+    return 0;
+  }
+
+  if (action === "clear") {
+    writeFocusLeaf(leafPath, null);
+    if (flags.booleans.has("json")) emitJson({ schema_version: 1, kind: provider, cleared: true });
+    else console.log(`${provider} focus cleared`);
+    return 0;
+  }
+
+  const targetRef = flags.positionals[0];
+  const lifetimeToken = flags.positionals[1];
+  if (targetRef === undefined || lifetimeToken === undefined) {
+    console.error(`agentusage focus ${provider} set: expected <${provider === "claude" ? "route|cN" : "accountKey"}> <lifetime>`);
+    return 2;
+  }
+
+  let target: string;
+  let eligible: boolean | null;
+  let resolveReset: (expect: string | null) => CurrentResetFocusResult;
+
+  if (provider === "claude") {
+    const observation = await ensureFreshClaude(paths, process.env);
+    let resolved = observation === null ? null : resolveRouteRef(observation, targetRef);
+    if (resolved === null) resolved = normalizeRouteId(targetRef);
+    if (resolved === null) {
+      console.error(`agentusage focus: cannot resolve target ${targetRef} (no fresh observation and not a route id)`);
+      return 1;
+    }
+    const targetRoute = resolved;
+    target = targetRoute;
+    eligible = observation === null ? null : observation.routes.some((route) => route.id === targetRoute);
+    resolveReset = (expect) => resolveObservedWeekReset(observation, targetRoute, nowMs, expect);
+  } else {
+    const observation = await ensureFreshCodex(paths, process.env);
+    if (observation === null || observation.health !== "ok") {
+      console.error("agentusage focus codex set: needs a fresh codex observation to resolve the account");
+      return 1;
+    }
+    const account = observation.accounts.find((candidate) => candidate.accountKey === targetRef);
+    if (account === undefined) {
+      console.error(`agentusage focus codex set: unknown codex account ${targetRef}`);
+      return 1;
+    }
+    target = account.accountKey;
+    const lane = mainLane(account);
+    const headroom = lane === null ? null : laneHeadroomPercent(lane);
+    eligible = codexAuthEligible(account) && headroom !== null && headroom > 0;
+    resolveReset = (expect) => resolveObservedCodexWeeklyReset(observation, account.accountKey, nowMs, expect);
+  }
+
+  let lifetime: FullFocusLifetime;
+  if (lifetimeToken === "permanent") {
+    lifetime = { kind: "permanent" };
+  } else if (lifetimeToken === "absolute") {
+    const deadline = parseAbsoluteDeadline(flags.positionals[2], nowMs);
+    if (!deadline.ok) {
+      console.error(`agentusage focus set: ${deadline.message}`);
+      return deadline.code;
+    }
+    lifetime = { kind: "absolute", deadline_at: deadline.iso };
+  } else if (lifetimeToken === "current-reset" || lifetimeToken === "cycle-end") {
+    const resolved = resolveReset(flags.strings.get("expect-reset") ?? null);
+    if (!resolved.ok) {
+      console.error(`agentusage focus set: ${resolved.error}`);
+      return 1;
+    }
+    lifetime =
+      lifetimeToken === "current-reset"
+        ? { kind: "absolute", deadline_at: resolved.resetAt }
+        : { kind: "cycle-end", reset_at: resolved.resetAt };
+  } else {
+    console.error(`agentusage focus ${provider} set: unsupported lifetime ${lifetimeToken}`);
+    return 2;
+  }
+
+  if (eligible === false) {
+    const message = `target ${target} is not currently launch-eligible`;
+    if (flags.booleans.has("require-eligible")) {
+      console.error(`agentusage focus set: ${message}`);
+      return 1;
+    }
+    console.error(`agentusage focus set: warning: ${message}`);
+  }
+
+  writeFocusLeaf(leafPath, materializeFullFocusPolicy(provider, target, lifetime, nowMs));
+  if (flags.booleans.has("json")) emitJson({ schema_version: 1, kind: provider, target, lifetime });
+  else console.log(`${provider} focus → ${target} (${lifetime.kind})`);
   return 0;
 }
 

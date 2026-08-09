@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OBSERVATION_SCHEMA_VERSION, type NormalizedWindow, type Observation, type Route } from "../src/claude/types.ts";
 import { statePaths } from "../src/paths.ts";
-import { materializeFocusPolicy, writeFocusLeaf } from "../src/focus.ts";
+import { materializeFocusPolicy, materializeFullFocusPolicy, writeFocusLeaf } from "../src/focus.ts";
 import { selectClaudeRoute } from "../src/balance/claude.ts";
 
 const NOW = Date.parse("2026-08-08T20:00:00Z");
@@ -166,6 +166,59 @@ describe("selectClaudeRoute", () => {
     });
     expect(result.ok && result.route.id).toBe("claude-swap:1");
     if (result.ok) expect(result.reason).toBe("non-fable-focus");
+  });
+
+  test("full focus pins both intents and overrides the intent focuses", () => {
+    const paths = freshPaths();
+    writeFocusLeaf(paths.claudeFullFocusLeaf, materializeFullFocusPolicy("claude", "claude-swap:1", { kind: "permanent" }, NOW));
+    writeFocusLeaf(paths.fableFocusLeaf, materializeFocusPolicy("claude-swap:2", { kind: "permanent" }, true, NOW));
+    writeFocusLeaf(paths.nonFableFocusLeaf, materializeFocusPolicy("claude-swap:2", { kind: "permanent" }, false, NOW));
+    const routes = () => [
+      route(1, { session: 0.9, week: 0.9, fable: 0.9 }),
+      route(2, { session: 0.1, week: 0.1, fable: 0.1 }),
+    ];
+
+    const fable = selectClaudeRoute({ observation: observation(routes()), paths, nowMs: NOW, fableIntent: true });
+    expect(fable.ok && fable.route.id).toBe("claude-swap:1");
+    if (fable.ok) {
+      expect(fable.reason).toBe("full-focus");
+      expect(fable.focus.full).toBe("active");
+    }
+
+    const generic = selectClaudeRoute({ observation: observation(routes()), paths, nowMs: NOW });
+    expect(generic.ok && generic.route.id).toBe("claude-swap:1");
+    if (generic.ok) expect(generic.reason).toBe("full-focus");
+  });
+
+  test("full-focus fallback ignores the intent focuses", () => {
+    const paths = freshPaths();
+    writeFocusLeaf(paths.claudeFullFocusLeaf, materializeFullFocusPolicy("claude", "claude-swap:9", { kind: "permanent" }, NOW));
+    writeFocusLeaf(paths.nonFableFocusLeaf, materializeFocusPolicy("claude-swap:1", { kind: "permanent" }, false, NOW));
+    const result = selectClaudeRoute({
+      observation: observation([
+        route(1, { session: 0.9, week: 0.9 }),
+        route(2, { session: 0.1, week: 0.1 }),
+      ]),
+      paths,
+      nowMs: NOW,
+    });
+    // Scoring picks the lighter route; the non-fable focus on route 1 stays
+    // suppressed while the full focus is active.
+    expect(result.ok && result.route.id).toBe("claude-swap:2");
+    if (result.ok) expect(result.reason).toBe("full-focus-fallback");
+  });
+
+  test("requested account beats an active full focus", () => {
+    const paths = freshPaths();
+    writeFocusLeaf(paths.claudeFullFocusLeaf, materializeFullFocusPolicy("claude", "claude-swap:1", { kind: "permanent" }, NOW));
+    const result = selectClaudeRoute({
+      observation: observation([route(1, { session: 0.2, week: 0.2 }), route(2, { session: 0.2, week: 0.2 })]),
+      paths,
+      nowMs: NOW,
+      requestedRoute: "c1",
+    });
+    expect(result.ok && result.route.id).toBe("claude-swap:2");
+    if (result.ok) expect(result.reason).toBe("requested-account");
   });
 
   test("requested routes bypass scoring but not eligibility", () => {

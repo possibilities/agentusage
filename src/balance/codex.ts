@@ -5,8 +5,10 @@ import {
   type CodexAccountView,
   type CodexObservation,
   laneHeadroomPercent,
+  mainLane,
   sparkLane,
 } from "../codex/types.ts";
+import type { FocusStatus, FullFocusEffectiveState, FullFocusPolicy } from "../focus.ts";
 
 /**
  * Codex balance. The main lane delegates to `codex-swap select` — the
@@ -14,6 +16,10 @@ import {
  * cooldowns, decision-grade trust). The spark lane is selected locally from
  * the observation: spark quota is independent of the main lane and keeps
  * working after main exhaustion, so main-lane exclusions must not veto it.
+ *
+ * An active codex focus pins locally from the observation instead of
+ * delegating — codex-swap select has no account pin — so leases (`--claim`)
+ * are unavailable while a focus is active and refuse rather than unpin.
  */
 
 const SELECT_TIMEOUT_MS = 60_000;
@@ -44,7 +50,8 @@ export type CodexRefusal =
   | "provider-error"
   | "observation-unavailable"
   | "observation-stale"
-  | "no-spark-capacity";
+  | "no-spark-capacity"
+  | "focus-claim-unsupported";
 
 export interface CodexSelectionRefusal {
   ok: false;
@@ -64,6 +71,9 @@ export interface SelectCodexOptions {
   env?: Record<string, string | undefined>;
   /** Filled from the observation sidecar when available, for email/label. */
   observation?: CodexObservation | null;
+  /** Effective codex focus; an active one pins locally instead of delegating. */
+  focus?: FocusStatus<FullFocusPolicy, FullFocusEffectiveState> | null;
+  nowMs?: number;
 }
 
 function describeAccount(
@@ -75,6 +85,59 @@ function describeAccount(
 }
 
 export async function selectCodexAccount(options: SelectCodexOptions = {}): Promise<CodexSelection> {
+  const focus = options.focus ?? null;
+  const focusTarget = focus !== null && focus.state === "active" && focus.policy !== null ? focus.policy.target : null;
+  if (focusTarget !== null) {
+    if (options.claim === true) {
+      return {
+        ok: false,
+        lane: "main",
+        refusal: "focus-claim-unsupported",
+        detail: `codex focus pins ${focusTarget} and leases require codex-swap select; launch with codex-swap run --account ${focusTarget}, or clear the focus`,
+      };
+    }
+    const observation = options.observation ?? null;
+    if (observation === null || observation.health !== "ok") {
+      return {
+        ok: false,
+        lane: "main",
+        refusal: "observation-unavailable",
+        detail: "codex focus needs a healthy observation to gate its target",
+      };
+    }
+    const nowMs = options.nowMs ?? Date.now();
+    const ageMs = nowMs - observation.observed_at_ms;
+    if (ageMs > CODEX_OBSERVATION_FRESHNESS_CEILING_MS) {
+      return {
+        ok: false,
+        lane: "main",
+        refusal: "observation-stale",
+        detail: `codex observation is ${Math.round(ageMs / 1000)}s old`,
+      };
+    }
+    const account = observation.accounts.find((candidate) => candidate.accountKey === focusTarget);
+    const lane = account === undefined ? null : mainLane(account);
+    const headroom = lane === null ? null : laneHeadroomPercent(lane);
+    if (account !== undefined && codexAuthEligible(account) && headroom !== null && headroom > 0) {
+      return {
+        ok: true,
+        lane: "main",
+        accountKey: account.accountKey,
+        email: account.email,
+        label: account.label,
+        reason: "full-focus",
+        score: headroom,
+        lease: null,
+      };
+    }
+    const delegated = await delegateCodexSelect(options);
+    if (delegated.ok) return { ...delegated, reason: `full-focus-fallback (${delegated.reason})` };
+    return delegated;
+  }
+  return delegateCodexSelect(options);
+}
+
+async function delegateCodexSelect(options: SelectCodexOptions): Promise<CodexSelection> {
   const argv = [...codexSwapArgv(options.env ?? process.env), "select", "--json"];
   if (options.strategy !== undefined) argv.push("--strategy", options.strategy);
   if (options.claim === true) argv.push("--claim");
@@ -163,7 +226,7 @@ export async function selectCodexAccount(options: SelectCodexOptions = {}): Prom
 // ---------------------------------------------------------------------------
 // Spark lane — local selection over the observation sidecar.
 
-function sparkAuthEligible(account: CodexAccountView): boolean {
+export function codexAuthEligible(account: CodexAccountView): boolean {
   return (
     account.present &&
     account.enabled &&
@@ -173,7 +236,11 @@ function sparkAuthEligible(account: CodexAccountView): boolean {
   );
 }
 
-export function selectCodexSpark(observation: CodexObservation, nowMs: number = Date.now()): CodexSelection {
+export function selectCodexSpark(
+  observation: CodexObservation,
+  nowMs: number = Date.now(),
+  focusTarget: string | null = null,
+): CodexSelection {
   if (observation.health !== "ok") {
     return {
       ok: false,
@@ -194,7 +261,7 @@ export function selectCodexSpark(observation: CodexObservation, nowMs: number = 
 
   const pool: Array<{ account: CodexAccountView; headroomPercent: number }> = [];
   for (const account of observation.accounts) {
-    if (!sparkAuthEligible(account)) continue;
+    if (!codexAuthEligible(account)) continue;
     const lane = sparkLane(account);
     if (lane === null) continue;
     const headroom = laneHeadroomPercent(lane);
@@ -217,14 +284,15 @@ export function selectCodexSpark(observation: CodexObservation, nowMs: number = 
     if (a.account.activeLeases !== b.account.activeLeases) return a.account.activeLeases - b.account.activeLeases;
     return a.account.accountKey < b.account.accountKey ? -1 : 1;
   });
-  const chosen = pool[0]!;
+  const pinned = focusTarget === null ? undefined : pool.find((entry) => entry.account.accountKey === focusTarget);
+  const chosen = pinned ?? pool[0]!;
   return {
     ok: true,
     lane: "codex-spark",
     accountKey: chosen.account.accountKey,
     email: chosen.account.email,
     label: chosen.account.label,
-    reason: "spark-headroom",
+    reason: pinned !== undefined ? "full-focus" : focusTarget !== null ? "full-focus-fallback (spark-headroom)" : "spark-headroom",
     score: chosen.headroomPercent,
     lease: null,
     pool: pool.map((entry) => ({

@@ -79,7 +79,7 @@ agentusage usage --json          both observations, machine-readable
 agentusage status [--json]       health, focus states, would-choose previews
 agentusage balance claude [...]  pick a Claude account (records a reservation)
 agentusage balance codex [...]   pick a Codex account (delegates to codex-swap select)
-agentusage focus fable|non-fable show|set|clear ...
+agentusage focus fable|non-fable|claude|codex show|set|clear ...
 agentusage recover <c0|route>    one explicit cswap token recovery
 agentusage refresh [claude|codex|all]
 agentusage daemon run|status
@@ -100,13 +100,20 @@ least-recently-selected then lexicographic tie-breaks, focus overlay.
 `--dry-run` previews without reserving; `--account <route|cN>` pins the pick
 (reason `requested-account`) but still runs the eligibility gate, refusing
 `requested-unknown` / `requested-ineligible` rather than launching into an
-exhausted account. Refuses (`observation-stale`) rather than guessing when the
-sidecar is older than 5 minutes — one bounded refresh is attempted first.
+exhausted account. An active provider focus (`focus claude`) sits between
+the two: explicit `--account` beats it, and it beats the fable/non-fable
+overlay (reasons `full-focus` / `full-focus-fallback`). Refuses
+(`observation-stale`) rather than guessing when the sidecar is older than 5
+minutes — one bounded refresh is attempted first.
 
 **Codex** — `agentusage balance codex --json [--strategy best|next-available]
 [--claim]` delegates to `codex-swap select`; with `--claim` the result carries
 a lease to consume via `codex-swap run --claim <lease-id> -- …`, otherwise
-launch with `codex-swap run --account <accountKey> -- …`.
+launch with `codex-swap run --account <accountKey> -- …`. An active codex
+focus pins the pick locally from the observation instead of delegating
+(codex-swap select has no account pin), so `--claim` refuses
+(`focus-claim-unsupported`) while a focus is active — use the `--account`
+launch form, which needs no lease.
 
 **Pi** — pi launches ride the codex pool: the same
 `agentusage balance codex --json [--claim]` picks the account, then launch
@@ -127,7 +134,8 @@ account/capacity (matching codex-swap's convention).
 ## Focus
 
 Durable policies pinning launches to one route, stored as hardened 0600
-leaves under `~/.local/state/agentusage/account-routing/`:
+leaves under `~/.local/state/agentusage/account-routing/` (codex provider
+focus: `codex-account-routing/`):
 
 ```bash
 agentusage focus fable set c1 permanent            # all Fable launches → c1
@@ -145,10 +153,32 @@ if the window has already rolled underneath you.
 
 An active Fable focus also **fences its target out of the non-Fable pool**, so
 generic launches stop draining the account you are conserving for Fable.
-Effective states: `off · active · expired · invalid · unavailable` (+ Fable
-`completed`). Expired policies are not auto-cleared (parity with keeper);
-routing simply falls back and `show` names the state. `usage --json` carries
-observations only; machine consumers read focus from `status --json`.
+Effective states: `off · active · expired · invalid · unavailable`
+(+ `completed` for observed lifetimes). Expired policies are not auto-cleared
+(parity with keeper); routing simply falls back and `show` names the state.
+`usage --json` carries observations only; machine consumers read focus from
+`status --json`.
+
+A **provider focus** pins *every* launch for one provider — Fable and
+non-Fable alike, and for codex the main, spark, and pi paths, since they all
+ride `balance codex` — to a single account, overriding both intent focuses
+entirely (fence included, and also during fallback while the target is
+temporarily ineligible: one policy is in charge at a time). Explicit
+`--account` requests still win. Its observed lifetimes follow the **binding
+weekly window** (Claude `week`, Codex main-lane weekly) instead of the Fable
+window, which makes draining an account whose week resets soon a single
+command:
+
+```bash
+agentusage focus claude set c0 cycle-end           # everything → c0 until its week resets or hits 100%
+agentusage focus codex set <accountKey> current-reset
+agentusage focus claude clear
+```
+
+Codex targets are accountKeys resolved against a fresh observation. While a
+codex focus is active, `balance codex --claim` refuses
+(`focus-claim-unsupported`) — the pick is made locally, so launch with the
+lease-less `codex-swap run --account <key>` form.
 
 ## Data
 

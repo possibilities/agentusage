@@ -37,10 +37,14 @@ Non-binding lanes are display + lane-targeted balance only.
 
 **Focus** — a durable policy pinning launches to one route. **Fable focus**
 pins Fable-intent launches; **Non-Fable focus** pins everything else. An
-active Fable focus also fences its target out of the non-Fable pool.
-Lifetimes: `permanent`, `absolute`, Fable-only `current-reset` and
-`cycle-end`. Effective states: `off | active | expired | invalid |
-unavailable` (+ Fable `completed`).
+active Fable focus also fences its target out of the non-Fable pool. A
+**provider focus** (`focus claude` / `focus codex`) pins every launch for
+that provider to one account and overrides both intent focuses, fence
+included. Lifetimes: `permanent`, `absolute`, and observed `current-reset` /
+`cycle-end` (Fable focus reads the Fable window, provider focus the binding
+weekly window; Non-Fable focus has only the first two). Effective states:
+`off | active | expired | invalid | unavailable` (+ `completed` for observed
+lifetimes).
 
 **Balance** — the explicit account-selection verb a launcher calls
 (`agentusage balance <provider> --json`); prints the chosen account, does not

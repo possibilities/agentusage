@@ -109,3 +109,22 @@ accounts (via codex-swap), installed by funk as a launchagent.
 None blocking. Two defaults chosen: codex `balance` claims are opt-in
 (`--claim`), and focus auto-clear is not ported (keeper never shipped it
 either — expired policies persist with effective-state fallback).
+
+## Addendum: provider-wide focus (2026-08-09)
+
+First deliberate extension beyond keeper parity, sketched and approved in
+session. `focus claude` / `focus codex` pin **every** launch for a provider
+to one account, overriding the Fable/Non-Fable focuses — fence included, and
+also during fallback while the target is temporarily ineligible (fallback is
+plain scoring; one policy is in charge at a time). Explicit `--account`
+requests still win. Same hardened leaf machinery, one leaf per provider
+(`account-routing/full-focus-policy.json`,
+`codex-account-routing/full-focus-policy.json`); policy shape carries
+`provider` + `target` (route id / accountKey) and all four lifetimes, with
+the observed ones (`current-reset`, `cycle-end`) reading the **binding
+weekly window** (claude `week`, codex main-lane secondary), not the Fable
+window. New selection reasons `full-focus` / `full-focus-fallback` extend
+keeper's vocabulary. Codex pins select locally from the observation
+(codex-swap `select` has no account pin), so `--claim` refuses
+(`focus-claim-unsupported`) rather than unpinning; lifting that needs
+`select --account` upstream in codex-swap.

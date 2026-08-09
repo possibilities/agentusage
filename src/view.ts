@@ -17,6 +17,8 @@ import type {
   FableFocusEffectiveState,
   FableFocusPolicy,
   FocusStatus,
+  FullFocusEffectiveState,
+  FullFocusPolicy,
   NonFableFocusPolicy,
 } from "./focus.ts";
 
@@ -53,7 +55,7 @@ export interface ProviderSection {
 }
 
 export interface FocusLine {
-  kind: "fable" | "non-fable";
+  kind: "fable" | "non-fable" | "claude" | "codex";
   state: string;
   target: string | null;
   lifetime: string | null;
@@ -185,7 +187,11 @@ function sectionAgeText(health: string, fresh: boolean, ageMs: number): string {
 // ---------------------------------------------------------------------------
 // Codex
 
-function buildCodexSection(observation: CodexObservation, nowMs: number): ProviderSection {
+function buildCodexSection(
+  observation: CodexObservation,
+  nowMs: number,
+  focusBadges: Map<string, string[]>,
+): ProviderSection {
   const ageMs = nowMs - observation.observed_at_ms;
   const fresh = observation.health === "ok" && ageMs <= CODEX_OBSERVATION_FRESHNESS_CEILING_MS;
   const cards: AccountCard[] = [];
@@ -233,7 +239,7 @@ function buildCodexSection(observation: CodexObservation, nowMs: number): Provid
       stale: displayStale,
       measuredAgo: account.measuredAtMs === null ? null : formatDurationMs(nowMs - account.measuredAtMs),
       meters,
-      focus: [],
+      focus: focusBadges.get(account.accountKey) ?? [],
     });
   });
 
@@ -250,7 +256,7 @@ function buildCodexSection(observation: CodexObservation, nowMs: number): Provid
 // ---------------------------------------------------------------------------
 // Focus chapter
 
-function lifetimeText(policy: FableFocusPolicy | NonFableFocusPolicy, nowMs: number): string {
+function lifetimeText(policy: FableFocusPolicy | NonFableFocusPolicy | FullFocusPolicy, nowMs: number): string {
   const lifetime = policy.lifetime;
   if (lifetime.kind === "permanent") return "permanent";
   if (lifetime.kind === "absolute") return `until ${lifetimeCountdown(lifetime.deadline_at, nowMs)}`;
@@ -268,24 +274,45 @@ export interface BuildViewModelInput {
   codex: CodexObservation | null;
   fable: FocusStatus<FableFocusPolicy, FableFocusEffectiveState>;
   nonFable: FocusStatus<NonFableFocusPolicy, AccountFocusEffectiveState>;
+  claudeFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
+  codexFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
   nowMs: number;
 }
 
 export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
-  const focusBadges = new Map<string, string[]>();
-  const badge = (route: string, text: string): void => {
-    const existing = focusBadges.get(route) ?? [];
+  const claudeBadges = new Map<string, string[]>();
+  const codexBadges = new Map<string, string[]>();
+  const badge = (map: Map<string, string[]>, key: string, text: string): void => {
+    const existing = map.get(key) ?? [];
     existing.push(text);
-    focusBadges.set(route, existing);
+    map.set(key, existing);
   };
+  if (input.claudeFull.state === "active" && input.claudeFull.policy !== null) {
+    badge(claudeBadges, input.claudeFull.policy.target, "all⤳");
+  }
+  if (input.codexFull.state === "active" && input.codexFull.policy !== null) {
+    badge(codexBadges, input.codexFull.policy.target, "all⤳");
+  }
   if (input.fable.state === "active" && input.fable.policy !== null) {
-    badge(input.fable.policy.target_route, "fable⤳");
+    badge(claudeBadges, input.fable.policy.target_route, "fable⤳");
   }
   if (input.nonFable.state === "active" && input.nonFable.policy !== null) {
-    badge(input.nonFable.policy.target_route, "non-fable⤳");
+    badge(claudeBadges, input.nonFable.policy.target_route, "non-fable⤳");
   }
 
   const focus: FocusLine[] = [
+    {
+      kind: "claude",
+      state: input.claudeFull.state,
+      target: input.claudeFull.policy?.target ?? null,
+      lifetime: input.claudeFull.policy === null ? null : lifetimeText(input.claudeFull.policy, input.nowMs),
+    },
+    {
+      kind: "codex",
+      state: input.codexFull.state,
+      target: input.codexFull.policy?.target ?? null,
+      lifetime: input.codexFull.policy === null ? null : lifetimeText(input.codexFull.policy, input.nowMs),
+    },
     {
       kind: "fable",
       state: input.fable.state,
@@ -302,8 +329,8 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
 
   return {
     nowMs: input.nowMs,
-    claude: input.claude === null ? null : buildClaudeSection(input.claude, input.nowMs, focusBadges),
-    codex: input.codex === null ? null : buildCodexSection(input.codex, input.nowMs),
+    claude: input.claude === null ? null : buildClaudeSection(input.claude, input.nowMs, claudeBadges),
+    codex: input.codex === null ? null : buildCodexSection(input.codex, input.nowMs, codexBadges),
     focus,
   };
 }

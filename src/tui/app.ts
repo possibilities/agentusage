@@ -1,6 +1,15 @@
 import type { StatePaths } from "../paths.ts";
 import { readClaudeObservation, readCodexObservation, refreshClaudeObservation, refreshCodexObservation } from "../observe.ts";
-import { effectiveFableFocus, effectiveNonFableFocus, readFocusLeaf, type FableFocusPolicy, type FocusDelivery } from "../focus.ts";
+import {
+  effectiveClaudeFullFocus,
+  effectiveCodexFullFocus,
+  effectiveFableFocus,
+  effectiveNonFableFocus,
+  readFocusLeaf,
+  readFullFocusLeaf,
+  type FableFocusPolicy,
+  type FocusDelivery,
+} from "../focus.ts";
 import { buildViewModel } from "../view.ts";
 import { renderFrameLines, TONE_HEX, type Line } from "../render.ts";
 import { VERSION } from "../version.ts";
@@ -87,6 +96,8 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
       codex,
       fable: effectiveFableFocus(fableDelivery, claude, nowMs),
       nonFable: effectiveNonFableFocus(readFocusLeaf(paths.nonFableFocusLeaf, false), nowMs),
+      claudeFull: effectiveClaudeFullFocus(readFullFocusLeaf(paths.claudeFullFocusLeaf, "claude"), claude, nowMs),
+      codexFull: effectiveCodexFullFocus(readFullFocusLeaf(paths.codexFullFocusLeaf, "codex"), codex, nowMs),
       nowMs,
     });
     const stamp = new Date(nowMs).toISOString().replace("T", " ").slice(0, 19);

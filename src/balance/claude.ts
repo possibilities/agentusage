@@ -19,10 +19,14 @@ import {
   type AccountFocusEffectiveState,
   type FableFocusEffectiveState,
   type FableFocusPolicy,
+  type FullFocusEffectiveState,
+  type FullFocusPolicy,
   type NonFableFocusPolicy,
+  effectiveClaudeFullFocus,
   effectiveFableFocus,
   effectiveNonFableFocus,
   readFocusLeaf,
+  readFullFocusLeaf,
 } from "../focus.ts";
 import { acquirePathLock, releasePathLock } from "./lock.ts";
 
@@ -41,6 +45,8 @@ export type LaunchRouteIssue =
   | "fable-quota-exhausted";
 
 export type SelectionReason =
+  | "full-focus"
+  | "full-focus-fallback"
   | "fable-focus"
   | "non-fable-focus"
   | "fable-focus-avoided"
@@ -90,7 +96,7 @@ export interface ClaudeSelectionSuccess {
   reason: SelectionReason;
   fableIntent: boolean;
   observationAgeMs: number;
-  focus: { fable: FableFocusEffectiveState; nonFable: AccountFocusEffectiveState };
+  focus: { full: FullFocusEffectiveState; fable: FableFocusEffectiveState; nonFable: AccountFocusEffectiveState };
   pool: ScoredCandidate[];
   excluded: Record<string, LaunchRouteIssue[]>;
   reserved: boolean;
@@ -301,21 +307,27 @@ function serializeLedger(ledger: Ledger): unknown {
 
 interface FocusViews {
   intent: boolean;
+  fullState: FullFocusEffectiveState;
   fableState: FableFocusEffectiveState;
   nonFableState: AccountFocusEffectiveState;
+  fullPolicy: FullFocusPolicy | null;
   fablePolicy: FableFocusPolicy | null;
   nonFablePolicy: NonFableFocusPolicy | null;
 }
 
 function readFocusViews(paths: StatePaths, observation: Observation, nowMs: number, intent: boolean): FocusViews {
+  const fullDelivery = readFullFocusLeaf(paths.claudeFullFocusLeaf, "claude");
   const fableDelivery = readFocusLeaf(paths.fableFocusLeaf, true) as import("../focus.ts").FocusDelivery<FableFocusPolicy>;
   const nonFableDelivery = readFocusLeaf(paths.nonFableFocusLeaf, false);
+  const full = effectiveClaudeFullFocus(fullDelivery, observation, nowMs);
   const fable = effectiveFableFocus(fableDelivery, observation, nowMs);
   const nonFable = effectiveNonFableFocus(nonFableDelivery, nowMs);
   return {
     intent,
+    fullState: full.state,
     fableState: fable.state,
     nonFableState: nonFable.state,
+    fullPolicy: full.state === "active" ? full.policy : null,
     fablePolicy: fable.state === "active" ? fable.policy : null,
     nonFablePolicy: nonFable.state === "active" ? nonFable.policy : null,
   };
@@ -400,7 +412,7 @@ export function selectClaudeRoute(options: SelectClaudeOptions): ClaudeSelection
       reason,
       fableIntent: intent,
       observationAgeMs: ageMs,
-      focus: { fable: focusViews.fableState, nonFable: focusViews.nonFableState },
+      focus: { full: focusViews.fullState, fable: focusViews.fableState, nonFable: focusViews.nonFableState },
       pool: scored,
       excluded,
       reserved: reserve,
@@ -437,6 +449,15 @@ export function selectClaudeRoute(options: SelectClaudeOptions): ClaudeSelection
 
     const findCandidate = (routeId: string | undefined): Route | undefined =>
       routeId === undefined ? undefined : candidates.find((candidate) => candidate.id === routeId);
+
+    if (focusViews.fullPolicy !== null) {
+      const fullTarget = findCandidate(focusViews.fullPolicy.target);
+      if (fullTarget !== undefined) return finish(fullTarget, "full-focus", ledger, candidates);
+      // An active provider focus suppresses the intent focuses even while its
+      // target is ineligible — one policy is in charge at a time.
+      const chosen = scoreAndPick(candidates, ledger, options.model ?? null, options.fableIntent);
+      return finish(chosen, "full-focus-fallback", ledger, candidates);
+    }
 
     if (intent) {
       const target = findCandidate(focusViews.fablePolicy?.target_route);

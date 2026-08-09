@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { CODEX_OBSERVATION_SCHEMA_VERSION, type CodexAccountView, type CodexObservation } from "../src/codex/types.ts";
-import { selectCodexSpark } from "../src/balance/codex.ts";
+import { selectCodexAccount, selectCodexSpark } from "../src/balance/codex.ts";
+import {
+  materializeFullFocusPolicy,
+  type FocusStatus,
+  type FullFocusEffectiveState,
+  type FullFocusPolicy,
+} from "../src/focus.ts";
 
 const NOW = Date.parse("2026-08-08T20:00:00Z");
 
@@ -124,5 +130,105 @@ describe("selectCodexSpark", () => {
     stale.observed_at_ms = NOW - 6 * 60_000;
     const result = selectCodexSpark(stale, NOW);
     expect(!result.ok && result.refusal).toBe("observation-stale");
+  });
+});
+
+function mainLanes(fiveHourRemaining: number, weeklyRemaining: number) {
+  return [
+    {
+      id: "main",
+      title: "Main",
+      binding: true,
+      windows: [
+        { role: "primary" as const, label: "5h", windowSeconds: 18000, usedPercent: 100 - fiveHourRemaining, remainingPercent: fiveHourRemaining, resetsAt: null, resetAfterSeconds: null, limitName: null, meteredFeature: null },
+        { role: "secondary" as const, label: "weekly", windowSeconds: 604800, usedPercent: 100 - weeklyRemaining, remainingPercent: weeklyRemaining, resetsAt: null, resetAfterSeconds: null, limitName: null, meteredFeature: null },
+      ],
+    },
+  ];
+}
+
+function activeFocus(target: string): FocusStatus<FullFocusPolicy, FullFocusEffectiveState> {
+  return {
+    state: "active",
+    policy: materializeFullFocusPolicy("codex", target, { kind: "permanent" }, NOW),
+    diagnostic: "none",
+  };
+}
+
+describe("codex full focus", () => {
+  test("active focus pins the main lane locally without a lease", async () => {
+    const selection = await selectCodexAccount({
+      observation: codexObservation([
+        account("account:a", { lanes: mainLanes(80, 60) }),
+        account("account:b", { lanes: mainLanes(90, 90) }),
+      ]),
+      focus: activeFocus("account:a"),
+      nowMs: NOW,
+    });
+    expect(selection.ok).toBe(true);
+    if (selection.ok) {
+      expect(selection.accountKey).toBe("account:a");
+      expect(selection.reason).toBe("full-focus");
+      expect(selection.score).toBe(60);
+      expect(selection.lease).toBeNull();
+    }
+  });
+
+  test("claim refuses under an active focus instead of unpinning", async () => {
+    const selection = await selectCodexAccount({
+      observation: codexObservation([account("account:a", { lanes: mainLanes(80, 60) })]),
+      focus: activeFocus("account:a"),
+      claim: true,
+      nowMs: NOW,
+    });
+    expect(selection.ok).toBe(false);
+    if (!selection.ok) expect(selection.refusal).toBe("focus-claim-unsupported");
+  });
+
+  test("ineligible focus target falls back to delegation rather than repinning", async () => {
+    const selection = await selectCodexAccount({
+      observation: codexObservation([
+        account("account:a", { lanes: mainLanes(0, 60) }),
+        account("account:b", { lanes: mainLanes(90, 90) }),
+      ]),
+      focus: activeFocus("account:a"),
+      nowMs: NOW,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: "/nonexistent/codex-swap-for-tests" },
+    });
+    // The missing binary proves the pin fell through to codex-swap select
+    // instead of silently moving to another account locally.
+    expect(selection.ok).toBe(false);
+    if (!selection.ok) expect(selection.refusal).toBe("dependency-unavailable");
+  });
+
+  test("focus refuses on a stale observation", async () => {
+    const stale = codexObservation([account("account:a", { lanes: mainLanes(80, 60) })]);
+    stale.observed_at_ms = NOW - 6 * 60_000;
+    const selection = await selectCodexAccount({ observation: stale, focus: activeFocus("account:a"), nowMs: NOW });
+    expect(!selection.ok && selection.refusal).toBe("observation-stale");
+  });
+
+  test("spark focus pins when the target has spark headroom, else falls back", () => {
+    const pinned = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(20, 90) }),
+        account("account:b", { lanes: sparkLanes(80, 60) }),
+      ]),
+      NOW,
+      "account:a",
+    );
+    expect(pinned.ok && pinned.accountKey).toBe("account:a");
+    if (pinned.ok) expect(pinned.reason).toBe("full-focus");
+
+    const fallback = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(0, 50) }),
+        account("account:b", { lanes: sparkLanes(80, 60) }),
+      ]),
+      NOW,
+      "account:a",
+    );
+    expect(fallback.ok && fallback.accountKey).toBe("account:b");
+    if (fallback.ok) expect(fallback.reason).toBe("full-focus-fallback (spark-headroom)");
   });
 });

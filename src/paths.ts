@@ -13,6 +13,8 @@ export interface StatePaths {
   reservationsLock: string;
   fableFocusLeaf: string;
   nonFableFocusLeaf: string;
+  claudeFullFocusLeaf: string;
+  codexFullFocusLeaf: string;
 }
 
 export function statePaths(env: Record<string, string | undefined> = process.env): StatePaths {
@@ -34,6 +36,8 @@ export function statePaths(env: Record<string, string | undefined> = process.env
     reservationsLock: join(claudeDir, "reservations.json.lock"),
     fableFocusLeaf: join(claudeDir, "fable-focus-policy.json"),
     nonFableFocusLeaf: join(claudeDir, "non-fable-focus-policy.json"),
+    claudeFullFocusLeaf: join(claudeDir, "full-focus-policy.json"),
+    codexFullFocusLeaf: join(codexDir, "full-focus-policy.json"),
   };
 }
 

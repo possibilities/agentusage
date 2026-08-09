@@ -97,6 +97,10 @@ export function sparkLane(account: CodexAccountView): CodexLane | null {
   return account.lanes.find(isSparkLane) ?? null;
 }
 
+export function mainLane(account: CodexAccountView): CodexLane | null {
+  return account.lanes.find((lane) => lane.id === MAIN_LANE_ID) ?? null;
+}
+
 function isLaneWindow(value: unknown): value is CodexLaneWindow {
   if (typeof value !== "object" || value === null) return false;
   const window = value as Record<string, unknown>;
