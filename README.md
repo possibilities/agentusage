@@ -2,11 +2,13 @@
 
 [![CI](https://github.com/possibilities/agentusage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/possibilities/agentusage/actions/workflows/ci.yml)
 
-Claude + Codex account capacity in one place: a background observer, a live
-TUI, and an explicit `balance` verb that launchers call to pick an account.
+How much capacity every Claude and Codex account has left, in one place: a
+background observer, a live TUI, and one explicit `balance` verb that launchers
+call to pick an account.
+
 This is the standalone rebuild of keeper's `usage` subsystem, with
-[claude-swap] and [codex-swap] as the per-provider account managers and
-durable observation stores.
+[claude-swap] and [codex-swap] as the per-provider account managers and durable
+observation stores.
 
 [claude-swap]: https://github.com/possibilities/claude-swap
 [codex-swap]: https://github.com/possibilities/codex-swap
@@ -22,10 +24,10 @@ durable observation stores.
         agentusage (TUI · status · balance · focus)  ◄── launchers call `balance … --json`
 ```
 
-Providers own the truth (claude-swap persists last-good usage per account;
-codex-swap keeps a SQLite store with trust/backoff/leases). agentusage shells
-their JSON CLIs, normalizes into observation sidecars, and never parses their
-on-disk stores directly.
+The providers own the truth: claude-swap persists last-good usage per account,
+and codex-swap keeps a SQLite store with trust, backoff, and leases. agentusage
+shells their JSON CLIs and normalizes the results into observation sidecars. It
+never parses their on-disk stores directly.
 
 ## Install
 
@@ -47,12 +49,11 @@ Either path also provisions the provider CLIs best-effort
 
 - **cswap** — `uv tool install` from the public
   [`possibilities/claude-swap`](https://github.com/possibilities/claude-swap)
-  fork's `main` branch. That stable branch carries
-  `subscriptionType`/`rateLimitMultiplier` on `--json` rows (cross-tier
-  capacity comparison) and `cswap recover` (owner-held expired-token recovery,
-  which the daemon runs one-due-per-cycle). The provisioner clones the fork
-  when absent, fast-forwards an existing clean checkout to `fork/main`, and
-  refuses dirty, divergent, or unpublished provider code.
+  fork's `main` branch, which carries `subscriptionType`/`rateLimitMultiplier`
+  on `--json` rows for cross-tier capacity comparison, and `cswap recover`, the
+  owner-held expired-token recovery the daemon runs one-due-per-cycle. The
+  provisioner clones the fork when absent and fast-forwards a clean checkout to
+  `fork/main`, refusing dirty, divergent, or unpublished provider code.
 - **codex-swap** — a source shim at `~/.local/bin/codex-swap` running
   `node src/cli/main.ts` from `~/code/codex-swap` (Node ≥ 24 type stripping),
   so the checkout is always current while that project is under active
@@ -67,8 +68,8 @@ codex-swap auth add       # per Codex account (device auth)
 ```
 
 The daemon (`agentusage.daemon` launchagent, logs at
-`~/.local/state/agentusage/daemon.log`) starts observing immediately; every
-surface renders absent/empty/stale states honestly until accounts exist.
+`~/.local/state/agentusage/daemon.log`) starts observing immediately. Until
+accounts exist, every surface renders absent, empty, and stale states honestly.
 
 ## Commands
 
@@ -94,19 +95,23 @@ agentusage picks; the launcher launches. Contract:
 **Claude** — `agentusage balance claude --json [--fable|--no-fable|--model m]`
 returns `{ ok, route: {id, slot}, ordinal, reason, … }`. Launch with
 `cswap run <slot> --share-history -- <claude args…>`. Selection is keeper's
-algorithm: eligibility (session + weekly present and < 100%, Fable window
-required for Fable intent), Fable conservation (Fable launches chase the
-lowest Fable utilization; non-Fable launches prefer Fable-less accounts, then
-the most-burned Fable), +5 pp pressure per live reservation (90 s TTL),
-least-recently-selected then lexicographic tie-breaks, focus overlay.
-`--dry-run` previews without reserving; `--account <route|cN>` pins the pick
+algorithm, applied in order:
+
+1. eligibility — session and weekly windows present and under 100%, with a
+   Fable window required for Fable intent;
+2. Fable conservation — Fable launches chase the lowest Fable utilization;
+   non-Fable launches prefer Fable-less accounts, then the most-burned Fable;
+3. +5 pp pressure per live reservation (90 s TTL);
+4. least-recently-selected, then lexicographic.
+
+`--dry-run` previews without reserving. `--account <route|cN>` pins the pick
 (reason `requested-account`) but still runs the eligibility gate, refusing
-`requested-unknown` / `requested-ineligible` rather than launching into an
-exhausted account. An active provider focus (`focus claude`) sits between
-the two: explicit `--account` beats it, and it beats the fable/non-fable
-overlay (reasons `full-focus` / `full-focus-fallback`). Refuses
-(`observation-stale`) rather than guessing when the sidecar is older than 5
-minutes — one bounded refresh is attempted first.
+`requested-unknown` or `requested-ineligible` rather than launching into an
+exhausted account. An active provider focus (`focus claude`) sits between the
+two: an explicit `--account` beats it, and it beats the fable/non-fable overlay
+(reasons `full-focus` / `full-focus-fallback`). When the sidecar is older than
+5 minutes, balance tries one bounded refresh, then refuses with
+`observation-stale` rather than guessing.
 
 **Codex** — `agentusage balance codex --json [--strategy best|next-available]
 [--claim]` delegates to `codex-swap select`; with `--claim` the result carries
@@ -147,29 +152,29 @@ agentusage focus non-fable set c0 absolute 2026-08-12T00:00:00Z
 agentusage focus fable clear
 ```
 
-`set` warns when the target is not currently launch-eligible; `--require-eligible`
-turns that warning into a refusal. The two observed lifetimes read the reset out
-of the live Fable window, so they need a fresh healthy observation;
-`--expect-reset <UTC>` asserts which reset you meant and fails `reset-mismatch`
-if the window has already rolled underneath you.
+`set` warns when the target is not currently launch-eligible, and
+`--require-eligible` turns that warning into a refusal. The two observed
+lifetimes read the reset out of the live Fable window, so they need a fresh
+healthy observation. `--expect-reset <UTC>` asserts which reset you meant and
+fails `reset-mismatch` if the window has already rolled underneath you.
 
 An active Fable focus also **fences its target out of the non-Fable pool**, so
 generic launches stop draining the account you are conserving for Fable.
-Effective states: `off · active · expired · invalid · unavailable`
-(+ `completed` for observed lifetimes). Expired policies are not auto-cleared
-(parity with keeper); routing simply falls back and `show` names the state.
-`usage --json` carries observations only; machine consumers read focus from
-`status --json`.
+Effective states are `off · active · expired · invalid · unavailable`, plus
+`completed` for observed lifetimes. Expired policies are not auto-cleared
+(parity with keeper): routing falls back and `show` names the state. Machine
+consumers read focus from `status --json` — `usage --json` carries observations
+only.
 
-A **provider focus** pins *every* launch for one provider — Fable and
-non-Fable alike, and for codex the main, spark, and pi paths, since they all
-ride `balance codex` — to a single account, overriding both intent focuses
-entirely (fence included, and also during fallback while the target is
-temporarily ineligible: one policy is in charge at a time). Explicit
-`--account` requests still win. Its observed lifetimes follow the **binding
-weekly window** (Claude `week`, Codex main-lane weekly) instead of the Fable
-window, which makes draining an account whose week resets soon a single
-command:
+A **provider focus** pins *every* launch for one provider to a single account —
+Fable and non-Fable alike, and for codex the main, spark, and pi paths, since
+they all ride `balance codex`. It overrides both intent focuses entirely, fence
+included, and stays in charge during fallback while its target is temporarily
+ineligible; one policy governs at a time. An explicit `--account` still wins.
+
+Its observed lifetimes follow the **binding weekly window** (Claude `week`,
+Codex main-lane weekly) rather than the Fable window, which makes draining an
+account whose week resets soon a single command:
 
 ```bash
 agentusage focus claude set c0 cycle-end           # everything → c0 until its week resets or hits 100%
@@ -199,7 +204,7 @@ lease-less `codex-swap run --account <key>` form.
 - All refreshes go through a non-blocking per-sidecar lock; contended callers
   re-read instead of stacking provider calls.
 
-## Development
+## Develop
 
 ```bash
 bun test            # no network, temp state roots
