@@ -82,8 +82,8 @@ accounts (via codex-swap), installed by funk as a launchagent.
 - `src/cli.ts` — dispatch: `usage` (default), `status`, `balance`, `focus`,
   `recover`, `refresh`, `daemon`, `help`, `version`.
 - `src/tui/` — view model + OpenTUI app; `src/snapshot.ts` — piped frame.
-- `scripts/install.sh`, `scripts/install-providers.sh`,
-  `system/Library/LaunchAgents/agentusage.daemon.plist`.
+- `scripts/install.sh`, `scripts/install-providers.sh`. The daemon's
+  LaunchAgent is Agentdots': `~/code/agentdots/config/launchd/`.
 - `~/code/funk`: `libexec/install-local-services`,
   `libexec/verify-local-services`, `install`, `bin/funk` usage text.
 - `~/src/claude-swap`: fork remote + `integration/agentusage` branch.
