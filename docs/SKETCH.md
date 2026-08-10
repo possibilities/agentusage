@@ -58,8 +58,8 @@ accounts (via codex-swap), installed by funk as a launchagent.
   Providers are provisioned by `scripts/install-providers.sh`: claude-swap
   from `~/src/claude-swap` with fork remote and an `integration/agentusage`
   branch (current upstream + open PRs #169 capacity-metadata + #166 recover)
-  via `uv tool install`; codex-swap shimmed to `node src/cli/main.ts` until it
-  grows its own installer.
+  via `uv tool install`. codex-swap grew its own installer and is provisioned by
+  agentdots directly; this file no longer writes a shim for it.
 - **Daemon recovery parity:** after each Claude cycle, at most one due
   `cswap recover <slot> --json` for a token-expired account (PR #166
   behavior keeper relied on), non-fatal.

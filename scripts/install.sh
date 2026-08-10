@@ -37,8 +37,9 @@ if (( DRY )); then
   exit 0
 fi
 
-# Provider CLIs first (cswap via uv, codex-swap source shim); best-effort —
-# agentusage renders provider absence honestly rather than failing to install.
+# Provider CLIs first (cswap via uv); best-effort — agentusage renders provider
+# absence honestly rather than failing to install. codex-swap is not here: it
+# ships its own installer, which agentdots runs.
 if [[ "${AGENTUSAGE_SKIP_PROVIDERS:-0}" != 1 ]]; then
   bash "$ROOT/scripts/install-providers.sh" || \
     printf 'install: provider provisioning incomplete (see above); continuing.\n'
