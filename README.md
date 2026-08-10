@@ -1,13 +1,15 @@
 # agentusage
 
+[![CI](https://github.com/possibilities/agentusage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/possibilities/agentusage/actions/workflows/ci.yml)
+
 Claude + Codex account capacity in one place: a background observer, a live
 TUI, and an explicit `balance` verb that launchers call to pick an account.
 This is the standalone rebuild of keeper's `usage` subsystem, with
 [claude-swap] and [codex-swap] as the per-provider account managers and
 durable observation stores.
 
-[claude-swap]: https://github.com/realiti4/claude-swap
-[codex-swap]: ../codex-swap
+[claude-swap]: https://github.com/possibilities/claude-swap
+[codex-swap]: https://github.com/possibilities/codex-swap
 
 ```
                        ┌─────────────────────────┐
@@ -43,14 +45,14 @@ bash scripts/install.sh --install
 Either path also provisions the provider CLIs best-effort
 (`scripts/install-providers.sh`):
 
-- **cswap** — `uv tool install` from `~/src/claude-swap` on branch
-  `integration/agentusage`: current upstream plus the two open PRs the old
-  system depended on — [#169] `subscriptionType`/`rateLimitMultiplier` on
-  `--json` rows (cross-tier capacity comparison) and [#166] `cswap recover`
-  (owner-held expired-token recovery, which the daemon runs one-due-per-cycle).
-  The branch also lives on the fork: `possibilities/claude-swap@integration/agentusage`.
-  To refresh it onto a newer upstream: fetch upstream, rebase the branch, rerun
-  the two cherry-picks if needed, run `uv run pytest`, reinstall.
+- **cswap** — `uv tool install` from the public
+  [`possibilities/claude-swap`](https://github.com/possibilities/claude-swap)
+  fork's `main` branch. That stable branch carries
+  `subscriptionType`/`rateLimitMultiplier` on `--json` rows (cross-tier
+  capacity comparison) and `cswap recover` (owner-held expired-token recovery,
+  which the daemon runs one-due-per-cycle). The provisioner clones the fork
+  when absent, fast-forwards an existing clean checkout to `fork/main`, and
+  refuses dirty, divergent, or unpublished provider code.
 - **codex-swap** — a source shim at `~/.local/bin/codex-swap` running
   `node src/cli/main.ts` from `~/code/codex-swap` (Node ≥ 24 type stripping),
   so the checkout is always current while that project is under active
@@ -205,8 +207,5 @@ bun run typecheck
 ```
 
 `docs/SKETCH.md` is the build contract, `CONTEXT.md` the glossary. Provider
-contracts are pinned to claude-swap 0.25.0b1 (+ the two PRs) and codex-swap
-`f193bc1`; both are read defensively.
-
-[#166]: https://github.com/realiti4/claude-swap/pull/166
-[#169]: https://github.com/realiti4/claude-swap/pull/169
+contracts are pinned to the public claude-swap fork's `main` integration
+contract and codex-swap `f193bc1`; both are read defensively.
