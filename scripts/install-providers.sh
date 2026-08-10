@@ -6,47 +6,67 @@ set -uo pipefail
 
 BIN_DIR="${AGENTUSAGE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 CSWAP_CHECKOUT="${AGENTUSAGE_CSWAP_CHECKOUT:-$HOME/src/claude-swap}"
-CSWAP_BRANCH="integration/agentusage"
-CSWAP_FORK_URL="https://github.com/possibilities/claude-swap.git"
-CSWAP_UPSTREAM_URL="https://github.com/realiti4/claude-swap.git"
+CSWAP_BRANCH="main"
+CSWAP_FORK_URL="${AGENTUSAGE_CSWAP_FORK_URL:-https://github.com/possibilities/claude-swap.git}"
 CODEX_SWAP_ROOT="${AGENTUSAGE_CODEX_SWAP_ROOT:-$HOME/code/codex-swap}"
 SHIM_MARKER="agentusage-installer-owned:v1"
 
 status=0
 
 # ── claude-swap (cswap) ─────────────────────────────────────────────────────
-# The integration branch is current upstream plus the two open PRs keeper
-# depended on: #169 account-capacity-metadata and #166 recover-expired-token.
-# Refreshing the branch onto a newer upstream is a manual act (see README);
-# this installer only installs what the checkout already holds.
+# The public fork's main branch is the stable provider contract: it carries the
+# capacity metadata and expired-token recovery that agentusage consumes. Keep
+# the local checkout exactly on fork/main so an install cannot silently use an
+# upstream-only or unpublished provider build.
 install_claude_swap() {
     if ! command -v uv >/dev/null 2>&1; then
         printf 'agentusage providers: uv missing; skipping claude-swap install.\n'
         return 1
     fi
     if [ ! -d "${CSWAP_CHECKOUT}/.git" ]; then
-        printf 'agentusage providers: cloning claude-swap upstream into %s.\n' "${CSWAP_CHECKOUT}"
-        git clone --quiet "${CSWAP_UPSTREAM_URL}" "${CSWAP_CHECKOUT}" || return 1
+        printf 'agentusage providers: cloning the public claude-swap fork into %s.\n' "${CSWAP_CHECKOUT}"
+        mkdir -p "$(dirname "${CSWAP_CHECKOUT}")"
+        git clone --quiet --origin fork --branch "${CSWAP_BRANCH}" \
+            "${CSWAP_FORK_URL}" "${CSWAP_CHECKOUT}" || return 1
     fi
-    if ! git -C "${CSWAP_CHECKOUT}" remote get-url fork >/dev/null 2>&1; then
+    local fork_url
+    fork_url="$(git -C "${CSWAP_CHECKOUT}" remote get-url fork 2>/dev/null || true)"
+    if [ -z "${fork_url}" ]; then
         git -C "${CSWAP_CHECKOUT}" remote add fork "${CSWAP_FORK_URL}" || return 1
+    elif [ "${fork_url}" != "${CSWAP_FORK_URL}" ] && \
+        [ "${fork_url}" != "git@github.com:possibilities/claude-swap.git" ] && \
+        [ "${fork_url}" != "https://github.com/possibilities/claude-swap" ]; then
+        printf 'agentusage providers: %s remote fork points at %s, not %s; refusing.\n' \
+            "${CSWAP_CHECKOUT}" "${fork_url}" "${CSWAP_FORK_URL}"
+        return 1
     fi
-    if ! git -C "${CSWAP_CHECKOUT}" rev-parse --verify --quiet "${CSWAP_BRANCH}" >/dev/null; then
-        git -C "${CSWAP_CHECKOUT}" fetch --quiet fork "${CSWAP_BRANCH}" || return 1
+    git -C "${CSWAP_CHECKOUT}" fetch --quiet fork "${CSWAP_BRANCH}" || return 1
+    if ! git -C "${CSWAP_CHECKOUT}" rev-parse --verify --quiet "refs/heads/${CSWAP_BRANCH}" >/dev/null; then
         git -C "${CSWAP_CHECKOUT}" branch --quiet "${CSWAP_BRANCH}" "fork/${CSWAP_BRANCH}" || return 1
     fi
     local current
     current="$(git -C "${CSWAP_CHECKOUT}" rev-parse --abbrev-ref HEAD)"
+    if [ -n "$(git -C "${CSWAP_CHECKOUT}" status --porcelain)" ]; then
+        printf 'agentusage providers: %s has local changes on %s; refusing to install them.\n' \
+            "${CSWAP_CHECKOUT}" "${current}"
+        return 1
+    fi
     if [ "${current}" != "${CSWAP_BRANCH}" ]; then
-        if ! git -C "${CSWAP_CHECKOUT}" diff --quiet || ! git -C "${CSWAP_CHECKOUT}" diff --cached --quiet; then
-            printf 'agentusage providers: %s has local changes on %s; refusing to switch branches.\n' \
-                "${CSWAP_CHECKOUT}" "${current}"
-            return 1
-        fi
         git -C "${CSWAP_CHECKOUT}" checkout --quiet "${CSWAP_BRANCH}" || return 1
     fi
+    git -C "${CSWAP_CHECKOUT}" merge --quiet --ff-only "fork/${CSWAP_BRANCH}" || {
+        printf 'agentusage providers: %s@%s cannot fast-forward to fork/%s; refusing.\n' \
+            "${CSWAP_CHECKOUT}" "${CSWAP_BRANCH}" "${CSWAP_BRANCH}"
+        return 1
+    }
+    if [ "$(git -C "${CSWAP_CHECKOUT}" rev-parse HEAD)" != \
+        "$(git -C "${CSWAP_CHECKOUT}" rev-parse "fork/${CSWAP_BRANCH}")" ]; then
+        printf 'agentusage providers: %s@%s has unpublished commits; refusing to install them.\n' \
+            "${CSWAP_CHECKOUT}" "${CSWAP_BRANCH}"
+        return 1
+    fi
     printf 'agentusage providers: installing claude-swap from %s@%s.\n' "${CSWAP_CHECKOUT}" "${CSWAP_BRANCH}"
-    uv tool install --force --from "${CSWAP_CHECKOUT}" claude-swap >/dev/null || return 1
+    uv tool install --force "${CSWAP_CHECKOUT}" >/dev/null || return 1
     command -v cswap >/dev/null 2>&1 || {
         printf 'agentusage providers: cswap did not land on PATH (is %s on PATH?).\n' "${BIN_DIR}"
         return 1
