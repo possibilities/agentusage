@@ -54,7 +54,7 @@ accounts (via codex-swap), installed by funk as a launchagent.
   project-owned `scripts/install.sh` — bun-shim bins `agentusage` +
   `agentusaged`, rendered `agentusage.daemon` plist with ownership marker and
   bootout/bootstrap dance, receipt in `~/.local/state/agentusage/` — plus funk
-  edits wiring it into `install-local-services` / `verify-local-services`.
+  edits wiring it into Agentdots' `install-agent-clis` / funk's `verify-local-services`.
   Providers are provisioned by `scripts/install-providers.sh`: claude-swap
   from `~/src/claude-swap` with fork remote and an `integration/agentusage`
   branch (current upstream + open PRs #169 capacity-metadata + #166 recover)
@@ -84,8 +84,8 @@ accounts (via codex-swap), installed by funk as a launchagent.
 - `src/tui/` — view model + OpenTUI app; `src/snapshot.ts` — piped frame.
 - `scripts/install.sh`, `scripts/install-providers.sh`. The daemon's
   LaunchAgent is Agentdots': `~/code/agentdots/config/launchd/`.
-- `~/code/funk`: `libexec/install-local-services`,
-  `libexec/verify-local-services`, `install`, `bin/funk` usage text.
+- `~/code/agentdots`: `scripts/install-agent-clis`, `scripts/install-launchagents`.
+- `~/code/funk`: `libexec/verify-local-services`, `install`, `bin/funk` usage text.
 - `~/src/claude-swap`: fork remote + `integration/agentusage` branch.
 - `test/` — normalization, balance scoring/tie-breaks/focus overlay, focus
   lifetimes, spark grouping/selection, sidecar IO.

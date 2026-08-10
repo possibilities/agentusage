@@ -31,10 +31,11 @@ never parses their on-disk stores directly.
 
 ## Install
 
-Via funk (preferred — it is part of `funk install-local-services`):
+Via Agentdots (preferred — it installs the command, its provider CLIs, and the
+`agentusage.daemon` service):
 
 ```bash
-funk install-local-services
+~/code/agentdots/scripts/install.sh --install
 funk verify-local-services
 ```
 
