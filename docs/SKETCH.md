@@ -54,12 +54,12 @@ accounts (via codex-swap), installed by funk as a launchagent.
   project-owned `scripts/install.sh` — bun-shim bins `agentusage` +
   `agentusaged`, rendered `agentusage.daemon` plist with ownership marker and
   bootout/bootstrap dance, receipt in `~/.local/state/agentusage/` — plus funk
-  edits wiring it into Agentdots' `install-agent-clis` / funk's `verify-local-services`.
+  edits wiring it into AgentStart's `install-agent-clis` / funk's `verify-local-services`.
   Providers are provisioned by `scripts/install-providers.sh`: claude-swap
   from `~/src/claude-swap` with fork remote and an `integration/agentusage`
   branch (current upstream + open PRs #169 capacity-metadata + #166 recover)
   via `uv tool install`. codex-swap grew its own installer and is provisioned by
-  agentdots directly; this file no longer writes a shim for it.
+  AgentStart directly; this file no longer writes a shim for it.
 - **Daemon recovery parity:** after each Claude cycle, at most one due
   `cswap recover <slot> --json` for a token-expired account (PR #166
   behavior keeper relied on), non-fatal.
@@ -83,8 +83,8 @@ accounts (via codex-swap), installed by funk as a launchagent.
   `recover`, `refresh`, `daemon`, `help`, `version`.
 - `src/tui/` — view model + OpenTUI app; `src/snapshot.ts` — piped frame.
 - `scripts/install.sh`, `scripts/install-providers.sh`. The daemon's
-  LaunchAgent is Agentdots': `~/code/agentdots/config/launchd/`.
-- `~/code/agentdots`: `scripts/install-agent-clis`, `scripts/install-launchagents`.
+  LaunchAgent is AgentStart's: `~/code/agentstart/config/launchd/`.
+- `~/code/agentstart`: `scripts/install-agent-clis`, `scripts/install-launchagents`.
 - `~/code/funk`: `libexec/verify-local-services`, `install`, `bin/funk` usage text.
 - `~/src/claude-swap`: fork remote + `integration/agentusage` branch.
 - `test/` — normalization, balance scoring/tie-breaks/focus overlay, focus

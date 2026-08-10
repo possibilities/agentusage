@@ -28,8 +28,8 @@ RECEIPT="$STATE_DIR/install-receipt"
 LOG_PATH="$STATE_DIR/daemon.log"
 
 # This installer ships the binaries; the agentusage.daemon launch agent that
-# supervises agentusaged belongs to Agentdots, which owns every fleet service
-# (~/code/agentdots/config/launchd/). Installing the daemon here as well would
+# supervises agentusaged belongs to AgentStart, which owns every fleet service
+# (~/code/agentstart/config/launchd/). Installing the daemon here as well would
 # give one service two owners racing to render it.
 
 if (( DRY )); then
@@ -39,7 +39,7 @@ fi
 
 # Provider CLIs first (cswap via uv); best-effort — agentusage renders provider
 # absence honestly rather than failing to install. codex-swap is not here: it
-# ships its own installer, which agentdots runs.
+# ships its own installer, which AgentStart runs.
 if [[ "${AGENTUSAGE_SKIP_PROVIDERS:-0}" != 1 ]]; then
   bash "$ROOT/scripts/install-providers.sh" || \
     printf 'install: provider provisioning incomplete (see above); continuing.\n'
@@ -60,5 +60,5 @@ printf 'agentusage-installer-owned:v1\nroot=%s\nbin=%s\nlog=%s\n' \
   "$ROOT" "$BIN_DIR" "$LOG_PATH" >"$RECEIPT"
 chmod 600 "$RECEIPT"
 printf 'installed agentusage commands in %s\n' "$BIN_DIR"
-printf 'the agentusage.daemon service is installed by Agentdots: %s\n' \
-  "$HOME/code/agentdots/scripts/install-launchagents --install"
+printf 'the agentusage.daemon service is installed by AgentStart: %s\n' \
+  "$HOME/code/agentstart/scripts/install-launchagents --install"
