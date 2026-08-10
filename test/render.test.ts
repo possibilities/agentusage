@@ -1,0 +1,94 @@
+import { describe, expect, test } from "bun:test";
+import { linesToText, renderFrameLines } from "../src/render.ts";
+import type { UsageViewModel } from "../src/view.ts";
+
+const vm: UsageViewModel = {
+  nowMs: Date.parse("2026-08-10T23:00:00Z"),
+  claude: {
+    provider: "claude",
+    health: "ok",
+    ageText: "fresh 4s",
+    fresh: true,
+    notes: [],
+    cards: [
+      {
+        provider: "claude",
+        name: "claude-1",
+        detail: "Max 20× · a deliberately long account description",
+        status: null,
+        stale: false,
+        measuredAgo: "12s",
+        focus: ["non-fable"],
+        meters: [
+          { label: "session", usedPercent: 42, resetText: "3h 12m", tone: "good", spark: false },
+          { label: "gpt-5.3-codex-spark", usedPercent: 88.4, resetText: "6d 23h", tone: "hot", spark: true },
+        ],
+      },
+    ],
+  },
+  codex: null,
+  focus: [
+    { kind: "claude", state: "off", target: null, lifetime: null },
+    { kind: "non-fable", state: "active", target: "claude-1", lifetime: "permanent" },
+  ],
+};
+
+describe("Signal Room frame", () => {
+  test("uses the shared rail and explicit operational labels", () => {
+    const text = linesToText(renderFrameLines(vm, 80), false);
+    expect(text).toContain("▎ AGENTUSAGE / CAPACITY");
+    expect(text).toContain("▎ CLAUDE");
+    expect(text).toContain("▎ FOCUS");
+    expect(text).toContain("[NON-FABLE]");
+  });
+
+  test("compresses meters and metadata before they wrap", () => {
+    for (const width of [40, 48, 64, 100]) {
+      const lines = renderFrameLines(vm, width, { title: false });
+      for (const line of lines) {
+        expect(line.map((span) => span.text).join("").length).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+
+  test("clips unbounded provider data at the frame edge", () => {
+    const noisy: UsageViewModel = {
+      ...vm,
+      claude: {
+        ...vm.claude!,
+        health: "provider-error-with-a-long-name",
+        ageText: "stale for an unexpectedly long time",
+        notes: ["an upstream diagnostic that is intentionally much wider than the terminal"],
+        cards: [
+          {
+            ...vm.claude!.cards[0]!,
+            name: "claude-account-with-an-unusually-long-display-name",
+            status: "unavailable-for-a-very-long-reason",
+            meters: [
+              {
+                label: "gpt-5.3-codex-spark-with-a-long-suffix",
+                usedPercent: 112,
+                resetText: "123d 23h 59m",
+                tone: "over",
+                spark: true,
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    for (const width of [32, 40, 48]) {
+      for (const line of renderFrameLines(noisy, width)) {
+        expect(line.map((span) => span.text).join("").length).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+
+  test("keeps color optional for snapshot output", () => {
+    const plain = linesToText(renderFrameLines(vm, 80), false);
+    const color = linesToText(renderFrameLines(vm, 80), true);
+    expect(plain).not.toContain("\u001b[");
+    expect(color).toContain("\u001b[38;2;");
+  });
+});

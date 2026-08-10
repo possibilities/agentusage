@@ -1,4 +1,7 @@
 import type { AccountCard, ProviderSection, Tone, UsageViewModel } from "./view.ts";
+import { SIGNAL_GLYPHS, TONE_HEX } from "./tui/theme.ts";
+
+export { TONE_HEX } from "./tui/theme.ts";
 
 export interface Span {
   text: string;
@@ -9,25 +12,22 @@ export interface Span {
 
 export type Line = Span[];
 
-export const TONE_HEX: Record<Tone, string> = {
-  good: "#34d399",
-  warn: "#fbbf24",
-  hot: "#fb923c",
-  over: "#f87171",
-  muted: "#7b8494",
-  accent: "#a78bfa",
-  spark: "#22d3ee",
-  plain: "#d4d8e1",
-};
+const MAX_BAR_WIDTH = 22;
+const MIN_BAR_WIDTH = 10;
+const MAX_LABEL_WIDTH = 16;
+const MIN_LABEL_WIDTH = 9;
 
-const BAR_WIDTH = 22;
-const LABEL_WIDTH = 16;
+function meterGeometry(width: number): { barWidth: number; labelWidth: number } {
+  const barWidth = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, width - 44));
+  const labelWidth = Math.max(MIN_LABEL_WIDTH, Math.min(MAX_LABEL_WIDTH, width - barWidth - 28));
+  return { barWidth, labelWidth };
+}
 
-function bar(usedPercent: number | null): { filled: number; empty: number; overflow: boolean } {
-  if (usedPercent === null) return { filled: 0, empty: BAR_WIDTH, overflow: false };
+function bar(usedPercent: number | null, width: number): { filled: number; empty: number; overflow: boolean } {
+  if (usedPercent === null) return { filled: 0, empty: width, overflow: false };
   const clamped = Math.max(0, Math.min(100, usedPercent));
-  const filled = Math.round((clamped / 100) * BAR_WIDTH);
-  return { filled, empty: BAR_WIDTH - filled, overflow: usedPercent > 100 };
+  const filled = Math.round((clamped / 100) * width);
+  return { filled, empty: width - filled, overflow: usedPercent > 100 };
 }
 
 function pctText(usedPercent: number | null): string {
@@ -37,72 +37,95 @@ function pctText(usedPercent: number | null): string {
   return text.padStart(6);
 }
 
-function meterLine(card: AccountCard, meter: AccountCard["meters"][number]): Line {
-  const label = meter.label.length > LABEL_WIDTH ? `${meter.label.slice(0, LABEL_WIDTH - 1)}…` : meter.label;
-  const { filled, empty, overflow } = bar(meter.usedPercent);
+function meterLine(card: AccountCard, meter: AccountCard["meters"][number], width: number): Line {
+  const { barWidth, labelWidth } = meterGeometry(width);
+  const label = meter.label.length > labelWidth ? `${meter.label.slice(0, labelWidth - 1)}…` : meter.label;
+  const { filled, empty, overflow } = bar(meter.usedPercent, barWidth);
   const barTone: Tone = meter.tone;
   const line: Line = [
     { text: "    " },
-    { text: label.padEnd(LABEL_WIDTH + 1), tone: meter.spark ? "spark" : card.stale ? "muted" : "plain", dim: card.stale },
-    { text: "▕", tone: "muted" },
-    { text: "█".repeat(filled), tone: barTone },
-    { text: "░".repeat(empty), tone: "muted", dim: true },
-    { text: "▏", tone: "muted" },
+    { text: label.padEnd(labelWidth + 1), tone: meter.spark ? "spark" : card.stale ? "muted" : "plain", dim: card.stale },
+    { text: SIGNAL_GLYPHS.meterStart, tone: "muted" },
+    { text: SIGNAL_GLYPHS.meterFull.repeat(filled), tone: barTone },
+    { text: SIGNAL_GLYPHS.meterEmpty.repeat(empty), tone: "muted", dim: true },
+    { text: SIGNAL_GLYPHS.meterEnd, tone: "muted" },
     { text: pctText(meter.usedPercent), tone: barTone, bold: !card.stale && meter.usedPercent !== null && meter.usedPercent >= 80 },
   ];
   if (overflow) line.push({ text: "!", tone: "over", bold: true });
-  if (meter.resetText !== null) {
-    line.push({ text: "  ↻ ", tone: "muted", dim: true });
+  if (meter.resetText !== null && width >= 44) {
+    line.push({ text: `  ${SIGNAL_GLYPHS.reset} `, tone: "muted", dim: true });
     line.push({ text: meter.resetText, tone: card.stale ? "muted" : "plain", dim: card.stale });
   }
   return line;
 }
 
-function cardLines(card: AccountCard): Line[] {
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return max <= 1 ? "…" : `${text.slice(0, max - 1)}…`;
+}
+
+function clipLine(line: Line, width: number): Line {
+  const clipped: Line = [];
+  let used = 0;
+  for (const span of line) {
+    const remaining = width - used;
+    if (remaining <= 0) break;
+    if (span.text.length <= remaining) {
+      clipped.push(span);
+      used += span.text.length;
+      continue;
+    }
+    clipped.push({ ...span, text: truncate(span.text, remaining) });
+    break;
+  }
+  return clipped;
+}
+
+function cardLines(card: AccountCard, width: number): Line[] {
   const header: Line = [
     { text: "  " },
-    { text: card.stale ? "○ " : "● ", tone: card.stale ? "muted" : card.provider === "codex" ? "spark" : "accent" },
+    { text: `${card.stale ? SIGNAL_GLYPHS.idle : SIGNAL_GLYPHS.live} `, tone: card.stale ? "muted" : "good" },
     { text: card.name, bold: true, tone: card.stale ? "muted" : "plain" },
   ];
-  if (card.detail !== null) {
-    header.push({ text: ` · ${card.detail}`, tone: "muted" });
-  }
   if (card.status !== null) {
-    header.push({ text: "  [", tone: "muted" });
+    header.push({ text: "  ", tone: "muted" });
     header.push({ text: card.status, tone: "over", bold: true });
-    header.push({ text: "]", tone: "muted" });
   }
   for (const focusBadge of card.focus) {
-    header.push({ text: `  ⟨${focusBadge}⟩`, tone: "accent", bold: true });
-  }
-  if (card.measuredAgo !== null) {
-    header.push({ text: `  measured ${card.measuredAgo} ago`, tone: "muted", dim: true });
+    header.push({ text: `  [${focusBadge.toUpperCase()}]`, tone: "accent", bold: true });
   }
   const lines: Line[] = [header];
+  const metadata = [card.detail, card.measuredAgo === null ? null : `sampled ${card.measuredAgo} ago`]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+  if (metadata.length > 0) {
+    lines.push([{ text: `    ${truncate(metadata, Math.max(12, width - 4))}`, tone: "muted", dim: true }]);
+  }
   if (card.meters.length === 0) {
     lines.push([{ text: "    no usage data", tone: "muted", dim: true }]);
   } else {
-    for (const meter of card.meters) lines.push(meterLine(card, meter));
+    for (const meter of card.meters) lines.push(meterLine(card, meter, width));
   }
   return lines;
 }
 
 function sectionLines(section: ProviderSection, width: number): Line[] {
-  const title = ` ${section.provider} · ${section.ageText} `;
-  const ruleWidth = Math.max(8, width - title.length - 4);
+  const label = section.provider.toUpperCase();
+  const meta = section.health === "ok" ? section.ageText.toUpperCase() : `${section.health.toUpperCase()} · ${section.ageText}`;
+  const leadWidth = 2 + label.length;
+  const gap = Math.max(2, width - leadWidth - meta.length);
   const headline: Line = [
-    { text: "── ", tone: "muted" },
-    { text: section.provider, tone: section.provider === "codex" ? "spark" : "accent", bold: true },
-    { text: ` · ${section.ageText}`, tone: section.fresh ? "muted" : "hot" },
-    section.health !== "ok" ? { text: ` · ${section.health}`, tone: "over", bold: true } : { text: "" },
-    { text: ` ${"─".repeat(Math.max(4, ruleWidth))}`, tone: "muted" },
+    { text: `${SIGNAL_GLYPHS.rail} `, tone: "accent", bold: true },
+    { text: label, tone: "plain", bold: true },
+    { text: " ".repeat(gap) },
+    { text: meta, tone: section.health !== "ok" ? "over" : section.fresh ? "muted" : "hot", bold: section.health !== "ok" },
   ];
   const lines: Line[] = [headline, []];
   if (section.cards.length === 0) {
     lines.push([{ text: "  no accounts observed", tone: "muted", dim: true }]);
   }
   for (const card of section.cards) {
-    lines.push(...cardLines(card));
+    lines.push(...cardLines(card, width));
     lines.push([]);
   }
   for (const note of section.notes) {
@@ -112,19 +135,34 @@ function sectionLines(section: ProviderSection, width: number): Line[] {
 }
 
 export function renderFrameLines(vm: UsageViewModel, width: number, options: { title?: boolean } = {}): Line[] {
+  const frameWidth = Math.max(32, width);
   const lines: Line[] = [];
   if (options.title !== false) {
     const stamp = new Date(vm.nowMs).toISOString().replace("T", " ").slice(0, 19);
-    lines.push([
-      { text: " agentusage", tone: "accent", bold: true },
-      { text: `  ${stamp}Z`.padStart(Math.max(0, width - 12)), tone: "muted", dim: true },
-    ]);
+    const product = "AGENTUSAGE / CAPACITY";
+    const time = `${stamp}Z`;
+    if (frameWidth >= product.length + time.length + 4) {
+      const gap = frameWidth - product.length - time.length - 2;
+      lines.push([
+        { text: `${SIGNAL_GLYPHS.rail} `, tone: "accent", bold: true },
+        { text: product, tone: "plain", bold: true },
+        { text: " ".repeat(gap) },
+        { text: time, tone: "muted", dim: true },
+      ]);
+    } else {
+      lines.push([
+        { text: `${SIGNAL_GLYPHS.rail} `, tone: "accent", bold: true },
+        { text: product, tone: "plain", bold: true },
+      ]);
+      lines.push([{ text: `  ${time}`, tone: "muted", dim: true }]);
+    }
+    lines.push([{ text: SIGNAL_GLYPHS.rule.repeat(frameWidth), tone: "muted", dim: true }]);
     lines.push([]);
   }
 
   for (const section of [vm.claude, vm.codex]) {
     if (section === null) continue;
-    lines.push(...sectionLines(section, width));
+    lines.push(...sectionLines(section, frameWidth));
   }
   if (vm.claude === null && vm.codex === null) {
     lines.push([{ text: "  no observations yet — run `agentusage refresh` or install the daemon", tone: "muted" }]);
@@ -132,12 +170,12 @@ export function renderFrameLines(vm: UsageViewModel, width: number, options: { t
   }
 
   lines.push([
-    { text: "── ", tone: "muted" },
-    { text: "focus", tone: "accent", bold: true },
-    { text: ` ${"─".repeat(Math.max(4, width - 12))}`, tone: "muted" },
+    { text: `${SIGNAL_GLYPHS.rail} `, tone: "accent", bold: true },
+    { text: "FOCUS", tone: "plain", bold: true },
   ]);
+  lines.push([]);
   for (const focus of vm.focus) {
-    const line: Line = [{ text: `  ${focus.kind.padEnd(10)}`, tone: "plain" }];
+    const line: Line = [{ text: `  ${focus.kind.toUpperCase().padEnd(12)}`, tone: "plain" }];
     if (focus.state === "off") {
       line.push({ text: "off", tone: "muted", dim: true });
     } else {
@@ -147,11 +185,21 @@ export function renderFrameLines(vm: UsageViewModel, width: number, options: { t
         bold: focus.state === "active",
       });
       if (focus.target !== null) line.push({ text: `  → ${focus.target}`, tone: "plain", bold: true });
-      if (focus.lifetime !== null) line.push({ text: `  (${focus.lifetime})`, tone: "muted" });
+      if (focus.lifetime !== null) {
+        const lifetime = `  (${focus.lifetime})`;
+        const currentWidth = line.reduce((total, span) => total + span.text.length, 0);
+        if (currentWidth + lifetime.length <= frameWidth) {
+          line.push({ text: lifetime, tone: "muted" });
+        } else {
+          lines.push(line);
+          lines.push([{ text: `    ${focus.lifetime}`, tone: "muted", dim: true }]);
+          continue;
+        }
+      }
     }
     lines.push(line);
   }
-  return lines;
+  return lines.map((line) => clipLine(line, frameWidth));
 }
 
 const ANSI_RESET = "[0m";

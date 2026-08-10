@@ -12,7 +12,7 @@ import {
 } from "../focus.ts";
 import { buildViewModel } from "../view.ts";
 import { renderFrameLines, TONE_HEX, type Line } from "../render.ts";
-import { VERSION } from "../version.ts";
+import { SIGNAL_GLYPHS, SIGNAL_ROOM } from "./theme.ts";
 
 /**
  * Live usage viewer. Sidecar-backed and daemon-independent: it re-reads the
@@ -29,6 +29,7 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     targetFps: 30,
     autoFocus: false,
     exitSignals: ["SIGTERM", "SIGHUP", "SIGQUIT"],
+    backgroundColor: SIGNAL_ROOM.canvas,
   });
 
   const linesToStyled = (lines: readonly Line[]): InstanceType<typeof core.StyledText> => {
@@ -46,36 +47,107 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     return new core.StyledText(chunks);
   };
 
-  const header = new core.TextRenderable(renderer, {
+  const root = new core.BoxRenderable(renderer, {
+    id: "usage-root",
+    width: "100%",
+    height: "100%",
+    flexDirection: "column",
+    backgroundColor: SIGNAL_ROOM.canvas,
+  });
+  renderer.root.add(root);
+
+  const header = new core.BoxRenderable(renderer, {
     id: "usage-header",
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 2,
+    width: "100%",
+    height: 3,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingLeft: 2,
+    paddingRight: 2,
+    backgroundColor: SIGNAL_ROOM.field,
+    border: ["bottom"],
+    borderStyle: "single",
+    borderColor: SIGNAL_ROOM.line,
   });
-  const footer = new core.TextRenderable(renderer, {
-    id: "usage-footer",
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 2,
+  const headerBrand = new core.BoxRenderable(renderer, {
+    id: "usage-brand",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 1,
+    backgroundColor: SIGNAL_ROOM.field,
   });
+  const headerRail = new core.TextRenderable(renderer, {
+    id: "usage-brand-rail",
+    content: SIGNAL_GLYPHS.rail,
+    fg: SIGNAL_ROOM.accent,
+  });
+  const headerTitle = new core.TextRenderable(renderer, {
+    id: "usage-brand-title",
+    content: linesToStyled([[{ text: "AGENTUSAGE", tone: "plain", bold: true }]]),
+  });
+  const headerContext = new core.TextRenderable(renderer, {
+    id: "usage-brand-context",
+    content: "/ CAPACITY",
+    fg: SIGNAL_ROOM.muted,
+  });
+  headerBrand.add(headerRail);
+  headerBrand.add(headerTitle);
+  headerBrand.add(headerContext);
+
+  const headerPhase = new core.BoxRenderable(renderer, {
+    id: "usage-phase",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    backgroundColor: SIGNAL_ROOM.field,
+  });
+  const headerStatus = new core.TextRenderable(renderer, { id: "usage-status" });
+  const headerClock = new core.TextRenderable(renderer, {
+    id: "usage-clock",
+    content: "--:--:--Z",
+    fg: SIGNAL_ROOM.muted,
+  });
+  headerPhase.add(headerStatus);
+  headerPhase.add(headerClock);
+  header.add(headerBrand);
+  header.add(headerPhase);
+  root.add(header);
+
   const scroll = new core.ScrollBoxRenderable(renderer, {
     id: "usage-scroll",
-    position: "absolute",
-    top: 1,
-    left: 0,
-    right: 0,
-    bottom: 1,
+    width: "100%",
+    flexGrow: 1,
+    paddingTop: 1,
+    paddingBottom: 1,
+    paddingLeft: 2,
+    paddingRight: 2,
+    backgroundColor: SIGNAL_ROOM.canvas,
     viewportCulling: true,
   });
   const body = new core.TextRenderable(renderer, { id: "usage-body" });
   scroll.add(body);
-  renderer.root.add(header);
-  renderer.root.add(scroll);
-  renderer.root.add(footer);
+  root.add(scroll);
+
+  const footer = new core.BoxRenderable(renderer, {
+    id: "usage-footer",
+    width: "100%",
+    height: 3,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingLeft: 2,
+    paddingRight: 2,
+    backgroundColor: SIGNAL_ROOM.field,
+    border: ["top"],
+    borderStyle: "single",
+    borderColor: SIGNAL_ROOM.line,
+  });
+  const footerKeys = new core.TextRenderable(renderer, { id: "usage-keys" });
+  const footerMode = new core.TextRenderable(renderer, { id: "usage-mode" });
+  footer.add(footerKeys);
+  footer.add(footerMode);
+  root.add(footer);
   // Construction-time scrollbar options do not stick; the setter pins them.
   try {
     scroll.verticalScrollBar.visible = false;
@@ -87,7 +159,8 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   let refreshing = false;
   const paint = (): void => {
     const nowMs = Date.now();
-    const width = Math.min(process.stdout.columns ?? 100, 120);
+    const columns = process.stdout.columns ?? 100;
+    const width = Math.max(32, Math.min(columns - 4, 116));
     const claude = readClaudeObservation(paths);
     const codex = readCodexObservation(paths);
     const fableDelivery = readFocusLeaf(paths.fableFocusLeaf, true) as FocusDelivery<FableFocusPolicy>;
@@ -101,26 +174,39 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
       nowMs,
     });
     const stamp = new Date(nowMs).toISOString().replace("T", " ").slice(0, 19);
-    header.content = linesToStyled([
-      [
-        { text: ` agentusage ${VERSION}`, tone: "accent", bold: true },
-        { text: refreshing ? "  ⟳ refreshing…" : "", tone: "spark" },
-        { text: `  ${stamp}Z `.padStart(Math.max(0, width - 20 - (refreshing ? 15 : 0))), tone: "muted", dim: true },
-      ],
+    headerContext.content = columns >= 58 ? "/ CAPACITY" : "";
+    const headerState = refreshing
+      ? columns >= 64
+        ? `${SIGNAL_GLYPHS.reset} REFRESHING`
+        : SIGNAL_GLYPHS.reset
+      : `${SIGNAL_GLYPHS.live} LIVE`;
+    headerStatus.content = linesToStyled([
+      [{ text: headerState, tone: refreshing ? "accent" : "good", bold: true }],
     ]);
+    headerClock.content = columns >= 48 ? `${stamp.slice(11)}Z` : "";
     body.content = linesToStyled(renderFrameLines(vm, width, { title: false }));
-    footer.content = linesToStyled([
-      [
-        { text: " q", tone: "accent", bold: true },
-        { text: " quit  ", tone: "muted" },
-        { text: "r", tone: "accent", bold: true },
-        { text: " refresh  ", tone: "muted" },
-        { text: "j/k", tone: "accent", bold: true },
-        { text: " scroll  ", tone: "muted" },
-        { text: "g/G", tone: "accent", bold: true },
-        { text: " top/bottom", tone: "muted" },
-      ],
-    ]);
+    footerKeys.content = linesToStyled(
+      columns < 44
+        ? [
+            [
+              { text: "[Q]", tone: "accent", bold: true },
+              { text: "  [R]", tone: "accent", bold: true },
+              { text: "  [J/K]", tone: "accent", bold: true },
+            ],
+          ]
+        : [
+            [
+              { text: "[Q]", tone: "accent", bold: true },
+              { text: " quit  ", tone: "muted" },
+              { text: "[R]", tone: "accent", bold: true },
+              { text: " refresh  ", tone: "muted" },
+              { text: "[J/K]", tone: "accent", bold: true },
+              { text: " scroll", tone: "muted" },
+              { text: columns >= 76 ? "  [G/⇧G] edge" : "", tone: "muted" },
+            ],
+          ],
+    );
+    footerMode.content = linesToStyled([[{ text: columns >= 62 ? "AUTO · 1s" : "", tone: "muted", dim: true }]]);
     renderer.requestRender();
   };
 
