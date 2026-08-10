@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Claude + Codex account usage observations, balancing, and TUI over claude-swap and codex-swap",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/possibilities/agentusage.git"
+  },
   "bin": {
     "agentusage": "src/cli.ts",
     "agentusaged": "src/daemon.ts"
