@@ -83,7 +83,8 @@ agentusage status [--json]       health, focus states, would-choose previews
 agentusage balance claude [...]  pick a Claude account (records a reservation)
 agentusage balance codex [...]   pick a Codex account (delegates to codex-swap select)
 agentusage focus fable|non-fable|claude|codex show|set|clear ...
-agentusage recover <c0|route>    one explicit cswap token recovery
+agentusage recover <route|claude-N>
+                                 one explicit cswap token recovery
 agentusage refresh [claude|codex|all]
 agentusage daemon run|status
 ```
@@ -93,7 +94,7 @@ agentusage daemon run|status
 agentusage picks; the launcher launches. Contract:
 
 **Claude** — `agentusage balance claude --json [--fable|--no-fable|--model m]`
-returns `{ ok, route: {id, slot}, ordinal, reason, … }`. Launch with
+returns `{ ok, route: {id, slot}, display_name, reason, … }`. Launch with
 `cswap run <slot> --share-history -- <claude args…>`. Selection is keeper's
 algorithm, applied in order:
 
@@ -145,10 +146,10 @@ leaves under `~/.local/state/agentusage/account-routing/` (codex provider
 focus: `codex-account-routing/`):
 
 ```bash
-agentusage focus fable set c1 permanent            # all Fable launches → c1
-agentusage focus fable set c1 cycle-end            # …until the observed Fable window resets or hits 100%
-agentusage focus fable set c1 current-reset        # …until that reset time (absolute)
-agentusage focus non-fable set c0 absolute 2026-08-12T00:00:00Z
+agentusage focus fable set claude-2 permanent            # all Fable launches → claude-2
+agentusage focus fable set claude-2 cycle-end            # …until the observed Fable window resets or hits 100%
+agentusage focus fable set claude-2 current-reset        # …until that reset time (absolute)
+agentusage focus non-fable set claude-1 absolute 2026-08-12T00:00:00Z
 agentusage focus fable clear
 ```
 
@@ -177,7 +178,7 @@ Codex main-lane weekly) rather than the Fable window, which makes draining an
 account whose week resets soon a single command:
 
 ```bash
-agentusage focus claude set c0 cycle-end           # everything → c0 until its week resets or hits 100%
+agentusage focus claude set claude-1 cycle-end           # everything → claude-1 until its week resets or hits 100%
 agentusage focus codex set <accountKey> current-reset
 agentusage focus claude clear
 ```

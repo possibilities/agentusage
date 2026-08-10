@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { OBSERVATION_SCHEMA_VERSION, type NormalizedWindow, type Observation, type Route } from "../src/claude/types.ts";
 import { statePaths } from "../src/paths.ts";
 import { materializeFocusPolicy, materializeFullFocusPolicy, writeFocusLeaf } from "../src/focus.ts";
-import { selectClaudeRoute } from "../src/balance/claude.ts";
+import { resolveRouteRef, selectClaudeRoute } from "../src/balance/claude.ts";
 
 const NOW = Date.parse("2026-08-08T20:00:00Z");
 
@@ -215,7 +215,7 @@ describe("selectClaudeRoute", () => {
       observation: observation([route(1, { session: 0.2, week: 0.2 }), route(2, { session: 0.2, week: 0.2 })]),
       paths,
       nowMs: NOW,
-      requestedRoute: "c1",
+      requestedRoute: "claude-2",
     });
     expect(result.ok && result.route.id).toBe("claude-swap:2");
     if (result.ok) expect(result.reason).toBe("requested-account");
@@ -228,7 +228,7 @@ describe("selectClaudeRoute", () => {
       observation: observation(routes),
       paths,
       nowMs: NOW,
-      requestedRoute: "c1",
+      requestedRoute: "claude-2",
     });
     expect(eligible.ok && eligible.route.id).toBe("claude-swap:2");
     if (eligible.ok) expect(eligible.reason).toBe("requested-account");
@@ -253,5 +253,21 @@ describe("selectClaudeRoute", () => {
     const errored = { ...fresh, health: "error" as const };
     const errorResult = selectClaudeRoute({ observation: errored, paths, nowMs: NOW });
     expect(!errorResult.ok && errorResult.refusal).toBe("observation-unavailable");
+  });
+});
+
+describe("resolveRouteRef", () => {
+  const observed = observation([route(1, { session: 0.1, week: 0.1 }), route(3, { session: 0.1, week: 0.1 })]);
+
+  test("display names resolve by slot, not by position", () => {
+    expect(resolveRouteRef(observed, "claude-1")).toBe("claude-swap:1");
+    expect(resolveRouteRef(observed, "claude-3")).toBe("claude-swap:3");
+    expect(resolveRouteRef(observed, "claude-2")).toBeNull();
+  });
+
+  test("route ids still resolve and the retired zero-based ref does not", () => {
+    expect(resolveRouteRef(observed, "claude-swap:3")).toBe("claude-swap:3");
+    expect(resolveRouteRef(observed, "c0")).toBeNull();
+    expect(resolveRouteRef(observed, "claude-0")).toBeNull();
   });
 });

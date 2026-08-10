@@ -5,7 +5,7 @@ import {
   OBSERVATION_FRESHNESS_CEILING_MS,
   RECOVERY_TIMEOUT_MS,
 } from "./constants.ts";
-import { type Observation } from "./claude/types.ts";
+import { displayNameForRouteId, type Observation } from "./claude/types.ts";
 import { laneHeadroomPercent, mainLane, type CodexObservation } from "./codex/types.ts";
 import { selectClaudeRoute, resolveRouteRef } from "./balance/claude.ts";
 import { codexAuthEligible, selectCodexAccount, selectCodexSpark } from "./balance/codex.ts";
@@ -48,13 +48,13 @@ const HELP = `agentusage ${VERSION} — Claude + Codex account usage, balancing,
 Usage:
   agentusage [usage] [--snapshot|--watch] [--timeout <dur>] [--json]
   agentusage status [--json]
-  agentusage balance claude [--fable|--no-fable] [--model <m>] [--account <route|cN>] [--dry-run] [--json]
+  agentusage balance claude [--fable|--no-fable] [--model <m>] [--account <route|claude-N>] [--dry-run] [--json]
   agentusage balance codex [--model <m>] [--strategy best|next-available] [--claim] [--json]
-  agentusage focus fable   show|set|clear [<route|cN> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
-  agentusage focus non-fable show|set|clear [<route|cN> permanent|absolute [deadline]] [--require-eligible] [--json]
-  agentusage focus claude  show|set|clear [<route|cN> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
+  agentusage focus fable   show|set|clear [<route|claude-N> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
+  agentusage focus non-fable show|set|clear [<route|claude-N> permanent|absolute [deadline]] [--require-eligible] [--json]
+  agentusage focus claude  show|set|clear [<route|claude-N> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
   agentusage focus codex   show|set|clear [<accountKey> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
-  agentusage recover <route|cN> [--json]
+  agentusage recover <route|claude-N> [--json]
   agentusage refresh [claude|codex|all] [--json]
   agentusage daemon run|status
   agentusage help | version
@@ -109,6 +109,11 @@ function parseDurationMs(value: string): number | null {
   if (match[2] === "ms") return amount;
   if (match[2] === "s") return amount * 1000;
   return amount * 60_000;
+}
+
+/** Claude provider-focus targets are route ids; codex targets are accountKeys. */
+function providerTargetName(provider: "claude" | "codex", target: string): string {
+  return provider === "claude" ? displayNameForRouteId(target) : target;
 }
 
 function emitJson(value: unknown): void {
@@ -284,7 +289,9 @@ async function statusCommand(args: string[]): Promise<number> {
   describe("codex", codex === null ? "no observation" : `${codex.health} · ${Math.round((nowMs - codex.observed_at_ms) / 1000)}s old · ${codex.accounts.length} accounts`);
   describe(
     "claude focus",
-    focus.claudeFull.state === "off" ? "off" : `${focus.claudeFull.state} → ${focus.claudeFull.policy?.target ?? "?"}`,
+    focus.claudeFull.state === "off"
+      ? "off"
+      : `${focus.claudeFull.state} → ${focus.claudeFull.policy === null ? "?" : displayNameForRouteId(focus.claudeFull.policy.target)}`,
   );
   describe(
     "codex focus",
@@ -292,17 +299,21 @@ async function statusCommand(args: string[]): Promise<number> {
   );
   describe(
     "fable focus",
-    focus.fable.state === "off" ? "off" : `${focus.fable.state} → ${focus.fable.policy?.target_route ?? "?"}`,
+    focus.fable.state === "off"
+      ? "off"
+      : `${focus.fable.state} → ${focus.fable.policy === null ? "?" : displayNameForRouteId(focus.fable.policy.target_route)}`,
   );
   describe(
     "non-fable focus",
-    focus.nonFable.state === "off" ? "off" : `${focus.nonFable.state} → ${focus.nonFable.policy?.target_route ?? "?"}`,
+    focus.nonFable.state === "off"
+      ? "off"
+      : `${focus.nonFable.state} → ${focus.nonFable.policy === null ? "?" : displayNameForRouteId(focus.nonFable.policy.target_route)}`,
   );
   if (claudePreview !== null) {
-    describe("would choose", claudePreview.ok ? `${claudePreview.route.id} (${claudePreview.reason})` : claudePreview.refusal);
+    describe("would choose", claudePreview.ok ? `${claudePreview.display_name} (${claudePreview.reason})` : claudePreview.refusal);
   }
   if (claudeFablePreview !== null) {
-    describe("… for fable", claudeFablePreview.ok ? `${claudeFablePreview.route.id} (${claudeFablePreview.reason})` : claudeFablePreview.refusal);
+    describe("… for fable", claudeFablePreview.ok ? `${claudeFablePreview.display_name} (${claudeFablePreview.reason})` : claudeFablePreview.refusal);
   }
   if (codex?.recommendation != null) describe("codex rec.", codex.recommendation.accountKey);
   if (sparkPreview !== null) {
@@ -349,8 +360,7 @@ async function balanceCommand(args: string[]): Promise<number> {
     if (flags.booleans.has("json")) {
       emitJson({ schema_version: 1, provider: "claude", ...selection });
     } else if (selection.ok) {
-      const ordinal = selection.ordinal === null ? "" : ` (c${selection.ordinal})`;
-      console.log(`${selection.route.id}${ordinal} — ${selection.reason}`);
+      console.log(`${selection.route.id} (${selection.display_name}) — ${selection.reason}`);
       console.log(`launch: cswap run ${selection.route.slot} --share-history -- <claude args>`);
     } else {
       console.error(`agentusage: ${selection.refusal}: ${selection.detail}`);
@@ -465,7 +475,7 @@ async function focusCommand(args: string[]): Promise<number> {
     else if (status.state === "off") console.log(`${kind} focus: off`);
     else {
       console.log(
-        `${kind} focus: ${status.state}${status.policy === null ? "" : ` → ${status.policy.target_route} (${status.policy.lifetime.kind})`}${
+        `${kind} focus: ${status.state}${status.policy === null ? "" : ` → ${displayNameForRouteId(status.policy.target_route)} (${status.policy.lifetime.kind})`}${
           status.diagnostic === "none" ? "" : ` [${status.diagnostic}]`
         }`,
       );
@@ -483,7 +493,7 @@ async function focusCommand(args: string[]): Promise<number> {
   const targetRef = flags.positionals[0];
   const lifetimeToken = flags.positionals[1];
   if (targetRef === undefined || lifetimeToken === undefined) {
-    console.error(`agentusage focus ${kind} set: expected <route|cN> <lifetime>`);
+    console.error(`agentusage focus ${kind} set: expected <route|claude-N> <lifetime>`);
     return 2;
   }
 
@@ -549,7 +559,7 @@ async function focusCommand(args: string[]): Promise<number> {
     writeFocusLeaf(leafPath, materializeFocusPolicy(targetRoute, lifetime as AccountFocusLifetime, false, nowMs));
   }
   if (flags.booleans.has("json")) emitJson({ schema_version: 1, kind, target_route: targetRoute, lifetime });
-  else console.log(`${kind} focus → ${targetRoute} (${lifetime.kind})`);
+  else console.log(`${kind} focus → ${displayNameForRouteId(targetRoute)} (${lifetime.kind})`);
   return 0;
 }
 
@@ -585,7 +595,7 @@ async function fullFocusAction(
     else if (status.state === "off") console.log(`${provider} focus: off`);
     else {
       console.log(
-        `${provider} focus: ${status.state}${status.policy === null ? "" : ` → ${status.policy.target} (${status.policy.lifetime.kind})`}${
+        `${provider} focus: ${status.state}${status.policy === null ? "" : ` → ${providerTargetName(provider, status.policy.target)} (${status.policy.lifetime.kind})`}${
           status.diagnostic === "none" ? "" : ` [${status.diagnostic}]`
         }`,
       );
@@ -603,7 +613,7 @@ async function fullFocusAction(
   const targetRef = flags.positionals[0];
   const lifetimeToken = flags.positionals[1];
   if (targetRef === undefined || lifetimeToken === undefined) {
-    console.error(`agentusage focus ${provider} set: expected <${provider === "claude" ? "route|cN" : "accountKey"}> <lifetime>`);
+    console.error(`agentusage focus ${provider} set: expected <${provider === "claude" ? "route|claude-N" : "accountKey"}> <lifetime>`);
     return 2;
   }
 
@@ -677,7 +687,7 @@ async function fullFocusAction(
 
   writeFocusLeaf(leafPath, materializeFullFocusPolicy(provider, target, lifetime, nowMs));
   if (flags.booleans.has("json")) emitJson({ schema_version: 1, kind: provider, target, lifetime });
-  else console.log(`${provider} focus → ${target} (${lifetime.kind})`);
+  else console.log(`${provider} focus → ${providerTargetName(provider, target)} (${lifetime.kind})`);
   return 0;
 }
 
@@ -689,7 +699,7 @@ async function recoverCommand(args: string[]): Promise<number> {
   if (flags === null) return 2;
   const ref = flags.positionals[0];
   if (ref === undefined) {
-    console.error("agentusage recover: expected <route|cN>");
+    console.error("agentusage recover: expected <route|claude-N>");
     return 2;
   }
   const paths = statePaths(process.env);

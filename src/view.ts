@@ -4,6 +4,7 @@ import {
   ROUTE_MEASUREMENT_FRESHNESS_CEILING_MS,
 } from "./constants.ts";
 import {
+  displayNameForRouteId,
   MODEL_WINDOW_PREFIX,
   type NormalizedWindow,
   type Observation,
@@ -150,7 +151,6 @@ function buildClaudeSection(
     .map(([id]) => id);
 
   for (const id of orderedIds) {
-    const ordinal = observation.claude_accounts.ordinals[id] ?? 0;
     const route = observation.routes.find((candidate) => candidate.id === id);
     const issue = observation.account_issues[id];
     const measurement = route ?? observation.account_measurements?.[id];
@@ -160,7 +160,7 @@ function buildClaudeSection(
     const muted = issue !== undefined || measurementStale || !fresh;
     cards.push({
       provider: "claude",
-      name: `c${ordinal}`,
+      name: displayNameForRouteId(id),
       detail: capacityDetail(observation, id),
       status: issue ?? null,
       stale: muted,
@@ -233,7 +233,7 @@ function buildCodexSection(
     if (identity !== null) detailParts.push(identity);
     cards.push({
       provider: "codex",
-      name: `Codex ${account.ndyIndex ?? index + 1}`,
+      name: `codex-${(account.ndyIndex ?? index) + 1}`,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
       status,
       stale: displayStale,
@@ -300,29 +300,37 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
     badge(claudeBadges, input.nonFable.policy.target_route, "non-fable⤳");
   }
 
+  // Focus lines name the same account the cards do: route ids and codex
+  // accountKeys are storage identities, display names are what operators read.
+  const codexName = (accountKey: string): string => {
+    const index = input.codex?.accounts.findIndex((account) => account.accountKey === accountKey) ?? -1;
+    if (index < 0) return accountKey;
+    return `codex-${(input.codex?.accounts[index]?.ndyIndex ?? index) + 1}`;
+  };
+
   const focus: FocusLine[] = [
     {
       kind: "claude",
       state: input.claudeFull.state,
-      target: input.claudeFull.policy?.target ?? null,
+      target: input.claudeFull.policy === null ? null : displayNameForRouteId(input.claudeFull.policy.target),
       lifetime: input.claudeFull.policy === null ? null : lifetimeText(input.claudeFull.policy, input.nowMs),
     },
     {
       kind: "codex",
       state: input.codexFull.state,
-      target: input.codexFull.policy?.target ?? null,
+      target: input.codexFull.policy === null ? null : codexName(input.codexFull.policy.target),
       lifetime: input.codexFull.policy === null ? null : lifetimeText(input.codexFull.policy, input.nowMs),
     },
     {
       kind: "fable",
       state: input.fable.state,
-      target: input.fable.policy?.target_route ?? null,
+      target: input.fable.policy === null ? null : displayNameForRouteId(input.fable.policy.target_route),
       lifetime: input.fable.policy === null ? null : lifetimeText(input.fable.policy, input.nowMs),
     },
     {
       kind: "non-fable",
       state: input.nonFable.state,
-      target: input.nonFable.policy?.target_route ?? null,
+      target: input.nonFable.policy === null ? null : displayNameForRouteId(input.nonFable.policy.target_route),
       lifetime: input.nonFable.policy === null ? null : lifetimeText(input.nonFable.policy, input.nowMs),
     },
   ];

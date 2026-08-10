@@ -19,8 +19,14 @@ account carries an issue instead — never both, never neither.
 **Slot** — claude-swap's positive-integer account number, the argument to
 `cswap run <slot>`.
 
-**Ordinal** — zero-based display position (`c0`, `c1`, …) of a Claude account
-in cswap inventory order; how humans name routes in commands.
+**Display name** — the operator-facing 1-indexed name of an account:
+`claude-<slot>` (so `claude-swap:1` is `claude-1`) and `codex-<n>` for the
+nth Codex account. Also the short ref accepted wherever a Claude route id is.
+_Avoid_: `c0`/`c1` and `Codex 0` (the retired zero-based forms).
+
+**Ordinal** — zero-based position of a Claude account in cswap inventory
+order, kept in the observation for ordering and bookkeeping. Never displayed
+and never a command ref — that is the display name's job.
 
 **Lane** — a group of Codex rate-limit windows that share one quota pool: the
 binding `main` lane (primary 5 h + secondary weekly), the non-binding

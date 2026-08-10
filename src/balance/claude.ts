@@ -8,8 +8,10 @@ import {
 import {
   FABLE_WINDOW_KEY,
   MODEL_WINDOW_PREFIX,
+  displayNameForRouteId,
   type Observation,
   type Route,
+  routeIdForSlot,
   SESSION_WINDOW,
   WEEK_WINDOW,
 } from "../claude/types.ts";
@@ -92,6 +94,9 @@ export interface ScoredCandidate {
 export interface ClaudeSelectionSuccess {
   ok: true;
   route: Route;
+  /** Operator-facing `claude-<slot>` name for the chosen route. */
+  display_name: string;
+  /** Zero-based position in cswap inventory order; bookkeeping, not display. */
   ordinal: number | null;
   reason: SelectionReason;
   fableIntent: boolean;
@@ -339,20 +344,19 @@ export interface SelectClaudeOptions {
   nowMs?: number;
   model?: string | null;
   fableIntent?: boolean | null;
-  /** Route id or ordinal ref (`c0`); bypasses scoring but not eligibility. */
+  /** Route id or display name (`claude-1`); bypasses scoring but not eligibility. */
   requestedRoute?: string | null;
   /** Preview only: no reservation is recorded. */
   dryRun?: boolean;
 }
 
 export function resolveRouteRef(observation: Observation, ref: string): string | null {
-  const ordinalMatch = /^c(\d+)$/u.exec(ref);
-  if (ordinalMatch !== null) {
-    const ordinal = Number(ordinalMatch[1]);
-    for (const [id, position] of Object.entries(observation.claude_accounts.ordinals)) {
-      if (position === ordinal) return id;
-    }
-    return null;
+  // `claude-<slot>` is the display name; it names the slot directly, so an
+  // account cswap knows about resolves whether or not it is launch-eligible.
+  const nameMatch = /^claude-([1-9]\d*)$/u.exec(ref);
+  if (nameMatch !== null) {
+    const id = routeIdForSlot(Number(nameMatch[1]));
+    return id in observation.claude_accounts.ordinals ? id : null;
   }
   return /^claude-swap:[1-9]\d*$/u.test(ref) ? ref : null;
 }
@@ -408,6 +412,7 @@ export function selectClaudeRoute(options: SelectClaudeOptions): ClaudeSelection
     return {
       ok: true,
       route: chosen,
+      display_name: displayNameForRouteId(chosen.id),
       ordinal: observation.claude_accounts.ordinals[chosen.id] ?? null,
       reason,
       fableIntent: intent,

@@ -80,6 +80,12 @@ export function routeIdForSlot(slot: number): string {
   return `claude-swap:${slot}`;
 }
 
+/** Operator-facing name for a route: `claude-<slot>`, 1-indexed like cswap's own numbering. */
+export function displayNameForRouteId(id: string): string {
+  const slot = slotForRouteId(id);
+  return slot === null ? id : `claude-${slot}`;
+}
+
 export function slotForRouteId(id: string): number | null {
   const match = /^claude-swap:([1-9]\d*)$/u.exec(id);
   if (match === null) return null;
