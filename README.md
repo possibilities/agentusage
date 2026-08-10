@@ -1,4 +1,4 @@
-# agentusage
+# AgentUsage
 
 [![CI](https://github.com/possibilities/agentusage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/possibilities/agentusage/actions/workflows/ci.yml)
 
