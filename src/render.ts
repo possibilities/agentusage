@@ -215,7 +215,8 @@ export function renderFrameLines(
     }
     lines.push(line);
   }
-  return lines.map((line) => clipLine(line, frameWidth));
+  const clipped = lines.map((line) => clipLine(line, frameWidth));
+  return clipped.filter((line, index) => line.length > 0 || clipped[index - 1]?.length !== 0);
 }
 
 const ANSI_RESET = "[0m";

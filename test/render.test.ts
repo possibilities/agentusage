@@ -65,6 +65,14 @@ describe("Signal Room frame", () => {
     expect(comfortable[comfortableMetadata + 2]).toContain("session");
   });
 
+  test("never renders more than one consecutive blank line", () => {
+    for (const density of ["compact", "comfortable"] as const) {
+      const lines = renderFrameLines(vm, 80, { density });
+      const hasDoubleBlank = lines.some((line, index) => line.length === 0 && lines[index - 1]?.length === 0);
+      expect(hasDoubleBlank).toBe(false);
+    }
+  });
+
   test("lets meters occupy the field instead of huddling at the left", () => {
     const text = linesToText(renderFrameLines(vm, 80, { title: false }), false);
     const meter = text.split("\n").find((line) => line.includes("session"))!;
