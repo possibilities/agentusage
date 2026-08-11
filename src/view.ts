@@ -206,7 +206,7 @@ function buildCodexSection(
   const fresh = observation.health === "ok" && ageMs <= CODEX_OBSERVATION_FRESHNESS_CEILING_MS;
   const cards: AccountCard[] = [];
 
-  observation.accounts.forEach((account, index) => {
+  observation.accounts.filter((account) => account.present).forEach((account, index) => {
     const displayStale = account.measurementSource === "last-good" || !account.decisionGrade || !fresh;
     const status =
       account.reloginRequired

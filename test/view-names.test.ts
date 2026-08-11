@@ -79,4 +79,15 @@ describe("account display names", () => {
     const model = build(null, codexObservation());
     expect(model.codex?.cards.map((card) => card.name)).toEqual(["codex-1", "codex-2"]);
   });
+
+  test("codex cards exclude historical accounts absent from the provider store", () => {
+    const observation = codexObservation();
+    observation.accounts.push(
+      { ...codexAccount("account:legacy-a", 0), present: false },
+      { ...codexAccount("account:legacy-b", 1), present: false },
+    );
+
+    const model = build(null, observation);
+    expect(model.codex?.cards.map((card) => card.name)).toEqual(["codex-1", "codex-2"]);
+  });
 });
