@@ -36,7 +36,6 @@ Via AgentStart (preferred — it installs the command, its provider CLIs, and th
 
 ```bash
 ~/code/agentstart/scripts/install.sh --install
-funk verify-local-services
 ```
 
 Or directly:

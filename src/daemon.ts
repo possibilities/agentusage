@@ -162,7 +162,7 @@ export async function daemonRun(env: Record<string, string | undefined> = proces
   log("daemon", "stopped");
 }
 
-/** Liveness probe for funk's verify step: both sidecars written recently. */
+/** Liveness probe for the machine's verify step: both sidecars written recently. */
 export function daemonStatus(env: Record<string, string | undefined> = process.env): number {
   const paths = statePaths(env);
   const claude = readClaudeObservation(paths);

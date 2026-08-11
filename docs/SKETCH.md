@@ -1,15 +1,15 @@
 # agentusage — build sketch
 
 Self-approved 2026-08-08 under Mike's standing authorization; investigation
-reports from four explorers (keeper usage, claude-swap fork, codex-swap, funk
-installers) are the evidence base.
+reports from four explorers (keeper usage, claude-swap fork, codex-swap, and
+the machine installers) are the evidence base.
 
 ## Goal
 
 Give this account keeper-`usage` parity as a standalone tool: an observation
 daemon, an explicit `balance` command for launchers, Fable/Non-Fable focus, and
 an OpenTUI usage view — over Claude accounts (via claude-swap) and Codex
-accounts (via codex-swap), installed by funk as a launchagent.
+accounts (via codex-swap), installed by AgentStart as a launchagent.
 
 ## Direction
 
@@ -53,8 +53,9 @@ accounts (via codex-swap), installed by funk as a launchagent.
 - **Install copies the agentweb shape** (the new account's convention):
   project-owned `scripts/install.sh` — bun-shim bins `agentusage` +
   `agentusaged`, rendered `agentusage.daemon` plist with ownership marker and
-  bootout/bootstrap dance, receipt in `~/.local/state/agentusage/` — plus funk
-  edits wiring it into AgentStart's `install-agent-clis` / funk's `verify-local-services`.
+  bootout/bootstrap dance, receipt in `~/.local/state/agentusage/` — plus the
+  edits wiring it into AgentStart's `install-agent-clis` and the machine's
+  local-service verification.
   Providers are provisioned by `scripts/install-providers.sh`: claude-swap
   from `~/src/claude-swap` with fork remote and an `integration/agentusage`
   branch (current upstream + open PRs #169 capacity-metadata + #166 recover)
@@ -85,7 +86,6 @@ accounts (via codex-swap), installed by funk as a launchagent.
 - `scripts/install.sh`, `scripts/install-providers.sh`. The daemon's
   LaunchAgent is AgentStart's: `~/code/agentstart/config/launchd/`.
 - `~/code/agentstart`: `scripts/install-agent-clis`, `scripts/install-launchagents`.
-- `~/code/funk`: `libexec/verify-local-services`, `install`, `bin/funk` usage text.
 - `~/src/claude-swap`: fork remote + `integration/agentusage` branch.
 - `test/` — normalization, balance scoring/tie-breaks/focus overlay, focus
   lifetimes, spark grouping/selection, sidecar IO.
