@@ -10,7 +10,7 @@ import {
   type FableFocusPolicy,
   type FocusDelivery,
 } from "../focus.ts";
-import { buildViewModel } from "../view.ts";
+import { buildViewModel, formatClock } from "../view.ts";
 import { renderFrameLines, TONE_HEX, type Line } from "../render.ts";
 import { SIGNAL_GLYPHS, SIGNAL_ROOM } from "./theme.ts";
 
@@ -157,6 +157,7 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   }
 
   let refreshing = false;
+  const startedAtMs = Date.now();
   const paint = (): void => {
     const nowMs = Date.now();
     const columns = process.stdout.columns ?? 100;
@@ -173,7 +174,6 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
       codexFull: effectiveCodexFullFocus(readFullFocusLeaf(paths.codexFullFocusLeaf, "codex"), codex, nowMs),
       nowMs,
     });
-    const stamp = new Date(nowMs).toISOString().replace("T", " ").slice(0, 19);
     headerContext.content = columns >= 58 ? "/ CAPACITY" : "";
     const headerState = refreshing
       ? columns >= 64
@@ -183,8 +183,8 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     headerStatus.content = linesToStyled([
       [{ text: headerState, tone: refreshing ? "accent" : "good", bold: true }],
     ]);
-    headerClock.content = columns >= 48 ? `${stamp.slice(11)}Z` : "";
-    body.content = linesToStyled(renderFrameLines(vm, width, { title: false }));
+    headerClock.content = columns >= 48 ? formatClock(nowMs - startedAtMs) : "";
+    body.content = linesToStyled(renderFrameLines(vm, width, { title: false, density: "comfortable" }));
     footerKeys.content = linesToStyled(
       columns < 44
         ? [

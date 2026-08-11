@@ -12,7 +12,7 @@ export interface Span {
 
 export type Line = Span[];
 
-const MAX_BAR_WIDTH = 22;
+const MAX_BAR_WIDTH = 40;
 const MIN_BAR_WIDTH = 10;
 const MAX_LABEL_WIDTH = 16;
 const MIN_LABEL_WIDTH = 9;
@@ -81,7 +81,7 @@ function clipLine(line: Line, width: number): Line {
   return clipped;
 }
 
-function cardLines(card: AccountCard, width: number): Line[] {
+function cardLines(card: AccountCard, width: number, comfortable: boolean): Line[] {
   const header: Line = [
     { text: "  " },
     { text: `${card.stale ? SIGNAL_GLYPHS.idle : SIGNAL_GLYPHS.live} `, tone: card.stale ? "muted" : "good" },
@@ -101,6 +101,7 @@ function cardLines(card: AccountCard, width: number): Line[] {
   if (metadata.length > 0) {
     lines.push([{ text: `    ${truncate(metadata, Math.max(12, width - 4))}`, tone: "muted", dim: true }]);
   }
+  if (comfortable) lines.push([]);
   if (card.meters.length === 0) {
     lines.push([{ text: "    no usage data", tone: "muted", dim: true }]);
   } else {
@@ -109,7 +110,7 @@ function cardLines(card: AccountCard, width: number): Line[] {
   return lines;
 }
 
-function sectionLines(section: ProviderSection, width: number): Line[] {
+function sectionLines(section: ProviderSection, width: number, comfortable: boolean): Line[] {
   const label = section.provider.toUpperCase();
   const meta = section.health === "ok" ? section.ageText.toUpperCase() : `${section.health.toUpperCase()} · ${section.ageText}`;
   const leadWidth = 2 + label.length;
@@ -125,17 +126,32 @@ function sectionLines(section: ProviderSection, width: number): Line[] {
     lines.push([{ text: "  no accounts observed", tone: "muted", dim: true }]);
   }
   for (const card of section.cards) {
-    lines.push(...cardLines(card, width));
+    lines.push(...cardLines(card, width, comfortable));
     lines.push([]);
+    if (comfortable) lines.push([]);
   }
   for (const note of section.notes) {
     lines.push([{ text: `  ⚠ ${note}`, tone: "warn", dim: true }]);
   }
+  const desiredTrailingSpace = comfortable ? 2 : 1;
+  let trailingSpace = 0;
+  for (let index = lines.length - 1; index >= 0 && lines[index]?.length === 0; index -= 1) {
+    trailingSpace += 1;
+  }
+  while (trailingSpace < desiredTrailingSpace) {
+    lines.push([]);
+    trailingSpace += 1;
+  }
   return lines;
 }
 
-export function renderFrameLines(vm: UsageViewModel, width: number, options: { title?: boolean } = {}): Line[] {
+export function renderFrameLines(
+  vm: UsageViewModel,
+  width: number,
+  options: { title?: boolean; density?: "compact" | "comfortable" } = {},
+): Line[] {
   const frameWidth = Math.max(32, width);
+  const comfortable = options.density === "comfortable";
   const lines: Line[] = [];
   if (options.title !== false) {
     const stamp = new Date(vm.nowMs).toISOString().replace("T", " ").slice(0, 19);
@@ -162,7 +178,7 @@ export function renderFrameLines(vm: UsageViewModel, width: number, options: { t
 
   for (const section of [vm.claude, vm.codex]) {
     if (section === null) continue;
-    lines.push(...sectionLines(section, frameWidth));
+    lines.push(...sectionLines(section, frameWidth, comfortable));
   }
   if (vm.claude === null && vm.codex === null) {
     lines.push([{ text: "  no observations yet — run `agentusage refresh` or install the daemon", tone: "muted" }]);

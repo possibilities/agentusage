@@ -85,6 +85,16 @@ export function formatDurationMs(ms: number): string {
   return restHours === 0 ? `${days}d` : `${days}d ${restHours}h`;
 }
 
+/** "mm:ss" (or "h:mm:ss" past an hour); negatives clamp to 00:00. */
+export function formatClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const seconds = total % 60;
+  const minutes = Math.floor(total / 60) % 60;
+  const hours = Math.floor(total / 3600);
+  const mmss = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return hours > 0 ? `${hours}:${mmss}` : mmss;
+}
+
 function countdownTo(resetsAt: string | null, nowMs: number): string | null {
   if (resetsAt === null) return null;
   const resetMs = Date.parse(resetsAt);

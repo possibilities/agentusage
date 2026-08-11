@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { linesToText, renderFrameLines } from "../src/render.ts";
-import type { UsageViewModel } from "../src/view.ts";
+import { formatClock, type UsageViewModel } from "../src/view.ts";
 
 const vm: UsageViewModel = {
   nowMs: Date.parse("2026-08-10T23:00:00Z"),
@@ -49,6 +49,33 @@ describe("Signal Room frame", () => {
         expect(line.map((span) => span.text).join("").length).toBeLessThanOrEqual(width);
       }
     }
+  });
+
+  test("uses comfortable instrument spacing without changing snapshot density", () => {
+    const compact = linesToText(renderFrameLines(vm, 80, { title: false }), false).split("\n");
+    const comfortable = linesToText(
+      renderFrameLines(vm, 80, { title: false, density: "comfortable" }),
+      false,
+    ).split("\n");
+    const compactMetadata = compact.findIndex((line) => line.includes("sampled 12s ago"));
+    const comfortableMetadata = comfortable.findIndex((line) => line.includes("sampled 12s ago"));
+
+    expect(compact[compactMetadata + 1]).toContain("session");
+    expect(comfortable[comfortableMetadata + 1]).toBe("");
+    expect(comfortable[comfortableMetadata + 2]).toContain("session");
+  });
+
+  test("lets meters occupy the field instead of huddling at the left", () => {
+    const text = linesToText(renderFrameLines(vm, 80, { title: false }), false);
+    const meter = text.split("\n").find((line) => line.includes("session"))!;
+    const bar = meter.slice(meter.indexOf("▕") + 1, meter.indexOf("▏"));
+    expect(bar.length).toBe(36);
+  });
+
+  test("shares agentvoice's elapsed time grammar", () => {
+    expect(formatClock(-1)).toBe("00:00");
+    expect(formatClock(61_000)).toBe("01:01");
+    expect(formatClock(3_661_000)).toBe("1:01:01");
   });
 
   test("clips unbounded provider data at the frame edge", () => {
