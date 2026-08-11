@@ -10,8 +10,9 @@ import {
   type FableFocusPolicy,
   type FocusDelivery,
 } from "../focus.ts";
-import { buildViewModel, formatClock } from "../view.ts";
+import { buildViewModel } from "../view.ts";
 import { renderFrameLines, TONE_HEX, type Line } from "../render.ts";
+import { buildUsageChrome } from "./chrome.ts";
 import { SIGNAL_GLYPHS, SIGNAL_ROOM } from "./theme.ts";
 
 /**
@@ -32,16 +33,25 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     backgroundColor: SIGNAL_ROOM.canvas,
   });
 
+  const lineChunks = (line: Line): ReturnType<typeof core.bold>[] => {
+    const chunks: ReturnType<typeof core.bold>[] = [];
+    for (const span of line) {
+      if (span.text.length === 0) continue;
+      let chunk = span.tone !== undefined ? core.fg(TONE_HEX[span.tone])(span.text) : core.fg(TONE_HEX.plain)(span.text);
+      if (span.bold === true) chunk = core.bold(chunk);
+      if (span.dim === true) chunk = core.dim(chunk);
+      chunks.push(chunk);
+    }
+    return chunks;
+  };
+
+  const lineToStyled = (line: Line): InstanceType<typeof core.StyledText> =>
+    new core.StyledText(lineChunks(line));
+
   const linesToStyled = (lines: readonly Line[]): InstanceType<typeof core.StyledText> => {
     const chunks: ReturnType<typeof core.bold>[] = [];
     for (const line of lines) {
-      for (const span of line) {
-        if (span.text.length === 0) continue;
-        let chunk = span.tone !== undefined ? core.fg(TONE_HEX[span.tone])(span.text) : core.fg(TONE_HEX.plain)(span.text);
-        if (span.bold === true) chunk = core.bold(chunk);
-        if (span.dim === true) chunk = core.dim(chunk);
-        chunks.push(chunk);
-      }
+      chunks.push(...lineChunks(line));
       chunks.push(core.fg(TONE_HEX.plain)("\n"));
     }
     return new core.StyledText(chunks);
@@ -84,11 +94,11 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   });
   const headerTitle = new core.TextRenderable(renderer, {
     id: "usage-brand-title",
-    content: linesToStyled([[{ text: "AGENTUSAGE", tone: "plain", bold: true }]]),
+    content: lineToStyled([{ text: "AGENTUSAGE", tone: "plain", bold: true }]),
   });
   const headerContext = new core.TextRenderable(renderer, {
     id: "usage-brand-context",
-    content: "/ CAPACITY",
+    content: " / CAPACITY",
     fg: SIGNAL_ROOM.muted,
   });
   headerBrand.add(headerRail);
@@ -102,10 +112,14 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     gap: 2,
     backgroundColor: SIGNAL_ROOM.field,
   });
-  const headerStatus = new core.TextRenderable(renderer, { id: "usage-status" });
+  const headerStatus = new core.TextRenderable(renderer, {
+    id: "usage-status",
+    content: "",
+    fg: SIGNAL_ROOM.muted,
+  });
   const headerClock = new core.TextRenderable(renderer, {
     id: "usage-clock",
-    content: "--:--:--Z",
+    content: "--:--",
     fg: SIGNAL_ROOM.muted,
   });
   headerPhase.add(headerStatus);
@@ -143,8 +157,16 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     borderStyle: "single",
     borderColor: SIGNAL_ROOM.line,
   });
-  const footerKeys = new core.TextRenderable(renderer, { id: "usage-keys" });
-  const footerMode = new core.TextRenderable(renderer, { id: "usage-mode" });
+  const footerKeys = new core.TextRenderable(renderer, {
+    id: "usage-keys",
+    content: "",
+    fg: SIGNAL_ROOM.muted,
+  });
+  const footerMode = new core.TextRenderable(renderer, {
+    id: "usage-mode",
+    content: "AUTO · 1s",
+    fg: SIGNAL_ROOM.muted,
+  });
   footer.add(footerKeys);
   footer.add(footerMode);
   root.add(footer);
@@ -174,39 +196,15 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
       codexFull: effectiveCodexFullFocus(readFullFocusLeaf(paths.codexFullFocusLeaf, "codex"), codex, nowMs),
       nowMs,
     });
-    headerContext.content = columns >= 58 ? "/ CAPACITY" : "";
-    const headerState = refreshing
-      ? columns >= 64
-        ? `${SIGNAL_GLYPHS.reset} REFRESHING`
-        : SIGNAL_GLYPHS.reset
-      : `${SIGNAL_GLYPHS.live} LIVE`;
-    headerStatus.content = linesToStyled([
-      [{ text: headerState, tone: refreshing ? "accent" : "good", bold: true }],
-    ]);
-    headerClock.content = columns >= 48 ? formatClock(nowMs - startedAtMs) : "";
+    const chrome = buildUsageChrome(columns, refreshing, nowMs - startedAtMs);
+    headerContext.content = chrome.context;
+    headerStatus.content = chrome.status.text;
+    headerStatus.fg = TONE_HEX[chrome.status.tone ?? "plain"];
+    headerClock.content = chrome.clock.text;
+    headerClock.fg = TONE_HEX[chrome.clock.tone ?? "plain"];
     body.content = linesToStyled(renderFrameLines(vm, width, { title: false, density: "comfortable" }));
-    footerKeys.content = linesToStyled(
-      columns < 44
-        ? [
-            [
-              { text: "[Q]", tone: "accent", bold: true },
-              { text: "  [R]", tone: "accent", bold: true },
-              { text: "  [J/K]", tone: "accent", bold: true },
-            ],
-          ]
-        : [
-            [
-              { text: "[Q]", tone: "accent", bold: true },
-              { text: " quit  ", tone: "muted" },
-              { text: "[R]", tone: "accent", bold: true },
-              { text: " refresh  ", tone: "muted" },
-              { text: "[J/K]", tone: "accent", bold: true },
-              { text: " scroll", tone: "muted" },
-              { text: columns >= 76 ? "  [G/⇧G] edge" : "", tone: "muted" },
-            ],
-          ],
-    );
-    footerMode.content = linesToStyled([[{ text: columns >= 62 ? "AUTO · 1s" : "", tone: "muted", dim: true }]]);
+    footerKeys.content = lineToStyled(chrome.keys);
+    footerMode.content = chrome.mode.text;
     renderer.requestRender();
   };
 
