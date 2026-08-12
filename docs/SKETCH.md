@@ -57,7 +57,7 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
   edits wiring it into AgentStart's `install-agent-clis` and the machine's
   local-service verification.
   Providers are provisioned by `scripts/install-providers.sh`: claude-swap
-  from `~/src/claude-swap` with fork remote and an `integration/agentusage`
+  from `~/src/claude-swap` with fork remote and an `integration`
   branch (current upstream + open PRs #169 capacity-metadata + #166 recover)
   via `uv tool install`. codex-swap grew its own installer and is provisioned by
   AgentStart directly; this file no longer writes a shim for it.
@@ -86,7 +86,7 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
 - `scripts/install.sh`, `scripts/install-providers.sh`. The daemon's
   LaunchAgent is AgentStart's: `~/code/agentstart/config/launchd/`.
 - `~/code/agentstart`: `scripts/install-agent-clis`, `scripts/install-launchagents`.
-- `~/src/claude-swap`: fork remote + `integration/agentusage` branch.
+- `~/src/claude-swap`: fork remote + `integration` branch.
 - `test/` — normalization, balance scoring/tie-breaks/focus overlay, focus
   lifetimes, spark grouping/selection, sidecar IO.
 

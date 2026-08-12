@@ -11,7 +11,10 @@ set -uo pipefail
 
 BIN_DIR="${AGENTUSAGE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 CSWAP_CHECKOUT="${AGENTUSAGE_CSWAP_CHECKOUT:-$HOME/src/claude-swap}"
-CSWAP_BRANCH="main"
+# The integration branch: the one ref this installer builds and binds, by the
+# fleet's fork convention. Per-PR branches live beside it and are never moved
+# by an install.
+CSWAP_BRANCH="integration"
 CSWAP_FORK_URL="${AGENTUSAGE_CSWAP_FORK_URL:-https://github.com/possibilities/claude-swap.git}"
 CSWAP_UPSTREAM_REMOTE="origin"
 CSWAP_UPSTREAM_BRANCH="main"
@@ -25,12 +28,13 @@ status=0
 # replay our patches onto current upstream — but never at the cost of the build
 # that already works.
 #
-# ONE branch is the install branch: the integration of every patch we carry, and
-# the only ref this installer ever builds and binds. It is what gets rebased
-# here. A patch also offered upstream lives on its own branch, and rebasing the
-# install branch does NOT move it — keeping an open PR mergeable is a separate
-# operation against a different audience, and conflating the two would
-# force-push someone else's review context as a side effect of an install.
+# ONE branch is the integration branch — named `integration`, by the fleet's
+# fork convention: every patch we carry, merged, and the only ref this installer
+# ever builds and binds. It is what gets rebased here. A patch also offered
+# upstream lives on its own branch, and rebasing the integration branch does NOT
+# move it — keeping an open PR mergeable is a separate operation against a
+# different audience, and conflating the two would force-push someone else's
+# review context as a side effect of an install.
 #
 # The rebase happens in a scratch worktree, so the bound checkout is never left
 # mid-rebase or dirty, and the live branch is repointed only after the rebase,
@@ -127,10 +131,10 @@ rebase_fork_onto_upstream() {
 }
 
 # ── claude-swap (cswap) ─────────────────────────────────────────────────────
-# The public fork's main branch is the stable provider contract: it carries the
-# capacity metadata and expired-token recovery that agentusage consumes. Keep
-# the local checkout exactly on fork/main so an install cannot silently use an
-# upstream-only or unpublished provider build.
+# The public fork's integration branch is the stable provider contract: it
+# carries the capacity metadata and expired-token recovery that agentusage
+# consumes. Keep the local checkout exactly on fork/integration so an install
+# cannot silently use an upstream-only or unpublished provider build.
 install_claude_swap() {
     if ! command -v uv >/dev/null 2>&1; then
         printf 'agentusage providers: uv missing; skipping claude-swap install.\n'
