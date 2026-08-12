@@ -99,8 +99,8 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
   codex-swap pool empty) — every surface must render absent/empty states
   honestly; end-to-end verification with real data waits on Mike's logins.
 - codex-swap is under active development; contract pinned at `f193bc1`
-  (additive since `efce453`), defensive parsing everywhere, live coordination
-  over the agent bus.
+  (additive since `efce453`), defensive parsing everywhere, and coordination
+  between maintainers when its contract moves.
 - `@opentui/core` 0.3 component-tree API differs from keeper's flat-string
   usage; prototype the TUI early to de-risk.
 
