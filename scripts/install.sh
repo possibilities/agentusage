@@ -25,15 +25,15 @@ BUN_VERSION="$("$BUN" --version)"
 BIN_DIR="${AGENTUSAGE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 STATE_DIR="${AGENTUSAGE_INSTALL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agentusage}"
 RECEIPT="$STATE_DIR/install-receipt"
-LOG_PATH="$STATE_DIR/daemon.log"
+LOG_PATH="$STATE_DIR/observer.log"
 
-# This installer ships the binaries; the agentusage.daemon launch agent that
-# supervises agentusaged belongs to AgentStart, which owns every fleet service
-# (~/code/agentstart/config/launchd/). Installing the daemon here as well would
-# give one service two owners racing to render it.
+# This installer ships the one public binary; the agentusage.observer launch
+# agent belongs to AgentStart, which owns every fleet service
+# (~/code/agentstart/config/launchd/). Installing the service here as well
+# would give one service two owners racing to render it.
 
 if (( DRY )); then
-  printf 'would install %s and %s in %s\n' agentusage agentusaged "$BIN_DIR"
+  printf 'would install %s in %s and remove an owned legacy agentusaged wrapper\n' agentusage "$BIN_DIR"
   exit 0
 fi
 
@@ -47,18 +47,24 @@ fi
 
 mkdir -p "$BIN_DIR" "$STATE_DIR"
 chmod 700 "$STATE_DIR"
-for name in agentusage agentusaged; do
-  source="$ROOT/src/$([[ "$name" == agentusage ]] && printf cli || printf daemon).ts"
-  target="$BIN_DIR/$name"
-  temporary="$target.tmp.$$"
-  printf '#!/usr/bin/env bash\n# agentusage-installer-owned:v1\nexec %q %q "$@"\n' "$BUN" "$source" >"$temporary"
-  chmod 755 "$temporary"
-  mv -f "$temporary" "$target"
-done
+legacy="$BIN_DIR/agentusaged"
+if [[ -e "$legacy" ]]; then
+  [[ -f "$legacy" && ! -L "$legacy" ]] || { printf 'install: refusing unsafe legacy wrapper %s\n' "$legacy" >&2; exit 1; }
+  grep -q '^# agentusage-installer-owned:v1$' "$legacy" || { printf 'install: refusing foreign legacy wrapper %s\n' "$legacy" >&2; exit 1; }
+fi
+target="$BIN_DIR/agentusage"
+temporary="$target.tmp.$$"
+printf '#!/usr/bin/env bash\n# agentusage-installer-owned:v1\nexec %q %q "$@"\n' "$BUN" "$ROOT/src/cli.ts" >"$temporary"
+chmod 755 "$temporary"
+mv -f "$temporary" "$target"
+
+if [[ -e "$legacy" ]]; then
+  rm -f "$legacy"
+fi
 
 printf 'agentusage-installer-owned:v1\nroot=%s\nbin=%s\nlog=%s\n' \
   "$ROOT" "$BIN_DIR" "$LOG_PATH" >"$RECEIPT"
 chmod 600 "$RECEIPT"
 printf 'installed agentusage commands in %s\n' "$BIN_DIR"
-printf 'the agentusage.daemon service is installed by AgentStart: %s\n' \
+printf 'the agentusage.observer service is installed by AgentStart: %s\n' \
   "$HOME/code/agentstart/scripts/install-launchagents --install"

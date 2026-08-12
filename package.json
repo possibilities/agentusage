@@ -10,8 +10,7 @@
     "url": "git+https://github.com/possibilities/agentusage.git"
   },
   "bin": {
-    "agentusage": "src/cli.ts",
-    "agentusaged": "src/daemon.ts"
+    "agentusage": "src/cli.ts"
   },
   "engines": {
     "bun": ">=1.3.14"

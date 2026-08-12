@@ -11,14 +11,16 @@ the operator and launcher-integration guide.
 - `bun test` — full test suite (no network, no real state dirs; tests use
   temp roots via `AGENTUSAGE_STATE_ROOT`).
 - `bun run typecheck` — `tsc --noEmit`.
-- `bash scripts/install.sh --install` — bins + launchagent (idempotent).
+- `bash scripts/install.sh --install` — the `agentusage` binary (idempotent);
+  AgentStart owns the `agentusage.observer` LaunchAgent.
 - `bash scripts/install-providers.sh` — best-effort cswap + codex-swap
   provisioning.
 
 ## Conventions
 
-- Bun ≥ 1.3.14, TypeScript run directly — no build step. Bins are bash shims
-  exec'ing bun against `src/cli.ts` / `src/daemon.ts`.
+- Bun ≥ 1.3.14, TypeScript run directly — no build step. The public binary is
+  a bash shim exec'ing bun against `src/cli.ts`; daemon behavior is the
+  `agentusage daemon` subcommand.
 - Never import `@opentui/core` at module scope — only `await import(...)`
   inside the TUI entry. The platform-native package top-level-awaits and races
   under parallel `bun test`; TUI-loading tests must stay serial.

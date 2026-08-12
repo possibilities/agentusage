@@ -15,7 +15,7 @@ observation stores.
 
 ```
                        ┌─────────────────────────┐
-  cswap list --json ◄──┤ agentusaged (launchagent)├──► codex-swap snapshot --json
+  cswap list --json ◄──┤ agentusage observer      ├──► codex-swap snapshot --json
   cswap recover N  ◄──┤  3min + jitter cadence   │
                        └───────────┬─────────────┘
                                    ▼ atomic 0600 sidecars
@@ -32,7 +32,7 @@ never parses their on-disk stores directly.
 ## Install
 
 Via AgentStart (preferred — it installs the command, its provider CLIs, and the
-`agentusage.daemon` service):
+`agentusage.observer` service):
 
 ```bash
 ~/code/agentstart/scripts/install.sh --install
@@ -67,8 +67,8 @@ cswap add                 # per Claude account, logged in via Claude Code
 codex-swap auth add       # per Codex account (device auth)
 ```
 
-The daemon (`agentusage.daemon` launchagent, logs at
-`~/.local/state/agentusage/daemon.log`) starts observing immediately. Until
+The observer (`agentusage.observer` LaunchAgent, logs at
+`~/.local/state/agentusage/observer.log`) starts observing immediately. Until
 accounts exist, every surface renders absent, empty, and stale states honestly.
 
 ## Commands

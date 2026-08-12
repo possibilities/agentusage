@@ -50,10 +50,11 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
   of one flat string: per-account cards, utilization-colored bars, reset
   countdowns, spark lane rows, focus badges, staleness dimming. Sidecar-backed
   at 1 Hz, daemon-independent, snapshot mode when piped, `--json` envelope.
-- **Install copies the agentweb shape** (the new account's convention):
-  project-owned `scripts/install.sh` — bun-shim bins `agentusage` +
-  `agentusaged`, rendered `agentusage.daemon` plist with ownership marker and
-  bootout/bootstrap dance, receipt in `~/.local/state/agentusage/` — plus the
+- **Install uses the fleet service convention:** project-owned
+  `scripts/install.sh` ships one bun-shim binary, `agentusage`; AgentStart
+  renders and supervises the `agentusage.observer` plist, whose command is
+  `agentusage daemon run`, with the receipt in
+  `~/.local/state/agentusage/` — plus the
   edits wiring it into AgentStart's `install-agent-clis` and the machine's
   local-service verification.
   Providers are provisioned by `scripts/install-providers.sh`: claude-swap
@@ -79,7 +80,7 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
 - `src/focus.ts` — policy types, leaf IO, effective-state evaluation.
 - `src/balance/claude.ts` — eligibility, scoring, ledger, focus overlay.
 - `src/balance/codex.ts` — `codex-swap select` delegation + spark selection.
-- `src/daemon.ts` — both provider loops + recovery; `agentusaged` entry.
+- `src/daemon.ts` — both provider loops + recovery behind `agentusage daemon`.
 - `src/cli.ts` — dispatch: `usage` (default), `status`, `balance`, `focus`,
   `recover`, `refresh`, `daemon`, `help`, `version`.
 - `src/tui/` — view model + OpenTUI app; `src/snapshot.ts` — piped frame.

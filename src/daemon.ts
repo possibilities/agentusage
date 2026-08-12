@@ -14,7 +14,7 @@ import { runBounded } from "./proc.ts";
 import { VERSION } from "./version.ts";
 
 /**
- * agentusaged — both provider observation loops in one launchd-supervised
+ * agentusage daemon — both provider observation loops in one launchd-supervised
  * process. Claude follows keeper's cadence (3 min + jitter, weekly-reset
  * early wake, one due recovery per cycle); codex polls codex-swap on the same
  * cadence while codex-swap's own poll plans pace real network fetches.
@@ -154,7 +154,7 @@ export async function daemonRun(env: Record<string, string | undefined> = proces
   };
   process.on("SIGTERM", () => stop("SIGTERM"));
   process.on("SIGINT", () => stop("SIGINT"));
-  log("daemon", `agentusaged ${VERSION} starting (state ${paths.stateRoot})`);
+  log("daemon", `agentusage observer ${VERSION} starting (state ${paths.stateRoot})`);
   await Promise.all([
     claudeLoop(paths, controller.signal, env),
     codexLoop(paths, controller.signal, env),
@@ -193,7 +193,7 @@ if (import.meta.main) {
       process.exit(1);
     });
   } else {
-    console.error(`agentusaged: unknown mode ${mode} (expected run|status)`);
+    console.error(`agentusage daemon: unknown mode ${mode} (expected run|status)`);
     process.exit(2);
   }
 }
