@@ -89,6 +89,11 @@ agentusage refresh [claude|codex|all]
 agentusage daemon run|status
 ```
 
+The TUI follows the fleet footer contract: one non-wrapping action rail with
+bold accent keys, muted labels, and a passive mode at the right only when it
+fits. Every action is clickable/tappable; narrow terminals scroll the rail
+horizontally with wheel or touch-style gestures, without a visible scrollbar.
+
 ## Launcher integration
 
 agentusage picks; the launcher launches. Contract:

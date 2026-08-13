@@ -13,6 +13,7 @@ import {
 import { buildViewModel } from "../view.ts";
 import { renderFrameLines, TONE_HEX, type Line } from "../render.ts";
 import { buildUsageChrome } from "./chrome.ts";
+import { createFleetFooter } from "./footer.ts";
 import { SIGNAL_GLYPHS, SIGNAL_ROOM } from "./theme.ts";
 
 /**
@@ -143,33 +144,13 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   scroll.add(body);
   root.add(scroll);
 
-  const footer = new core.BoxRenderable(renderer, {
-    id: "usage-footer",
-    width: "100%",
-    height: 3,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingLeft: 2,
-    paddingRight: 2,
-    backgroundColor: SIGNAL_ROOM.field,
-    border: ["top"],
-    borderStyle: "single",
-    borderColor: SIGNAL_ROOM.line,
+  const footer = createFleetFooter(core, renderer, "usage-footer", {
+    field: SIGNAL_ROOM.field,
+    line: SIGNAL_ROOM.line,
+    accent: SIGNAL_ROOM.accent,
+    muted: SIGNAL_ROOM.muted,
   });
-  const footerKeys = new core.TextRenderable(renderer, {
-    id: "usage-keys",
-    content: "",
-    fg: SIGNAL_ROOM.muted,
-  });
-  const footerMode = new core.TextRenderable(renderer, {
-    id: "usage-mode",
-    content: "AUTO · 1s",
-    fg: SIGNAL_ROOM.muted,
-  });
-  footer.add(footerKeys);
-  footer.add(footerMode);
-  root.add(footer);
+  root.add(footer.root);
   // Construction-time scrollbar options do not stick; the setter pins them.
   try {
     scroll.verticalScrollBar.visible = false;
@@ -203,8 +184,23 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     headerClock.content = chrome.clock.text;
     headerClock.fg = TONE_HEX[chrome.clock.tone ?? "plain"];
     body.content = linesToStyled(renderFrameLines(vm, width, { title: false, density: "comfortable" }));
-    footerKeys.content = lineToStyled(chrome.keys);
-    footerMode.content = chrome.mode.text;
+    footer.update({
+      width: columns,
+      mode: chrome.mode.text,
+      actions: [
+        { id: "quit", key: "Q", label: "quit", onPress: shutdown },
+        {
+          id: "refresh",
+          key: "R",
+          label: "refresh",
+          onPress: () => void refresh(),
+        },
+        { id: "up", key: "↑", label: "up", onPress: () => scrollBy(-2) },
+        { id: "down", key: "↓", label: "down", onPress: () => scrollBy(2) },
+        { id: "top", key: "G", label: "top", onPress: () => scrollTo(0) },
+        { id: "bottom", key: "⇧G", label: "bottom", onPress: () => scrollTo(Number.MAX_SAFE_INTEGER) },
+      ],
+    });
     renderer.requestRender();
   };
 
@@ -224,6 +220,26 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   process.once("SIGTERM", shutdown);
   process.once("SIGHUP", shutdown);
 
+  const scrollBy = (y: number): void => {
+    scroll.scrollBy({ x: 0, y });
+    renderer.requestRender();
+  };
+  const scrollTo = (y: number): void => {
+    scroll.scrollTop = y;
+    renderer.requestRender();
+  };
+  const refresh = async (): Promise<void> => {
+    if (refreshing) return;
+    refreshing = true;
+    paint();
+    await Promise.allSettled([
+      refreshClaudeObservation(paths, { freshWithinMs: 0 }),
+      refreshCodexObservation(paths, { freshWithinMs: 0 }),
+    ]);
+    refreshing = false;
+    paint();
+  };
+
   renderer.keyInput.on("keypress", (key) => {
     const name = key.name;
     if (name === "q" || (key.ctrl && name === "c")) {
@@ -231,23 +247,14 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
       return;
     }
     if (name === "r" && !refreshing) {
-      refreshing = true;
-      paint();
-      void Promise.allSettled([
-        refreshClaudeObservation(paths, { freshWithinMs: 0 }),
-        refreshCodexObservation(paths, { freshWithinMs: 0 }),
-      ]).then(() => {
-        refreshing = false;
-        paint();
-      });
+      void refresh();
       return;
     }
-    if (name === "j" || name === "down") scroll.scrollBy({ x: 0, y: 2 });
-    else if (name === "k" || name === "up") scroll.scrollBy({ x: 0, y: -2 });
-    else if (name === "g") scroll.scrollTop = 0;
-    else if (name === "G" || name === "end") scroll.scrollTop = Number.MAX_SAFE_INTEGER;
+    if (name === "j" || name === "down") scrollBy(2);
+    else if (name === "k" || name === "up") scrollBy(-2);
+    else if (name === "g") scrollTo(0);
+    else if (name === "G" || name === "end") scrollTo(Number.MAX_SAFE_INTEGER);
     else return;
-    renderer.requestRender();
   });
 
   paint();
