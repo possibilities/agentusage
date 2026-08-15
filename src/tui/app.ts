@@ -12,13 +12,17 @@ import {
 } from "../focus.ts";
 import { buildViewModel } from "../view.ts";
 import { renderFrameLines, TONE_HEX, type Line } from "../render.ts";
-import { buildUsageChrome } from "./chrome.ts";
-import { createFleetFooter } from "./footer.ts";
-import { SIGNAL_GLYPHS, SIGNAL_ROOM } from "./theme.ts";
+import { buildUsageStatus } from "./chrome.ts";
+import { createCommandPalette } from "./palette.ts";
+import { SIGNAL_ROOM } from "./theme.ts";
 
 /**
  * Live usage viewer. Sidecar-backed and daemon-independent: it re-reads the
  * observation files at 1 Hz and repaints; `r` forces a provider refresh.
+ *
+ * Chromeless shell: no header or footer rows. The status line is the first
+ * body row and scrolls with the frame; every action lives in the ctrl+k
+ * command palette.
  *
  * @opentui/core is imported dynamically only — its platform-native package
  * top-level-awaits and races under parallel test isolation (AGENTS.md).
@@ -46,9 +50,6 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     return chunks;
   };
 
-  const lineToStyled = (line: Line): InstanceType<typeof core.StyledText> =>
-    new core.StyledText(lineChunks(line));
-
   const linesToStyled = (lines: readonly Line[]): InstanceType<typeof core.StyledText> => {
     const chunks: ReturnType<typeof core.bold>[] = [];
     for (const line of lines) {
@@ -67,68 +68,6 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   });
   renderer.root.add(root);
 
-  const header = new core.BoxRenderable(renderer, {
-    id: "usage-header",
-    width: "100%",
-    height: 3,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingLeft: 2,
-    paddingRight: 2,
-    backgroundColor: SIGNAL_ROOM.field,
-    border: ["bottom"],
-    borderStyle: "single",
-    borderColor: SIGNAL_ROOM.line,
-  });
-  const headerBrand = new core.BoxRenderable(renderer, {
-    id: "usage-brand",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 1,
-    backgroundColor: SIGNAL_ROOM.field,
-  });
-  const headerRail = new core.TextRenderable(renderer, {
-    id: "usage-brand-rail",
-    content: SIGNAL_GLYPHS.rail,
-    fg: SIGNAL_ROOM.accent,
-  });
-  const headerTitle = new core.TextRenderable(renderer, {
-    id: "usage-brand-title",
-    content: lineToStyled([{ text: "AGENTUSAGE", tone: "plain", bold: true }]),
-  });
-  const headerContext = new core.TextRenderable(renderer, {
-    id: "usage-brand-context",
-    content: " / CAPACITY",
-    fg: SIGNAL_ROOM.muted,
-  });
-  headerBrand.add(headerRail);
-  headerBrand.add(headerTitle);
-  headerBrand.add(headerContext);
-
-  const headerPhase = new core.BoxRenderable(renderer, {
-    id: "usage-phase",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    backgroundColor: SIGNAL_ROOM.field,
-  });
-  const headerStatus = new core.TextRenderable(renderer, {
-    id: "usage-status",
-    content: "",
-    fg: SIGNAL_ROOM.muted,
-  });
-  const headerClock = new core.TextRenderable(renderer, {
-    id: "usage-clock",
-    content: "--:--",
-    fg: SIGNAL_ROOM.muted,
-  });
-  headerPhase.add(headerStatus);
-  headerPhase.add(headerClock);
-  header.add(headerBrand);
-  header.add(headerPhase);
-  root.add(header);
-
   const scroll = new core.ScrollBoxRenderable(renderer, {
     id: "usage-scroll",
     width: "100%",
@@ -144,13 +83,14 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   scroll.add(body);
   root.add(scroll);
 
-  const footer = createFleetFooter(core, renderer, "usage-footer", {
-    field: SIGNAL_ROOM.field,
+  const palette = createCommandPalette(core, renderer, "usage-palette", {
+    panel: SIGNAL_ROOM.panel,
     line: SIGNAL_ROOM.line,
     accent: SIGNAL_ROOM.accent,
     muted: SIGNAL_ROOM.muted,
+    text: SIGNAL_ROOM.text,
   });
-  root.add(footer.root);
+  renderer.root.add(palette.root);
   // Construction-time scrollbar options do not stick; the setter pins them.
   try {
     scroll.verticalScrollBar.visible = false;
@@ -164,6 +104,7 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   const paint = (): void => {
     const nowMs = Date.now();
     const columns = process.stdout.columns ?? 100;
+    const rows = renderer.height || process.stdout.rows || 24;
     const width = Math.max(32, Math.min(columns - 4, 116));
     const claude = readClaudeObservation(paths);
     const codex = readCodexObservation(paths);
@@ -177,28 +118,18 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
       codexFull: effectiveCodexFullFocus(readFullFocusLeaf(paths.codexFullFocusLeaf, "codex"), codex, nowMs),
       nowMs,
     });
-    const chrome = buildUsageChrome(columns, refreshing, nowMs - startedAtMs);
-    headerContext.content = chrome.context;
-    headerStatus.content = chrome.status.text;
-    headerStatus.fg = TONE_HEX[chrome.status.tone ?? "plain"];
-    headerClock.content = chrome.clock.text;
-    headerClock.fg = TONE_HEX[chrome.clock.tone ?? "plain"];
-    body.content = linesToStyled(renderFrameLines(vm, width, { title: false, density: "comfortable" }));
-    footer.update({
+    const status = buildUsageStatus(width, refreshing, nowMs - startedAtMs);
+    body.content = linesToStyled([status, [], ...renderFrameLines(vm, width, { title: false, density: "comfortable" })]);
+    palette.update({
       width: columns,
-      mode: chrome.mode.text,
-      actions: [
-        { id: "quit", key: "Q", label: "quit", onPress: shutdown },
-        {
-          id: "refresh",
-          key: "R",
-          label: "refresh",
-          onPress: () => void refresh(),
-        },
-        { id: "up", key: "↑", label: "up", onPress: () => scrollBy(-2) },
-        { id: "down", key: "↓", label: "down", onPress: () => scrollBy(2) },
-        { id: "top", key: "G", label: "top", onPress: () => scrollTo(0) },
-        { id: "bottom", key: "⇧G", label: "bottom", onPress: () => scrollTo(Number.MAX_SAFE_INTEGER) },
+      height: rows,
+      commands: [
+        { id: "refresh", key: "R", label: "refresh providers", onRun: () => void refresh() },
+        { id: "up", key: "K", label: "scroll up", onRun: () => scrollBy(-2) },
+        { id: "down", key: "J", label: "scroll down", onRun: () => scrollBy(2) },
+        { id: "top", key: "G", label: "jump to top", onRun: () => scrollTo(0) },
+        { id: "bottom", key: "⇧G", label: "jump to bottom", onRun: () => scrollTo(Number.MAX_SAFE_INTEGER) },
+        { id: "quit", key: "Q", label: "quit", onRun: shutdown },
       ],
     });
     renderer.requestRender();
@@ -241,6 +172,7 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   };
 
   renderer.keyInput.on("keypress", (key) => {
+    if (palette.handleKey(key)) return;
     const name = key.name;
     if (name === "q" || (key.ctrl && name === "c")) {
       shutdown();

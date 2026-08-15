@@ -89,10 +89,12 @@ agentusage refresh [claude|codex|all]
 agentusage daemon run|status
 ```
 
-The TUI follows the fleet footer contract: one non-wrapping action rail with
-bold accent keys, muted labels, and a passive mode at the right only when it
-fits. Every action is clickable/tappable; narrow terminals scroll the rail
-horizontally with wheel or touch-style gestures, without a visible scrollbar.
+The TUI follows the fleet chromeless-shell contract: no header or footer
+rows. Identity, live state, elapsed time, and cadence share one status line
+at the top of the scrolling body, and every action lives in the ctrl+k
+command palette — type to filter, arrows to select, enter to run, rows
+tappable — which doubles as the key reference. Direct hotkeys keep working
+while the palette is closed.
 
 ## Launcher integration
 
