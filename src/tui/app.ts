@@ -12,17 +12,16 @@ import {
 } from "../focus.ts";
 import { buildViewModel } from "../view.ts";
 import { renderFrameLines, TONE_HEX, type Line } from "../render.ts";
-import { buildUsageStatus } from "./chrome.ts";
 import { createCommandPalette } from "./palette.ts";
-import { SIGNAL_ROOM } from "./theme.ts";
+import { SIGNAL_GLYPHS, SIGNAL_ROOM } from "./theme.ts";
 
 /**
  * Live usage viewer. Sidecar-backed and daemon-independent: it re-reads the
  * observation files at 1 Hz and repaints; `r` forces a provider refresh.
  *
- * Chromeless shell: no header or footer rows. The status line is the first
- * body row and scrolls with the frame; every action lives in the ctrl+k
- * command palette.
+ * Chromeless shell: no header or footer rows, and no identity row — the
+ * frame is the whole surface. A transient overlay chip announces a running
+ * refresh, and every action lives in the ctrl+k command palette.
  *
  * @opentui/core is imported dynamically only — its platform-native package
  * top-level-awaits and races under parallel test isolation (AGENTS.md).
@@ -91,6 +90,25 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     text: SIGNAL_ROOM.text,
   });
   renderer.root.add(palette.root);
+  // Transient feedback, not chrome: exists only while a refresh runs.
+  const refreshChip = new core.BoxRenderable(renderer, {
+    id: "usage-refresh-chip",
+    position: "absolute",
+    top: 1,
+    right: 2,
+    zIndex: 50,
+    visible: false,
+    paddingLeft: 1,
+    paddingRight: 1,
+    backgroundColor: SIGNAL_ROOM.panel,
+  });
+  refreshChip.add(
+    new core.TextRenderable(renderer, {
+      content: `${SIGNAL_GLYPHS.reset} REFRESHING`,
+      fg: SIGNAL_ROOM.accent,
+    }),
+  );
+  renderer.root.add(refreshChip);
   // Construction-time scrollbar options do not stick; the setter pins them.
   try {
     scroll.verticalScrollBar.visible = false;
@@ -100,7 +118,6 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   }
 
   let refreshing = false;
-  const startedAtMs = Date.now();
   const paint = (): void => {
     const nowMs = Date.now();
     const columns = process.stdout.columns ?? 100;
@@ -118,8 +135,8 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
       codexFull: effectiveCodexFullFocus(readFullFocusLeaf(paths.codexFullFocusLeaf, "codex"), codex, nowMs),
       nowMs,
     });
-    const status = buildUsageStatus(width, refreshing, nowMs - startedAtMs);
-    body.content = linesToStyled([status, [], ...renderFrameLines(vm, width, { title: false, density: "comfortable" })]);
+    body.content = linesToStyled(renderFrameLines(vm, width, { title: false, density: "comfortable" }));
+    refreshChip.visible = refreshing;
     palette.update({
       width: columns,
       height: rows,

@@ -111,19 +111,21 @@ function cardLines(card: AccountCard, width: number, comfortable: boolean): Line
 }
 
 function sectionLines(section: ProviderSection, width: number, comfortable: boolean): Line[] {
-  const label = section.provider.toUpperCase();
-  const meta = section.health === "ok" ? section.ageText.toUpperCase() : `${section.health.toUpperCase()} · ${section.ageText}`;
-  const leadWidth = 2 + label.length;
-  const gap = Math.max(2, width - leadWidth - meta.length);
-  const headline: Line = [
-    { text: `${SIGNAL_GLYPHS.rail} `, tone: "accent", bold: true },
-    { text: label, tone: "plain", bold: true },
-    { text: " ".repeat(gap) },
-    { text: meta, tone: section.health !== "ok" ? "over" : section.fresh ? "muted" : "hot", bold: section.health !== "ok" },
-  ];
-  const lines: Line[] = [headline, []];
+  // No section headers: account rows are self-identifying, so only a
+  // non-ok observation surfaces the provider by name.
+  const lines: Line[] = [];
+  if (section.health !== "ok") {
+    lines.push([
+      {
+        text: `  ⚠ ${section.provider.toUpperCase()} ${section.health.toUpperCase()} · ${section.ageText}`,
+        tone: "over",
+        bold: true,
+      },
+    ]);
+    lines.push([]);
+  }
   if (section.cards.length === 0) {
-    lines.push([{ text: "  no accounts observed", tone: "muted", dim: true }]);
+    lines.push([{ text: `  no ${section.provider} accounts observed`, tone: "muted", dim: true }]);
   }
   for (const card of section.cards) {
     lines.push(...cardLines(card, width, comfortable));

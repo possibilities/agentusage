@@ -90,11 +90,11 @@ agentusage daemon run|status
 ```
 
 The TUI follows the fleet chromeless-shell contract: no header or footer
-rows. Identity, live state, elapsed time, and cadence share one status line
-at the top of the scrolling body, and every action lives in the ctrl+k
-command palette — type to filter, arrows to select, enter to run, rows
-tappable — which doubles as the key reference. Direct hotkeys keep working
-while the palette is closed.
+rows and no identity row — the usage frame is the whole surface. A
+transient overlay chip announces a running refresh, and every action lives
+in the ctrl+k command palette — type to filter, arrows to select, enter to
+run, rows tappable — which doubles as the key reference. Direct hotkeys
+keep working while the palette is closed.
 
 ## Launcher integration
 

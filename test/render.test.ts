@@ -34,12 +34,24 @@ const vm: UsageViewModel = {
 };
 
 describe("Signal Room frame", () => {
-  test("uses the shared rail and explicit operational labels", () => {
+  test("lets account rows stand alone, with no provider section headers", () => {
     const text = linesToText(renderFrameLines(vm, 80), false);
     expect(text).toContain("▎ AGENTUSAGE / CAPACITY");
-    expect(text).toContain("▎ CLAUDE");
+    expect(text).not.toContain("▎ CLAUDE");
+    expect(text).not.toContain("▎ CODEX");
+    expect(text).toContain("● claude-1");
     expect(text).toContain("▎ FOCUS");
     expect(text).toContain("[NON-FABLE]");
+  });
+
+  test("surfaces a non-ok observation by provider name where headers once did", () => {
+    const broken: UsageViewModel = {
+      ...vm,
+      claude: { ...vm.claude!, health: "error", ageText: "stale 3m", fresh: false },
+    };
+    const text = linesToText(renderFrameLines(broken, 80, { title: false }), false);
+    expect(text).toContain("⚠ CLAUDE ERROR · stale 3m");
+    expect(linesToText(renderFrameLines(vm, 80, { title: false }), false)).not.toContain("⚠");
   });
 
   test("compresses meters and metadata before they wrap", () => {
