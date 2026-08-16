@@ -103,7 +103,9 @@ agentusage picks; the launcher launches. Contract:
 **Claude** — `agentusage balance claude --json [--fable|--no-fable|--model m]`
 returns `{ ok, route: {id, slot}, display_name, reason, … }`. Launch with
 `cswap run <slot> --share-history -- <claude args…>`. Selection is keeper's
-algorithm, applied in order:
+algorithm. Fable intent covers the Fable model and Claude's 1M-context model
+spellings (`*-1m` and `*[1m]`); `--fable` / `--no-fable` explicitly override
+model inference. Selection is applied in order:
 
 1. eligibility — session and weekly windows present and under 100%, with a
    Fable window required for Fable intent;

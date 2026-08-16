@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { OBSERVATION_SCHEMA_VERSION, type NormalizedWindow, type Observation, type Route } from "../src/claude/types.ts";
 import { statePaths } from "../src/paths.ts";
 import { materializeFocusPolicy, materializeFullFocusPolicy, writeFocusLeaf } from "../src/focus.ts";
-import { resolveRouteRef, selectClaudeRoute } from "../src/balance/claude.ts";
+import { isFableRequest, resolveRouteRef, selectClaudeRoute } from "../src/balance/claude.ts";
 
 const NOW = Date.parse("2026-08-08T20:00:00Z");
 
@@ -36,6 +36,22 @@ function observation(routes: Route[]): Observation {
 function freshPaths() {
   return statePaths({ AGENTUSAGE_STATE_ROOT: mkdtempSync(join(tmpdir(), "agentusage-balance-")) });
 }
+
+describe("isFableRequest", () => {
+  test("recognizes Fable and Claude 1M-context model spellings", () => {
+    for (const model of ["fable", "claude-fable-5", "opus-1m", "sonnet-1m", "opus[1m]", "claude-opus-4-6[1m]"]) {
+      expect(isFableRequest(model)).toBe(true);
+    }
+  });
+
+  test("keeps ordinary models non-Fable and honors explicit intent", () => {
+    for (const model of ["opus", "sonnet", "haiku", null, undefined]) {
+      expect(isFableRequest(model)).toBe(false);
+    }
+    expect(isFableRequest("opus-1m", false)).toBe(false);
+    expect(isFableRequest("opus", true)).toBe(true);
+  });
+});
 
 describe("selectClaudeRoute", () => {
   test("fable request picks the lowest fable utilization", () => {
@@ -125,14 +141,14 @@ describe("selectClaudeRoute", () => {
     }
   });
 
-  test("active fable focus wins fable launches and is avoided by non-fable ones", () => {
+  test("active fable focus wins 1M-context launches and is avoided by non-fable ones", () => {
     const paths = freshPaths();
     writeFocusLeaf(paths.fableFocusLeaf, materializeFocusPolicy("claude-swap:1", { kind: "permanent" }, true, NOW));
     const routes = () => [
       route(1, { session: 0.9, week: 0.9, fable: 0.9 }),
       route(2, { session: 0.1, week: 0.1, fable: 0.1 }),
     ];
-    const fable = selectClaudeRoute({ observation: observation(routes()), paths, nowMs: NOW, fableIntent: true });
+    const fable = selectClaudeRoute({ observation: observation(routes()), paths, nowMs: NOW, model: "opus-1m" });
     expect(fable.ok && fable.route.id).toBe("claude-swap:1");
     if (fable.ok) expect(fable.reason).toBe("fable-focus");
 

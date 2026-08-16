@@ -42,8 +42,9 @@ Identified by `limitName`/`meteredFeature` containing "spark".
 Non-binding lanes are display + lane-targeted balance only.
 
 **Focus** — a durable policy pinning launches to one route. **Fable focus**
-pins Fable-intent launches; **Non-Fable focus** pins everything else. An
-active Fable focus also fences its target out of the non-Fable pool. A
+pins launches that consume the Fable-scoped quota: the Fable model and Claude
+1M-context models (`*-1m` / `*[1m]`). **Non-Fable focus** pins everything
+else. An active Fable focus also fences its target out of the non-Fable pool. A
 **provider focus** (`focus claude` / `focus codex`) pins every launch for
 that provider to one account and overrides both intent focuses, fence
 included. Lifetimes: `permanent`, `absolute`, and observed `current-reset` /
