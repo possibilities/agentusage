@@ -48,8 +48,10 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
   rail and don't need one.
 - **TUI is `@opentui/core`** like keeper's, but a real renderable tree instead
   of one flat string: per-account cards, utilization-colored bars, reset
-  countdowns, spark lane rows, focus badges, staleness dimming. Sidecar-backed
-  at 1 Hz, daemon-independent, snapshot mode when piped, `--json` envelope.
+  countdowns, spark lane rows, focus badges, and decision-state dimming for
+  account issues or stale provider observations; provider-trusted sample age
+  remains metadata. Sidecar-backed at 1 Hz, daemon-independent, snapshot mode
+  when piped, `--json` envelope.
 - **Install uses the fleet service convention:** project-owned
   `scripts/install.sh` ships one bun-shim binary, `agentusage`; AgentStart
   renders and supervises the `agentusage.observer` plist, whose command is

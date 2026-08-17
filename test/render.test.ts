@@ -16,7 +16,7 @@ const vm: UsageViewModel = {
         name: "claude-1",
         detail: "Max 20× · a deliberately long account description",
         status: null,
-        stale: false,
+        dimmed: false,
         measuredAgo: "12s",
         focus: ["non-fable"],
         meters: [
@@ -55,7 +55,7 @@ describe("Signal Room frame", () => {
   });
 
   test("compresses meters and metadata before they wrap", () => {
-    for (const width of [40, 48, 64, 100]) {
+    for (const width of [40, 48, 64, 80, 100, 120]) {
       const lines = renderFrameLines(vm, width, { title: false });
       for (const line of lines) {
         expect(line.map((span) => span.text).join("").length).toBeLessThanOrEqual(width);

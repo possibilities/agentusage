@@ -1,7 +1,6 @@
 import {
   CODEX_OBSERVATION_FRESHNESS_CEILING_MS,
   OBSERVATION_FRESHNESS_CEILING_MS,
-  ROUTE_MEASUREMENT_FRESHNESS_CEILING_MS,
 } from "./constants.ts";
 import {
   displayNameForRouteId,
@@ -40,7 +39,7 @@ export interface AccountCard {
   name: string;
   detail: string | null;
   status: string | null;
-  stale: boolean;
+  dimmed: boolean;
   measuredAgo: string | null;
   meters: MeterRow[];
   focus: string[];
@@ -165,17 +164,18 @@ function buildClaudeSection(
     const issue = observation.account_issues[id];
     const measurement = route ?? observation.account_measurements?.[id];
     const measuredAtMs = measurement?.measuredAtMs ?? null;
-    const measurementStale =
-      measuredAtMs !== null && nowMs - measuredAtMs > ROUTE_MEASUREMENT_FRESHNESS_CEILING_MS;
-    const muted = issue !== undefined || measurementStale || !fresh;
+    // cswap owns per-account measurement cadence and reports whether a row is
+    // still trusted through usageStatus. A route in a fresh observation is
+    // therefore live even when an idle account's scheduled sample is old.
+    const dimmed = issue !== undefined || !fresh;
     cards.push({
       provider: "claude",
       name: displayNameForRouteId(id),
       detail: capacityDetail(observation, id),
       status: issue ?? null,
-      stale: muted,
+      dimmed,
       measuredAgo: measuredAtMs === null ? null : formatDurationMs(nowMs - measuredAtMs),
-      meters: measurement === undefined ? [] : claudeMeters(measurement.windows, nowMs, muted),
+      meters: measurement === undefined ? [] : claudeMeters(measurement.windows, nowMs, dimmed),
       focus: focusBadges.get(id) ?? [],
     });
   }
@@ -207,7 +207,7 @@ function buildCodexSection(
   const cards: AccountCard[] = [];
 
   observation.accounts.filter((account) => account.present).forEach((account, index) => {
-    const displayStale = account.measurementSource === "last-good" || !account.decisionGrade || !fresh;
+    const dimmed = account.measurementSource === "last-good" || !account.decisionGrade || !fresh;
     const status =
       account.reloginRequired
         ? "relogin-required"
@@ -230,7 +230,7 @@ function buildCodexSection(
           resetText:
             countdownTo(window.resetsAt, nowMs) ??
             (window.resetAfterSeconds === null ? null : formatDurationMs(window.resetAfterSeconds * 1000)),
-          tone: displayStale ? "muted" : sparkLane ? "spark" : toneForUtilization(utilization),
+          tone: dimmed ? "muted" : sparkLane ? "spark" : toneForUtilization(utilization),
           spark: sparkLane,
         });
       }
@@ -246,7 +246,7 @@ function buildCodexSection(
       name: `codex-${(account.ndyIndex ?? index) + 1}`,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
       status,
-      stale: displayStale,
+      dimmed,
       measuredAgo: account.measuredAtMs === null ? null : formatDurationMs(nowMs - account.measuredAtMs),
       meters,
       focus: focusBadges.get(account.accountKey) ?? [],

@@ -6,9 +6,6 @@
 /** Balance refuses to act on a claude observation older than this. */
 export const OBSERVATION_FRESHNESS_CEILING_MS = 5 * 60_000;
 
-/** Per-route measurement age beyond this is diagnostic-only, never fatal. */
-export const ROUTE_MEASUREMENT_FRESHNESS_CEILING_MS = 10 * 60_000;
-
 export const OBSERVE_INTERVAL_MS = 3 * 60_000;
 export const OBSERVE_JITTER_MS = 30_000;
 

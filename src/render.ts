@@ -44,17 +44,17 @@ function meterLine(card: AccountCard, meter: AccountCard["meters"][number], widt
   const barTone: Tone = meter.tone;
   const line: Line = [
     { text: "    " },
-    { text: label.padEnd(labelWidth + 1), tone: meter.spark ? "spark" : card.stale ? "muted" : "plain", dim: card.stale },
+    { text: label.padEnd(labelWidth + 1), tone: meter.spark ? "spark" : card.dimmed ? "muted" : "plain", dim: card.dimmed },
     { text: SIGNAL_GLYPHS.meterStart, tone: "muted" },
     { text: SIGNAL_GLYPHS.meterFull.repeat(filled), tone: barTone },
     { text: SIGNAL_GLYPHS.meterEmpty.repeat(empty), tone: "muted", dim: true },
     { text: SIGNAL_GLYPHS.meterEnd, tone: "muted" },
-    { text: pctText(meter.usedPercent), tone: barTone, bold: !card.stale && meter.usedPercent !== null && meter.usedPercent >= 80 },
+    { text: pctText(meter.usedPercent), tone: barTone, bold: !card.dimmed && meter.usedPercent !== null && meter.usedPercent >= 80 },
   ];
   if (overflow) line.push({ text: "!", tone: "over", bold: true });
   if (meter.resetText !== null && width >= 44) {
     line.push({ text: `  ${SIGNAL_GLYPHS.reset} `, tone: "muted", dim: true });
-    line.push({ text: meter.resetText, tone: card.stale ? "muted" : "plain", dim: card.stale });
+    line.push({ text: meter.resetText, tone: card.dimmed ? "muted" : "plain", dim: card.dimmed });
   }
   return line;
 }
@@ -84,8 +84,8 @@ function clipLine(line: Line, width: number): Line {
 function cardLines(card: AccountCard, width: number, comfortable: boolean): Line[] {
   const header: Line = [
     { text: "  " },
-    { text: `${card.stale ? SIGNAL_GLYPHS.idle : SIGNAL_GLYPHS.live} `, tone: card.stale ? "muted" : "good" },
-    { text: card.name, bold: true, tone: card.stale ? "muted" : "plain" },
+    { text: `${card.dimmed ? SIGNAL_GLYPHS.idle : SIGNAL_GLYPHS.live} `, tone: card.dimmed ? "muted" : "good" },
+    { text: card.name, bold: true, tone: card.dimmed ? "muted" : "plain" },
   ];
   if (card.status !== null) {
     header.push({ text: "  ", tone: "muted" });

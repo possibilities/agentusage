@@ -29,6 +29,11 @@ and codex-swap keeps a SQLite store with trust, backoff, and leases. agentusage
 shells their JSON CLIs and normalizes the results into observation sidecars. It
 never parses their on-disk stores directly.
 
+For Claude cards, `●` means the account is a route in a fresh observation. A
+dim `○` means the account has an issue or the provider observation is stale;
+`sampled … ago` is diagnostic metadata and does not demote a route that cswap
+still reports as trusted.
+
 ## Install
 
 Via AgentStart (preferred — it installs the command, its provider CLIs, and the
