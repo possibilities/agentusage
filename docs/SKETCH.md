@@ -59,11 +59,12 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
   `~/.local/state/agentusage/` — plus the
   edits wiring it into AgentStart's `install-agent-clis` and the machine's
   local-service verification.
-  Providers are provisioned by `scripts/install-providers.sh`: claude-swap
-  from `~/src/claude-swap` with fork remote and an `integration`
-  branch (current upstream + open PRs #169 capacity-metadata + #166 recover)
-  via `uv tool install`. codex-swap grew its own installer and is provisioned by
-  AgentStart directly; this file no longer writes a shim for it.
+  Providers are installed by `scripts/install-providers.sh`: claude-swap from
+  `~/src/claude-swap` at the published `integration` commit (current upstream +
+  open PRs #169 capacity-metadata + #166 recover), through the cswax workshop's
+  installer, which owns the fork and its maintenance. codex-swap grew its own
+  installer and is provisioned by AgentStart directly; this file no longer
+  writes a shim for it.
 - **Daemon recovery parity:** after each Claude cycle, at most one due
   `cswap recover <slot> --json` for a token-expired account (PR #166
   behavior keeper relied on), non-fatal.
