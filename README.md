@@ -49,16 +49,21 @@ Or directly:
 bash scripts/install.sh --install
 ```
 
-Either path also provisions the provider CLIs best-effort
+Either path also installs the provider CLIs best-effort
 (`scripts/install-providers.sh`):
 
-- **cswap** — `uv tool install` from the public
+- **cswap** — installed by the [cswax](https://github.com/possibilities/cswax)
+  workshop, which owns the public
   [`possibilities/claude-swap`](https://github.com/possibilities/claude-swap)
-  fork's `main` branch, which carries `subscriptionType`/`rateLimitMultiplier`
+  fork. Its `integration` branch carries `subscriptionType`/`rateLimitMultiplier`
   on `--json` rows for cross-tier capacity comparison, and `cswap recover`, the
-  owner-held expired-token recovery the daemon runs one-due-per-cycle. The
-  provisioner clones the fork when absent and fast-forwards a clean checkout to
-  `fork/main`, refusing dirty, divergent, or unpublished provider code.
+  owner-held expired-token recovery the daemon runs one-due-per-cycle.
+  `scripts/install-providers.sh` calls `cswax/scripts/install.sh --install
+  --published` and does nothing else about the fork: the workshop clones it when
+  absent, binds a clean checkout to the published commit, and refuses dirty,
+  divergent, or unpublished provider code. Rebasing the fork onto upstream is
+  cswax's `/maintain` cycle, deliberately run — never a side effect of an
+  install.
 - **codex-swap** — a source shim at `~/.local/bin/codex-swap` running
   `node src/cli/main.ts` from `~/code/codex-swap` (Node ≥ 24 type stripping),
   so the checkout is always current while that project is under active
@@ -227,5 +232,5 @@ bun run typecheck
 ```
 
 `docs/SKETCH.md` is the build contract, `CONTEXT.md` the glossary. Provider
-contracts are pinned to the public claude-swap fork's `main` integration
-contract and codex-swap `f193bc1`; both are read defensively.
+contracts are pinned to the public claude-swap fork's `integration` branch
+(maintained by cswax) and codex-swap `f193bc1`; both are read defensively.

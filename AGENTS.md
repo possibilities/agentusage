@@ -14,7 +14,9 @@ the operator and launcher-integration guide.
 - `bash scripts/install.sh --install` — the `agentusage` binary (idempotent);
   AgentStart owns the `agentusage.observer` LaunchAgent.
 - `bash scripts/install-providers.sh` — best-effort cswap + codex-swap
-  provisioning.
+  installation. cswap comes from the cswax workshop (`~/code/cswax`), which
+  owns the claude-swap fork; this repository consumes it and never rebases,
+  publishes, or otherwise maintains that fork.
 
 ## Conventions
 
