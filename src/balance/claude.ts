@@ -452,7 +452,16 @@ export function selectClaudeRoute(options: SelectClaudeOptions): ClaudeSelection
     }
 
     if (candidates.length === 0) {
-      return { ok: false, refusal: "no-eligible-account", detail: "no launch-eligible Claude account", excluded };
+      const reasons = Object.entries(excluded).map(
+        ([routeId, issues]) => `${displayNameForRouteId(routeId)}: ${issues.join(", ")}`,
+      );
+      const suffix = reasons.length === 0 ? "" : ` (${reasons.join("; ")})`;
+      return {
+        ok: false,
+        refusal: "no-eligible-account",
+        detail: `no launch-eligible Claude account${suffix}`,
+        excluded,
+      };
     }
 
     const findCandidate = (routeId: string | undefined): Route | undefined =>

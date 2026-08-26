@@ -103,7 +103,28 @@ describe("selectClaudeRoute", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.refusal).toBe("no-eligible-account");
+      expect(result.detail).toBe(
+        "no launch-eligible Claude account (claude-1: fable-entitlement-missing)",
+      );
       expect(result.excluded["claude-swap:1"]).toEqual(["fable-entitlement-missing"]);
+    }
+  });
+
+  test("a total refusal explains every excluded account", () => {
+    const result = selectClaudeRoute({
+      observation: observation([
+        route(1, { session: 1, week: 0.2, fable: 0.5 }),
+        route(2, { session: 0.2, week: 0.3, fable: 1 }),
+      ]),
+      paths: freshPaths(),
+      nowMs: NOW,
+      fableIntent: true,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.detail).toBe(
+        "no launch-eligible Claude account (claude-1: session-quota-exhausted; claude-2: fable-quota-exhausted)",
+      );
     }
   });
 
