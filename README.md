@@ -137,10 +137,9 @@ two: an explicit `--account` beats it, and it beats the fable/non-fable overlay
 [--claim]` delegates to `codex-swap select`; with `--claim` the result carries
 a lease to consume via `codex-swap run --claim <lease-id> -- …`, otherwise
 launch with `codex-swap run --account <accountKey> -- …`. An active codex
-focus pins the pick locally from the observation instead of delegating
-(codex-swap select has no account pin), so `--claim` refuses
-(`focus-claim-unsupported`) while a focus is active — use the `--account`
-launch form, which needs no lease.
+focus gates its target against the fresh observation, then delegates through
+`codex-swap select --account <accountKey>` so focused launches retain the same
+atomic lease accounting as automatic selections.
 
 **Pi** — pi launches ride the codex pool: the same
 `agentusage balance codex --json [--claim]` picks the account, then launch
@@ -203,9 +202,10 @@ agentusage focus claude clear
 ```
 
 Codex targets are accountKeys resolved against a fresh observation. While a
-codex focus is active, `balance codex --claim` refuses
-(`focus-claim-unsupported`) — the pick is made locally, so launch with the
-lease-less `codex-swap run --account <key>` form.
+codex focus is active, `balance codex --claim` requests a pinned provider
+selection and returns its lease normally. If the target is temporarily
+ineligible, the active focus remains in charge while selection falls back to
+the ordinary eligible pool.
 
 ## Data
 

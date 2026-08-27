@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CODEX_OBSERVATION_SCHEMA_VERSION, type CodexAccountView, type CodexObservation } from "../src/codex/types.ts";
 import { selectCodexAccount, selectCodexSpark } from "../src/balance/codex.ts";
 import {
@@ -155,8 +158,53 @@ function activeFocus(target: string): FocusStatus<FullFocusPolicy, FullFocusEffe
   };
 }
 
+function fakePinnedCodexSwap(expectedAccountKey: string): string {
+  const path = join(mkdtempSync(join(tmpdir(), "agentusage-codex-swap-")), "codex-swap");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env bun
+const args = Bun.argv.slice(2);
+const accountAt = args.indexOf("--account");
+if (accountAt < 0 || args[accountAt + 1] !== ${JSON.stringify(expectedAccountKey)}) process.exit(9);
+const claim = args.includes("--claim");
+console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: {
+  selection: { accountKey: ${JSON.stringify(expectedAccountKey)}, reason: { summary: "pinned", score: 60 } },
+  lease: claim ? { leaseId: "lease-focus", ownerNonce: "nonce", accountKey: ${JSON.stringify(expectedAccountKey)}, expiresAt: "2026-08-08T20:01:00.000Z" } : null
+}, error: null }));
+`,
+    { mode: 0o700 },
+  );
+  chmodSync(path, 0o700);
+  return path;
+}
+
+function fakePinnedRefusalThenFallback(): string {
+  const path = join(mkdtempSync(join(tmpdir(), "agentusage-codex-swap-")), "codex-swap");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env bun
+const args = Bun.argv.slice(2);
+if (args.includes("--account")) {
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: null, error: {
+    code: "NO_ELIGIBLE_ACCOUNT", message: "focused account reached its concurrency cap",
+    details: { exclusions: [{ accountKey: "account:a", exclusions: ["max_concurrent_reached"] }] }
+  } }));
+  process.exit(3);
+}
+console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: {
+  selection: { accountKey: "account:b", reason: { summary: "fallback", score: 90 } },
+  lease: { leaseId: "lease-fallback", ownerNonce: "nonce", accountKey: "account:b", expiresAt: "2026-08-08T20:01:00.000Z" }
+}, error: null }));
+`,
+    { mode: 0o700 },
+  );
+  chmodSync(path, 0o700);
+  return path;
+}
+
 describe("codex full focus", () => {
-  test("active focus pins the main lane locally without a lease", async () => {
+  test("active focus pins provider selection without a lease for previews", async () => {
+    const codexSwap = fakePinnedCodexSwap("account:a");
     const selection = await selectCodexAccount({
       observation: codexObservation([
         account("account:a", { lanes: mainLanes(80, 60) }),
@@ -164,6 +212,7 @@ describe("codex full focus", () => {
       ]),
       focus: activeFocus("account:a"),
       nowMs: NOW,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
     });
     expect(selection.ok).toBe(true);
     if (selection.ok) {
@@ -174,15 +223,21 @@ describe("codex full focus", () => {
     }
   });
 
-  test("claim refuses under an active focus instead of unpinning", async () => {
+  test("claim under an active focus returns a lease for the pinned account", async () => {
+    const codexSwap = fakePinnedCodexSwap("account:a");
     const selection = await selectCodexAccount({
       observation: codexObservation([account("account:a", { lanes: mainLanes(80, 60) })]),
       focus: activeFocus("account:a"),
       claim: true,
       nowMs: NOW,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
     });
-    expect(selection.ok).toBe(false);
-    if (!selection.ok) expect(selection.refusal).toBe("focus-claim-unsupported");
+    expect(selection.ok).toBe(true);
+    if (selection.ok) {
+      expect(selection.accountKey).toBe("account:a");
+      expect(selection.reason).toBe("full-focus");
+      expect(selection.lease?.leaseId).toBe("lease-focus");
+    }
   });
 
   test("ineligible focus target falls back to delegation rather than repinning", async () => {
@@ -199,6 +254,25 @@ describe("codex full focus", () => {
     // instead of silently moving to another account locally.
     expect(selection.ok).toBe(false);
     if (!selection.ok) expect(selection.refusal).toBe("dependency-unavailable");
+  });
+
+  test("provider rejection of a locally eligible focus target falls back with a lease", async () => {
+    const selection = await selectCodexAccount({
+      observation: codexObservation([
+        account("account:a", { lanes: mainLanes(80, 60) }),
+        account("account:b", { lanes: mainLanes(90, 90) }),
+      ]),
+      focus: activeFocus("account:a"),
+      claim: true,
+      nowMs: NOW,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: fakePinnedRefusalThenFallback() },
+    });
+    expect(selection.ok).toBe(true);
+    if (selection.ok) {
+      expect(selection.accountKey).toBe("account:b");
+      expect(selection.reason).toBe("full-focus-fallback (fallback)");
+      expect(selection.lease?.leaseId).toBe("lease-fallback");
+    }
   });
 
   test("focus refuses on a stale observation", async () => {

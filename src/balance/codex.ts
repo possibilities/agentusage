@@ -17,9 +17,9 @@ import type { FocusStatus, FullFocusEffectiveState, FullFocusPolicy } from "../f
  * the observation: spark quota is independent of the main lane and keeps
  * working after main exhaustion, so main-lane exclusions must not veto it.
  *
- * An active codex focus pins locally from the observation instead of
- * delegating — codex-swap select has no account pin — so leases (`--claim`)
- * are unavailable while a focus is active and refuse rather than unpin.
+ * An active codex focus uses the observation to gate its target, then
+ * delegates a pinned selection to codex-swap so real launches retain atomic
+ * lease accounting. An ineligible focus target falls back to plain selection.
  */
 
 const SELECT_TIMEOUT_MS = 60_000;
@@ -50,8 +50,7 @@ export type CodexRefusal =
   | "provider-error"
   | "observation-unavailable"
   | "observation-stale"
-  | "no-spark-capacity"
-  | "focus-claim-unsupported";
+  | "no-spark-capacity";
 
 export interface CodexSelectionRefusal {
   ok: false;
@@ -71,7 +70,7 @@ export interface SelectCodexOptions {
   env?: Record<string, string | undefined>;
   /** Filled from the observation sidecar when available, for email/label. */
   observation?: CodexObservation | null;
-  /** Effective codex focus; an active one pins locally instead of delegating. */
+  /** Effective codex focus; an eligible active target pins provider selection. */
   focus?: FocusStatus<FullFocusPolicy, FullFocusEffectiveState> | null;
   nowMs?: number;
 }
@@ -88,14 +87,6 @@ export async function selectCodexAccount(options: SelectCodexOptions = {}): Prom
   const focus = options.focus ?? null;
   const focusTarget = focus !== null && focus.state === "active" && focus.policy !== null ? focus.policy.target : null;
   if (focusTarget !== null) {
-    if (options.claim === true) {
-      return {
-        ok: false,
-        lane: "main",
-        refusal: "focus-claim-unsupported",
-        detail: `codex focus pins ${focusTarget} and leases require codex-swap select; launch with codex-swap run --account ${focusTarget}, or clear the focus`,
-      };
-    }
     const observation = options.observation ?? null;
     if (observation === null || observation.health !== "ok") {
       return {
@@ -119,16 +110,14 @@ export async function selectCodexAccount(options: SelectCodexOptions = {}): Prom
     const lane = account === undefined ? null : mainLane(account);
     const headroom = lane === null ? null : laneHeadroomPercent(lane);
     if (account !== undefined && codexAuthEligible(account) && headroom !== null && headroom > 0) {
-      return {
-        ok: true,
-        lane: "main",
-        accountKey: account.accountKey,
-        email: account.email,
-        label: account.label,
-        reason: "full-focus",
-        score: headroom,
-        lease: null,
-      };
+      const pinned = await delegateCodexSelect(options, focusTarget);
+      if (pinned.ok) return { ...pinned, reason: "full-focus" };
+      if (pinned.refusal === "no-eligible-account") {
+        const delegated = await delegateCodexSelect(options);
+        if (delegated.ok) return { ...delegated, reason: `full-focus-fallback (${delegated.reason})` };
+        return delegated;
+      }
+      return pinned;
     }
     const delegated = await delegateCodexSelect(options);
     if (delegated.ok) return { ...delegated, reason: `full-focus-fallback (${delegated.reason})` };
@@ -137,9 +126,10 @@ export async function selectCodexAccount(options: SelectCodexOptions = {}): Prom
   return delegateCodexSelect(options);
 }
 
-async function delegateCodexSelect(options: SelectCodexOptions): Promise<CodexSelection> {
+async function delegateCodexSelect(options: SelectCodexOptions, requiredAccountKey?: string): Promise<CodexSelection> {
   const argv = [...codexSwapArgv(options.env ?? process.env), "select", "--json"];
   if (options.strategy !== undefined) argv.push("--strategy", options.strategy);
+  if (requiredAccountKey !== undefined) argv.push("--account", requiredAccountKey);
   if (options.claim === true) argv.push("--claim");
   if (options.allowUnknown === true) argv.push("--allow-unknown");
 

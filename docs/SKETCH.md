@@ -128,7 +128,7 @@ requests still win. Same hardened leaf machinery, one leaf per provider
 the observed ones (`current-reset`, `cycle-end`) reading the **binding
 weekly window** (claude `week`, codex main-lane secondary), not the Fable
 window. New selection reasons `full-focus` / `full-focus-fallback` extend
-keeper's vocabulary. Codex pins select locally from the observation
-(codex-swap `select` has no account pin), so `--claim` refuses
-(`focus-claim-unsupported`) rather than unpinning; lifting that needs
-`select --account` upstream in codex-swap.
+keeper's vocabulary. Codex gates a focused target from the observation and
+delegates it through codex-swap `select --account`, so `--claim` preserves the
+provider's atomic lease accounting. An ineligible focus target keeps the
+policy active while falling back to plain provider selection.
