@@ -92,7 +92,7 @@ describe("Signal Room frame", () => {
     expect(bar.length).toBe(36);
   });
 
-  test("shares agentvoice's elapsed time grammar", () => {
+  test("formats elapsed time across minute and hour boundaries", () => {
     expect(formatClock(-1)).toBe("00:00");
     expect(formatClock(61_000)).toBe("01:01");
     expect(formatClock(3_661_000)).toBe("1:01:01");
