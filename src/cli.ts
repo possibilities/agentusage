@@ -42,30 +42,7 @@ import {
 import { buildViewModel } from "./view.ts";
 import { daemonRun, daemonStatus } from "./daemon.ts";
 import { VERSION } from "./version.ts";
-
-const HELP = `agentusage ${VERSION} — Claude + Codex account usage, balancing, and focus
-
-Usage:
-  agentusage [usage] [--snapshot|--watch] [--timeout <dur>] [--json]
-  agentusage status [--json]
-  agentusage balance claude [--fable|--no-fable] [--model <m>] [--account <route|claude-N>] [--dry-run] [--json]
-  agentusage balance codex [--model <m>] [--strategy best|next-available] [--claim] [--json]
-  agentusage focus fable   show|set|clear [<route|claude-N> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
-  agentusage focus non-fable show|set|clear [<route|claude-N> permanent|absolute [deadline]] [--require-eligible] [--json]
-  agentusage focus claude  show|set|clear [<route|claude-N> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
-  agentusage focus codex   show|set|clear [<accountKey> permanent|absolute|current-reset|cycle-end [deadline]] [--expect-reset <UTC>] [--require-eligible] [--json]
-  agentusage recover <route|claude-N> [--json]
-  agentusage refresh [claude|codex|all] [--json]
-  agentusage daemon run|status
-  agentusage help | version
-
-The usage viewer is sidecar-backed and daemon-independent. Balance chooses an
-account for a launcher and prints it — launching stays with the launcher
-(cswap run <slot> --share-history / codex-swap run --account <key>).
-A provider focus (focus claude|codex) pins every launch for that provider to
-one account and overrides the fable/non-fable focuses; its observed lifetimes
-follow the weekly window.
-`;
+import { guideEnvelope, renderAgentHelp, renderAgentTeaser, renderHelp } from "./guide.ts";
 
 interface Flags {
   booleans: Set<string>;
@@ -781,10 +758,22 @@ async function main(argv: string[]): Promise<number> {
       console.error("agentusage daemon: expected run|status");
       return 2;
     }
+    case "guide": {
+      const flags = parseFlags(rest, ["json"], []);
+      if (flags === null) return 2;
+      emitJson(guideEnvelope());
+      return 0;
+    }
+    case "--agent-help":
+      console.log(renderAgentHelp());
+      return 0;
+    case "--agent-teaser":
+      console.log(renderAgentTeaser());
+      return 0;
     case "help":
     case "--help":
     case "-h":
-      console.log(HELP);
+      console.log(renderHelp());
       return 0;
     case "version":
     case "--version":
@@ -792,7 +781,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     default:
       console.error(`agentusage: unknown command ${command}\n`);
-      console.log(HELP);
+      console.log(renderHelp());
       return 2;
   }
 }
