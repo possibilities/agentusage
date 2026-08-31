@@ -53,6 +53,8 @@ export interface CodexAccountView {
   decisionGrade: boolean;
   planType: string | null;
   limitReached: boolean | null;
+  /** Provider-issued rate-limit resets currently available to this account. */
+  resetCreditsAvailable?: number | null;
   /** Which measurement produced `lanes`; stale display data is "last-good". */
   measurementSource: "current" | "last-good" | null;
   measuredAtMs: number | null;
@@ -143,6 +145,16 @@ export function validateCodexObservation(value: unknown): CodexObservation | nul
       if (!Array.isArray(laneRecord.windows) || !laneRecord.windows.every(isLaneWindow)) return null;
     }
     if (!Array.isArray(account.exclusions) || !account.exclusions.every((entry) => typeof entry === "string")) {
+      return null;
+    }
+    const resetCreditsAvailable = account.resetCreditsAvailable;
+    if (
+      resetCreditsAvailable !== undefined &&
+      resetCreditsAvailable !== null &&
+      (typeof resetCreditsAvailable !== "number" ||
+        !Number.isSafeInteger(resetCreditsAvailable) ||
+        resetCreditsAvailable < 0)
+    ) {
       return null;
     }
   }

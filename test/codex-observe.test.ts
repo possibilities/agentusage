@@ -46,6 +46,7 @@ function snapshotEnvelope(): unknown {
               probeKind: "direct-wham",
               planType: "plus",
               limitReached: false,
+              resetCreditsAvailable: 1,
               windows: sparkWindows(),
               fetchedAt: "2026-08-08T19:59:00Z",
             },
@@ -82,6 +83,7 @@ function snapshotEnvelope(): unknown {
             measurement: {
               schemaVersion: 1,
               probeKind: "direct-wham",
+              resetCreditsAvailable: 3,
               windows: [
                 { kind: "primary", label: "5h", windowSeconds: 18000, usedPercent: 100, remainingPercent: 0, resetsAt: "2026-08-08T21:30:00Z", resetAfterSeconds: null, limitName: null, meteredFeature: null },
               ],
@@ -124,12 +126,14 @@ describe("buildCodexObservation", () => {
     const primary = observation.accounts[0]!;
     expect(primary.measurementSource).toBe("current");
     expect(primary.planType).toBe("plus");
+    expect(primary.resetCreditsAvailable).toBe(1);
     expect(primary.activeLeases).toBe(2);
     expect(sparkLane(primary)).not.toBeNull();
     expect(primary.measuredAtMs).toBe(Date.parse("2026-08-08T19:59:00Z"));
 
     const stale = observation.accounts[1]!;
     expect(stale.measurementSource).toBe("last-good");
+    expect(stale.resetCreditsAvailable).toBe(3);
     expect(stale.usageStatus).toBe("stale");
     expect(stale.decisionGrade).toBe(false);
     expect(stale.exclusions).toEqual(["quota_exhausted"]);
@@ -153,5 +157,11 @@ describe("buildCodexObservation", () => {
     const observation = buildCodexObservation(envelope, NOW);
     expect(observation.health).toBe("ok");
     expect(observation.accounts).toHaveLength(0);
+  });
+
+  test("rejects malformed reset-credit counts in sidecars", () => {
+    const observation = buildCodexObservation(snapshotEnvelope(), NOW);
+    observation.accounts[0]!.resetCreditsAvailable = -1;
+    expect(validateCodexObservation(observation)).toBeNull();
   });
 });

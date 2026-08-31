@@ -24,6 +24,10 @@ function finiteOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function nonNegativeIntegerOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 function slug(value: string): string {
   return value
     .toLowerCase()
@@ -192,6 +196,7 @@ function parseAccount(value: unknown, notes: string[]): CodexAccountView | null 
     decisionGrade: usage.decisionGrade === true,
     planType: stringOrNull(measurementRecord.planType),
     limitReached: typeof measurementRecord.limitReached === "boolean" ? measurementRecord.limitReached : null,
+    resetCreditsAvailable: nonNegativeIntegerOrNull(measurementRecord.resetCreditsAvailable),
     measurementSource: measurementSource !== null && windows.length >= 0 ? measurementSource : null,
     measuredAtMs,
     lanes: measurementSource === null ? [] : groupLanes(windows),

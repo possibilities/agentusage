@@ -41,6 +41,11 @@ Identified by `limitName`/`meteredFeature` containing "spark".
 (Claude: `session` + `week`; Codex: the main lane's primary + secondary).
 Non-binding lanes are display + lane-targeted balance only.
 
+**Reset credit** — a provider-issued, one-shot Codex allowance for resetting
+rate-limit capacity. Agentusage displays the available count but does not use
+it for eligibility or headroom. _Avoid_: "reset" alone (confusable with a
+window's scheduled reset).
+
 **Focus** — a durable policy pinning launches to one route. **Fable focus**
 pins launches that consume the Fable-scoped quota: the Fable model and Claude
 1M-context models (`*-1m` / `*[1m]`). **Non-Fable focus** pins everything

@@ -239,6 +239,10 @@ function buildCodexSection(
     if (account.planType !== null) {
       detailParts.push(account.planType.charAt(0).toUpperCase() + account.planType.slice(1));
     }
+    const resetCredits = account.resetCreditsAvailable ?? 0;
+    if (resetCredits > 0) {
+      detailParts.push(resetCredits === 1 ? "1× reset credit available" : `${resetCredits}× reset credits available`);
+    }
     const identity = account.label ?? account.email;
     if (identity !== null) detailParts.push(identity);
     cards.push({

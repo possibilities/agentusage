@@ -24,7 +24,11 @@ function claudeObservation(): Observation {
   };
 }
 
-function codexAccount(accountKey: string, ndyIndex: number | null): CodexAccountView {
+function codexAccount(
+  accountKey: string,
+  ndyIndex: number | null,
+  resetCreditsAvailable: number | null = null,
+): CodexAccountView {
   return {
     accountKey,
     email: null,
@@ -40,6 +44,7 @@ function codexAccount(accountKey: string, ndyIndex: number | null): CodexAccount
     decisionGrade: true,
     planType: null,
     limitReached: false,
+    resetCreditsAvailable,
     measurementSource: "current",
     measuredAtMs: NOW - 5_000,
     lanes: [],
@@ -89,5 +94,14 @@ describe("account display names", () => {
 
     const model = build(null, observation);
     expect(model.codex?.cards.map((card) => card.name)).toEqual(["codex-1", "codex-2"]);
+  });
+
+  test("codex cards show only positive reset-credit availability", () => {
+    const observation = codexObservation();
+    observation.accounts = [codexAccount("account:a", 0, 1), codexAccount("account:b", 1, 0)];
+
+    const model = build(null, observation);
+    expect(model.codex?.cards[0]?.detail).toBe("1× reset credit available");
+    expect(model.codex?.cards[1]?.detail).toBeNull();
   });
 });

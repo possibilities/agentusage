@@ -217,7 +217,8 @@ the ordinary eligible pool.
 - Codex sidecar `codex-account-routing/observation.json` — agentusage schema
   v1 over codex-swap's snapshot: per account auth/trust/selection state plus
   windows regrouped into **lanes** (`main` binding, `codex-spark`,
-  `code-review`, extras) with used/remaining percent and reset times.
+  `code-review`, extras) with used/remaining percent and reset times, plus
+  available rate-limit reset credits when the provider reports them.
 - Cadence: 3 min + up to 30 s jitter per provider; a weekly window observed at
   100% schedules a one-shot wake 30 s after its reset. Balance trusts
   observations up to 5 min old.

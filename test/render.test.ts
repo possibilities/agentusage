@@ -138,4 +138,24 @@ describe("Signal Room frame", () => {
     expect(plain).not.toContain("\u001b[");
     expect(color).toContain("\u001b[38;2;");
   });
+
+  test("keeps reset availability visible ahead of long account identity metadata", () => {
+    const resetVm: UsageViewModel = {
+      ...vm,
+      claude: {
+        ...vm.claude!,
+        cards: [
+          {
+            ...vm.claude!.cards[0]!,
+            provider: "codex",
+            name: "codex-1",
+            detail: "Plus · 1× reset credit available · a deliberately long account identity",
+          },
+        ],
+      },
+    };
+
+    const text = linesToText(renderFrameLines(resetVm, 40, { title: false }), false);
+    expect(text).toContain("1× reset credit available");
+  });
 });
