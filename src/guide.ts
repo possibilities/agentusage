@@ -18,13 +18,22 @@ export interface Argument {
   choices?: string[];
   default?: unknown;
   aliases?: string[];
+  csv?: boolean;
+  minimum?: number;
+  maximum?: number;
+  role?: "call" | "output-format" | "store-selection" | "meta";
 }
 
 export interface Constraint {
-  kind: "one_of" | "conflicts" | "requires";
+  kind: "one_of" | "at_least_one" | "conflicts" | "requires";
   arguments: string[];
   required?: boolean;
   description?: string;
+}
+
+export interface Example {
+  invocation: string;
+  description: string;
 }
 
 export interface Stdin {
@@ -43,6 +52,10 @@ export interface Command {
   subcommands?: Command[];
   stdin?: Stdin;
   constraints?: Constraint[];
+  examples?: Example[];
+  blocking?: boolean;
+  aliases?: string[];
+  deprecated?: string;
 }
 
 export interface Contract {
@@ -61,6 +74,7 @@ const JSON_FLAG: Argument = {
   name: "--json",
   type: "boolean",
   description: "Emit the stable schema_version envelope instead of human-readable text.",
+  role: "output-format",
 };
 
 const LIFETIME_FULL_CHOICES = ["permanent", "absolute", "current-reset", "cycle-end"];
@@ -105,7 +119,7 @@ function focusSetArgs(targetDescription: string, choices: string[]): Argument[] 
   ];
 }
 
-function focusGroup(kind: string, targetDescription: string, choices: string[]): Command {
+function focusGroup(kind: string, targetDescription: string, choices: string[], setExamples: Example[]): Command {
   return {
     name: kind,
     summary: `Show, set, or clear the ${kind} focus`,
@@ -124,6 +138,7 @@ function focusGroup(kind: string, targetDescription: string, choices: string[]):
         audience: "operator",
         mutates: true,
         arguments: focusSetArgs(targetDescription, choices),
+        examples: setExamples,
       },
       {
         name: "clear",
@@ -151,6 +166,9 @@ export const CONTRACT: Contract = {
       summary: "Show current usage — live TUI, snapshot, or --json",
       audience: "operator",
       mutates: false,
+      blocking: true,
+      guidance:
+        "Blocking by default: a bare call or --watch renders the live TUI and does not return until the caller quits it. Pass --snapshot or --json for a one-shot render that returns promptly.",
       arguments: [
         { name: "--snapshot", type: "boolean", description: "Force snapshot output even inside a TTY." },
         { name: "--watch", type: "boolean", description: "Force the live watch view." },
@@ -207,6 +225,16 @@ export const CONTRACT: Contract = {
             JSON_FLAG,
           ],
           constraints: [{ kind: "conflicts", arguments: ["--fable", "--no-fable"] }],
+          examples: [
+            {
+              invocation: "agentusage balance claude --json",
+              description: "Pick a Claude account and reserve it, machine-readable.",
+            },
+            {
+              invocation: "agentusage balance claude --fable --json",
+              description: "Pick a Fable-eligible route.",
+            },
+          ],
         },
         {
           name: "codex",
@@ -234,6 +262,20 @@ export const CONTRACT: Contract = {
             },
             JSON_FLAG,
           ],
+          examples: [
+            {
+              invocation: "agentusage balance codex --json",
+              description: "Pick a Codex account and print it without claiming a lease.",
+            },
+            {
+              invocation: "agentusage balance codex --claim --json",
+              description: "Pick a Codex account and claim a lease on it via codex-swap.",
+            },
+            {
+              invocation: "agentusage balance codex --model gpt-5.3-codex-spark --json",
+              description: "Spark model: routes through spark-headroom selection.",
+            },
+          ],
         },
       ],
     },
@@ -242,10 +284,45 @@ export const CONTRACT: Contract = {
       summary: "Pin future launches to one account, per provider or per fable intent",
       audience: "operator",
       subcommands: [
-        focusGroup("fable", "Route, by route id or claude-N.", LIFETIME_FULL_CHOICES),
-        focusGroup("non-fable", "Route, by route id or claude-N.", LIFETIME_ABSOLUTE_ONLY_CHOICES),
-        focusGroup("claude", "Route, by route id or claude-N. Overrides fable/non-fable focus for every Claude launch.", LIFETIME_FULL_CHOICES),
-        focusGroup("codex", "Codex account key. Overrides fable/non-fable focus for every Codex launch.", LIFETIME_FULL_CHOICES),
+        focusGroup("fable", "Route, by route id or claude-N.", LIFETIME_FULL_CHOICES, [
+          { invocation: "agentusage focus fable set claude-2 permanent", description: "All Fable launches go to claude-2." },
+          {
+            invocation: "agentusage focus fable set claude-2 cycle-end",
+            description: "…until the observed Fable window resets or hits 100%.",
+          },
+          {
+            invocation: "agentusage focus fable set claude-2 current-reset",
+            description: "…until that reset time (absolute).",
+          },
+        ]),
+        focusGroup("non-fable", "Route, by route id or claude-N.", LIFETIME_ABSOLUTE_ONLY_CHOICES, [
+          {
+            invocation: "agentusage focus non-fable set claude-1 absolute 2026-08-12T00:00:00Z",
+            description: "Pin non-Fable launches to claude-1 until that UTC deadline.",
+          },
+        ]),
+        focusGroup(
+          "claude",
+          "Route, by route id or claude-N. Overrides fable/non-fable focus for every Claude launch.",
+          LIFETIME_FULL_CHOICES,
+          [
+            {
+              invocation: "agentusage focus claude set claude-1 cycle-end",
+              description: "Everything goes to claude-1 until its week resets or hits 100%.",
+            },
+          ],
+        ),
+        focusGroup(
+          "codex",
+          "Codex account key. Overrides fable/non-fable focus for every Codex launch.",
+          LIFETIME_FULL_CHOICES,
+          [
+            {
+              invocation: "agentusage focus codex set <accountKey> current-reset",
+              description: "Pin every Codex launch to one account until its observed reset.",
+            },
+          ],
+        ),
       ],
     },
     {
@@ -292,6 +369,7 @@ export const CONTRACT: Contract = {
           summary: "Run the observation daemon in the foreground",
           audience: "operator",
           mutates: true,
+          blocking: true,
           arguments: [],
         },
         {
@@ -315,6 +393,7 @@ export const CONTRACT: Contract = {
       summary: "Print usage",
       audience: "operator",
       mutates: false,
+      aliases: ["--help", "-h"],
       arguments: [],
     },
     {
@@ -322,6 +401,7 @@ export const CONTRACT: Contract = {
       summary: "Print the installed version",
       audience: "operator",
       mutates: false,
+      aliases: ["--version"],
       arguments: [],
     },
   ],
@@ -382,11 +462,19 @@ export function renderAgentHelp(): string {
   const lines: string[] = [`${CONTRACT.meta.name} ${CONTRACT.meta.version} — ${CONTRACT.meta.purpose}`, ""];
   for (const { path, command } of leaves) {
     const flags = command.audience === "internal" ? " [internal]" : "";
-    lines.push(`${path.join(" ")}${flags} — ${command.summary} (mutates: ${command.mutates === true})`);
+    const blocking = command.blocking === true ? " [blocking]" : "";
+    const aliases = command.aliases !== undefined && command.aliases.length > 0 ? ` (aka ${command.aliases.join(", ")})` : "";
+    const deprecated = command.deprecated !== undefined ? ` [deprecated: use ${command.deprecated}]` : "";
+    lines.push(
+      `${path.join(" ")}${flags}${blocking}${aliases}${deprecated} — ${command.summary} (mutates: ${command.mutates === true})`,
+    );
     for (const argument of command.arguments ?? []) {
       const req = argument.required === true ? ", required" : "";
       const choices = argument.choices !== undefined ? `, one of ${argument.choices.join("|")}` : "";
       lines.push(`  ${argument.name} (${argument.type}${req}${choices}) — ${argument.description}`);
+    }
+    for (const example of command.examples ?? []) {
+      lines.push(`  e.g. ${example.invocation}  — ${example.description}`);
     }
   }
   lines.push("", "Full machine-readable contract: agentusage guide --json");
