@@ -35,8 +35,8 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
   most-burned Fable), reservation pressure (+5 pp per live reservation, 90 s
   TTL flock ledger), LRU → lexicographic tie-breaks, focus overlay with
   keeper's reason vocabulary. `balance codex` delegates to `codex-swap
-  select` (claude-swap-approach parity — none of the old pi subagent
-  balancing); a `--model` matching *spark* instead selects on spark-lane
+  select` (following the claude-swap approach); a `--model` matching *spark*
+  instead selects on spark-lane
   headroom locally, ignoring main-quota exhaustion since spark is an
   independent lane that survives main exhaustion.
 - **Focus ports keeper's contract minus the event-sourcing.** Same policy

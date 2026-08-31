@@ -141,13 +141,6 @@ focus gates its target against the fresh observation, then delegates through
 `codex-swap select --account <accountKey>` so focused launches retain the same
 atomic lease accounting as automatic selections.
 
-**Pi** — pi launches ride the codex pool: the same
-`agentusage balance codex --json [--claim]` picks the account, then launch
-with `codex-swap pi run --claim <lease-id> -- <pi args…>` (or
-`codex-swap pi run --account <accountKey> -- …`). Accounts must be linked
-once with `codex-swap pi link`; unlinked accounts refuse pi launches
-(codex-swap ADR 0005).
-
 **Spark** — `agentusage balance codex --model gpt-5.3-codex-spark --json`
 selects locally on **spark-lane headroom** (min of the lane's 5 h and weekly
 remaining), ignoring main-quota exhaustion entirely — spark is an independent
@@ -186,7 +179,7 @@ consumers read focus from `status --json` — `usage --json` carries observation
 only.
 
 A **provider focus** pins *every* launch for one provider to a single account —
-Fable and non-Fable alike, and for codex the main, spark, and pi paths, since
+Fable and non-Fable alike, and for Codex the main and spark paths, since
 they all ride `balance codex`. It overrides both intent focuses entirely, fence
 included, and stays in charge during fallback while its target is temporarily
 ineligible; one policy governs at a time. An explicit `--account` still wins.
