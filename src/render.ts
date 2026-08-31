@@ -94,6 +94,14 @@ function cardLines(card: AccountCard, width: number, comfortable: boolean): Line
   for (const focusBadge of card.focus) {
     header.push({ text: `  [${focusBadge.toUpperCase()}]`, tone: "accent", bold: true });
   }
+  const resetCredits = card.resetCreditsAvailable ?? 0;
+  if (resetCredits > 0) {
+    header.push({
+      text: resetCredits === 1 ? "  1× reset" : `  ${resetCredits}× resets`,
+      tone: card.dimmed ? "muted" : "good",
+      dim: card.dimmed,
+    });
+  }
   const lines: Line[] = [header];
   const metadata = [card.detail, card.measuredAgo === null ? null : `sampled ${card.measuredAgo} ago`]
     .filter((part): part is string => part !== null)

@@ -101,7 +101,9 @@ describe("account display names", () => {
     observation.accounts = [codexAccount("account:a", 0, 1), codexAccount("account:b", 1, 0)];
 
     const model = build(null, observation);
-    expect(model.codex?.cards[0]?.detail).toBe("1× reset credit available");
+    expect(model.codex?.cards[0]?.resetCreditsAvailable).toBe(1);
+    expect(model.codex?.cards[0]?.detail).toBeNull();
+    expect(model.codex?.cards[1]?.resetCreditsAvailable).toBe(0);
     expect(model.codex?.cards[1]?.detail).toBeNull();
   });
 });

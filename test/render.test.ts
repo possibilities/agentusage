@@ -15,6 +15,7 @@ const vm: UsageViewModel = {
         provider: "claude",
         name: "claude-1",
         detail: "Max 20× · a deliberately long account description",
+        resetCreditsAvailable: null,
         status: null,
         dimmed: false,
         measuredAgo: "12s",
@@ -139,7 +140,7 @@ describe("Signal Room frame", () => {
     expect(color).toContain("\u001b[38;2;");
   });
 
-  test("keeps reset availability visible ahead of long account identity metadata", () => {
+  test("puts concise reset availability after the focus signal", () => {
     const resetVm: UsageViewModel = {
       ...vm,
       claude: {
@@ -149,13 +150,17 @@ describe("Signal Room frame", () => {
             ...vm.claude!.cards[0]!,
             provider: "codex",
             name: "codex-1",
-            detail: "Plus · 1× reset credit available · a deliberately long account identity",
+            detail: "Plus · a deliberately long account identity",
+            resetCreditsAvailable: 1,
           },
         ],
       },
     };
 
     const text = linesToText(renderFrameLines(resetVm, 40, { title: false }), false);
-    expect(text).toContain("1× reset credit available");
+    const header = text.split("\n").find((line) => line.includes("codex-1"));
+    const metadata = text.split("\n").find((line) => line.includes("Plus"));
+    expect(header).toContain("[NON-FABLE]  1× reset");
+    expect(metadata).not.toContain("reset");
   });
 });

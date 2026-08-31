@@ -38,6 +38,7 @@ export interface AccountCard {
   provider: "claude" | "codex";
   name: string;
   detail: string | null;
+  resetCreditsAvailable: number | null;
   status: string | null;
   dimmed: boolean;
   measuredAgo: string | null;
@@ -172,6 +173,7 @@ function buildClaudeSection(
       provider: "claude",
       name: displayNameForRouteId(id),
       detail: capacityDetail(observation, id),
+      resetCreditsAvailable: null,
       status: issue ?? null,
       dimmed,
       measuredAgo: measuredAtMs === null ? null : formatDurationMs(nowMs - measuredAtMs),
@@ -239,16 +241,13 @@ function buildCodexSection(
     if (account.planType !== null) {
       detailParts.push(account.planType.charAt(0).toUpperCase() + account.planType.slice(1));
     }
-    const resetCredits = account.resetCreditsAvailable ?? 0;
-    if (resetCredits > 0) {
-      detailParts.push(resetCredits === 1 ? "1× reset credit available" : `${resetCredits}× reset credits available`);
-    }
     const identity = account.label ?? account.email;
     if (identity !== null) detailParts.push(identity);
     cards.push({
       provider: "codex",
       name: `codex-${(account.ndyIndex ?? index) + 1}`,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
+      resetCreditsAvailable: account.resetCreditsAvailable ?? null,
       status,
       dimmed,
       measuredAgo: account.measuredAtMs === null ? null : formatDurationMs(nowMs - account.measuredAtMs),
