@@ -433,15 +433,34 @@ async function balanceCommand(args: string[]): Promise<number> {
 // ---------------------------------------------------------------------------
 // focus
 
+type FocusKind = "fable" | "non-fable" | "claude" | "codex";
+type FocusAction = "show" | "set" | "clear";
+
+function isFocusKind(value: string | undefined): value is FocusKind {
+  return value === "fable" || value === "non-fable" || value === "claude" || value === "codex";
+}
+
+function isFocusAction(value: string | undefined): value is FocusAction {
+  return value === "show" || value === "set" || value === "clear";
+}
+
 async function focusCommand(args: string[]): Promise<number> {
-  const kind = args[0];
-  if (kind !== "fable" && kind !== "non-fable" && kind !== "claude" && kind !== "codex") {
-    console.error("agentusage focus: expected fable|non-fable|claude|codex");
-    return 2;
-  }
-  const action = args[1];
-  if (action !== "show" && action !== "set" && action !== "clear") {
+  // The contract spells this action-first — `focus set fable <ref> <lifetime>` —
+  // but the target-first order it replaced (`focus fable set …`) is still
+  // accepted, unchanged, for everything already typed or scripted.
+  let kind: FocusKind;
+  let action: FocusAction;
+  if (isFocusAction(args[0]) && isFocusKind(args[1])) {
+    action = args[0];
+    kind = args[1];
+  } else if (isFocusKind(args[0]) && isFocusAction(args[1])) {
+    kind = args[0];
+    action = args[1];
+  } else if (isFocusKind(args[0])) {
     console.error("agentusage focus: expected show|set|clear");
+    return 2;
+  } else {
+    console.error("agentusage focus: expected fable|non-fable|claude|codex");
     return 2;
   }
   const flags = parseFlags(args.slice(2), ["json", "require-eligible"], ["expect-reset"]);

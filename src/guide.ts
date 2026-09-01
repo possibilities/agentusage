@@ -77,79 +77,15 @@ const JSON_FLAG: Argument = {
   role: "output-format",
 };
 
-const LIFETIME_FULL_CHOICES = ["permanent", "absolute", "current-reset", "cycle-end"];
-const LIFETIME_ABSOLUTE_ONLY_CHOICES = ["permanent", "absolute"];
-
-function focusSetArgs(targetDescription: string, choices: string[]): Argument[] {
-  return [
-    {
-      name: "target",
-      type: "string",
-      description: targetDescription,
-      positional: true,
-      required: true,
-      format: "ref",
-    },
-    {
-      name: "lifetime",
-      type: "string",
-      description: "How long the focus holds.",
-      positional: true,
-      required: true,
-      choices,
-    },
-    {
-      name: "deadline",
-      type: "string",
-      description: "UTC timestamp (with offset or Z). Required only when lifetime is absolute.",
-      positional: true,
-    },
-    {
-      name: "--expect-reset",
-      type: "string",
-      description:
-        "UTC timestamp: confirm the observed reset time before pinning current-reset/cycle-end; refuses on mismatch.",
-    },
-    {
-      name: "--require-eligible",
-      type: "boolean",
-      description: "Refuse instead of warning when the target is not currently launch-eligible.",
-    },
-    JSON_FLAG,
-  ];
-}
-
-function focusGroup(kind: string, targetDescription: string, choices: string[], setExamples: Example[]): Command {
-  return {
-    name: kind,
-    summary: `Show, set, or clear the ${kind} focus`,
-    audience: "operator",
-    subcommands: [
-      {
-        name: "show",
-        summary: `Show the effective ${kind} focus`,
-        audience: "operator",
-        mutates: false,
-        arguments: [JSON_FLAG],
-      },
-      {
-        name: "set",
-        summary: `Pin ${kind} launches to one target`,
-        audience: "operator",
-        mutates: true,
-        arguments: focusSetArgs(targetDescription, choices),
-        examples: setExamples,
-      },
-      {
-        name: "clear",
-        summary: `Remove the ${kind} focus`,
-        audience: "operator",
-        mutates: true,
-        arguments: [JSON_FLAG],
-      },
-    ],
-  };
-}
+const FOCUS_TARGET_ARG: Argument = {
+  name: "target",
+  type: "string",
+  description:
+    "Which focus to act on. fable and non-fable split Claude launches by intent; claude and codex are provider-wide and override them.",
+  positional: true,
+  required: true,
+  choices: ["fable", "non-fable", "claude", "codex"],
+};
 
 export const CONTRACT: Contract = {
   contract_version: 1,
@@ -283,46 +219,100 @@ export const CONTRACT: Contract = {
       name: "focus",
       summary: "Pin future launches to one account, per provider or per fable intent",
       audience: "operator",
+      guidance:
+        "The focus target is an argument rather than a command name: `focus set fable claude-2 permanent`. The older target-first spellings (`focus fable set claude-2 permanent`, `focus codex clear`) are still accepted for every target and action and behave identically.",
       subcommands: [
-        focusGroup("fable", "Route, by route id or claude-N.", LIFETIME_FULL_CHOICES, [
-          { invocation: "agentusage focus fable set claude-2 permanent", description: "All Fable launches go to claude-2." },
-          {
-            invocation: "agentusage focus fable set claude-2 cycle-end",
-            description: "…until the observed Fable window resets or hits 100%.",
-          },
-          {
-            invocation: "agentusage focus fable set claude-2 current-reset",
-            description: "…until that reset time (absolute).",
-          },
-        ]),
-        focusGroup("non-fable", "Route, by route id or claude-N.", LIFETIME_ABSOLUTE_ONLY_CHOICES, [
-          {
-            invocation: "agentusage focus non-fable set claude-1 absolute 2026-08-12T00:00:00Z",
-            description: "Pin non-Fable launches to claude-1 until that UTC deadline.",
-          },
-        ]),
-        focusGroup(
-          "claude",
-          "Route, by route id or claude-N. Overrides fable/non-fable focus for every Claude launch.",
-          LIFETIME_FULL_CHOICES,
-          [
-            {
-              invocation: "agentusage focus claude set claude-1 cycle-end",
-              description: "Everything goes to claude-1 until its week resets or hits 100%.",
-            },
+        {
+          name: "show",
+          summary: "Show the effective focus for one target",
+          audience: "operator",
+          mutates: false,
+          arguments: [FOCUS_TARGET_ARG, JSON_FLAG],
+          examples: [
+            { invocation: "agentusage focus show claude --json", description: "Is a provider-wide Claude focus active?" },
           ],
-        ),
-        focusGroup(
-          "codex",
-          "Codex account key. Overrides fable/non-fable focus for every Codex launch.",
-          LIFETIME_FULL_CHOICES,
-          [
+        },
+        {
+          name: "set",
+          summary: "Pin one target's launches to one account",
+          audience: "operator",
+          mutates: true,
+          guidance:
+            "Lifetimes current-reset and cycle-end read the observed reset window, so target non-fable accepts only permanent and absolute. ref is a Claude route (route id or claude-N) for fable, non-fable, and claude, and a Codex accountKey for codex.",
+          arguments: [
+            FOCUS_TARGET_ARG,
             {
-              invocation: "agentusage focus codex set <accountKey> current-reset",
+              name: "ref",
+              type: "string",
+              description:
+                "Account to pin to: a Claude route (route id or claude-N) for fable/non-fable/claude, a Codex accountKey for codex.",
+              positional: true,
+              required: true,
+              format: "ref",
+            },
+            {
+              name: "lifetime",
+              type: "string",
+              description:
+                "How long the focus holds. current-reset and cycle-end need an observed reset window and are refused when target is non-fable.",
+              positional: true,
+              required: true,
+              choices: ["permanent", "absolute", "current-reset", "cycle-end"],
+            },
+            {
+              name: "deadline",
+              type: "string",
+              description: "UTC timestamp (with offset or Z). Required only when lifetime is absolute.",
+              positional: true,
+            },
+            {
+              name: "--expect-reset",
+              type: "string",
+              description:
+                "UTC timestamp: confirm the observed reset time before pinning current-reset/cycle-end; refuses on mismatch.",
+            },
+            {
+              name: "--require-eligible",
+              type: "boolean",
+              description: "Refuse instead of warning when the target is not currently launch-eligible.",
+            },
+            JSON_FLAG,
+          ],
+          examples: [
+            {
+              invocation: "agentusage focus set fable claude-2 permanent",
+              description: "All Fable launches go to claude-2.",
+            },
+            {
+              invocation: "agentusage focus set fable claude-2 cycle-end",
+              description: "…until the observed Fable window resets or hits 100%.",
+            },
+            {
+              invocation: "agentusage focus set non-fable claude-1 absolute 2026-08-12T00:00:00Z",
+              description: "Pin non-Fable launches to claude-1 until that UTC deadline.",
+            },
+            {
+              invocation: "agentusage focus set claude claude-1 cycle-end",
+              description: "Everything Claude goes to claude-1 until its week resets or hits 100%.",
+            },
+            {
+              invocation: "agentusage focus set codex <accountKey> current-reset",
               description: "Pin every Codex launch to one account until its observed reset.",
             },
+            {
+              invocation: "agentusage focus claude set claude-1 cycle-end",
+              description: "The older target-first order, still accepted and identical to `focus set claude claude-1 cycle-end`.",
+            },
           ],
-        ),
+        },
+        {
+          name: "clear",
+          summary: "Remove one target's focus",
+          audience: "operator",
+          mutates: true,
+          arguments: [FOCUS_TARGET_ARG, JSON_FLAG],
+          examples: [{ invocation: "agentusage focus clear fable", description: "Stop pinning Fable launches." }],
+        },
       ],
     },
     {
@@ -449,9 +439,9 @@ export function renderHelp(): string {
     "The usage viewer is sidecar-backed and daemon-independent. `balance` chooses",
     "an account and prints it — launching stays with the launcher (cswap run",
     "<slot> --share-history / codex-swap run --account <key>). A provider focus",
-    "(focus claude|codex) pins every launch for that provider to one account and",
-    "overrides the fable/non-fable focuses; its observed lifetimes follow the",
-    "weekly window.",
+    "(focus set claude|codex) pins every launch for that provider to one account",
+    "and overrides the fable/non-fable focuses; its observed lifetimes follow the",
+    "weekly window. The older target-first order (focus claude set …) still works.",
   );
   return lines.join("\n");
 }
