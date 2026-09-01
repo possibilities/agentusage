@@ -36,9 +36,11 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
   TTL flock ledger), LRU → lexicographic tie-breaks, focus overlay with
   keeper's reason vocabulary. `balance codex` delegates to `codex-swap
   select` (following the claude-swap approach); a `--model` matching *spark*
-  instead selects on spark-lane
-  headroom locally, ignoring main-quota exhaustion since spark is an
-  independent lane that survives main exhaustion.
+  instead selects on spark-lane headroom locally, ignoring main-quota
+  exhaustion since spark is an independent lane that survives main
+  exhaustion. `--claim` claims the chosen account through codex-swap's
+  `--metered-lane codex-spark` primitive, retrying once on a structured
+  `NO_ELIGIBLE_ACCOUNT` refusal against the next-ranked pool account.
 - **Focus ports keeper's contract minus the event-sourcing.** Same policy
   shapes and lifetimes (`permanent`, `absolute`, Fable-only `current-reset`
   and `cycle-end`), same effective states including cycle-end completion

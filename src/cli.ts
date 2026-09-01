@@ -8,7 +8,7 @@ import {
 import { displayNameForRouteId, type Observation } from "./claude/types.ts";
 import { laneHeadroomPercent, mainLane, type CodexObservation } from "./codex/types.ts";
 import { selectClaudeRoute, resolveRouteRef } from "./balance/claude.ts";
-import { codexAuthEligible, selectCodexAccount, selectCodexSpark } from "./balance/codex.ts";
+import { claimCodexSpark, codexAuthEligible, selectCodexAccount, selectCodexSpark } from "./balance/codex.ts";
 import {
   readClaudeObservation,
   readCodexObservation,
@@ -351,7 +351,7 @@ async function balanceCommand(args: string[]): Promise<number> {
   const model = flags.strings.get("model") ?? null;
   const spark = model !== null && /spark/iu.test(model);
   const fullDelivery = readFullFocusLeaf(paths.codexFullFocusLeaf, "codex");
-  if (spark) {
+  if (spark && model !== null) {
     const observation = await ensureFreshCodex(paths, process.env);
     if (observation === null) {
       const failure = { schema_version: 1, provider: "codex", ok: false, refusal: "observation-unavailable", detail: "no codex observation (is codex-swap installed?)" };
@@ -362,7 +362,11 @@ async function balanceCommand(args: string[]): Promise<number> {
     const nowMs = Date.now();
     const codexFocus = effectiveCodexFullFocus(fullDelivery, observation, nowMs);
     const focusTarget = codexFocus.state === "active" && codexFocus.policy !== null ? codexFocus.policy.target : null;
-    const selection = selectCodexSpark(observation, nowMs, focusTarget);
+    const preview = selectCodexSpark(observation, nowMs, focusTarget);
+    const selection =
+      preview.ok && flags.booleans.has("claim")
+        ? await claimCodexSpark(preview, { observation, model, focusTarget, env: process.env })
+        : preview;
     if (flags.booleans.has("json")) {
       emitJson({
         schema_version: 1,
@@ -371,8 +375,13 @@ async function balanceCommand(args: string[]): Promise<number> {
         ...selection,
       });
     } else if (selection.ok) {
-      console.log(`${selection.accountKey} — ${selection.reason} (${selection.score}% spark headroom)`);
-      console.log(`launch: codex-swap run --account ${selection.accountKey} -- --model ${model} <codex args>`);
+      const lease = selection.lease === null ? "" : ` (lease ${selection.lease.leaseId}, expires ${selection.lease.expiresAt ?? "?"})`;
+      console.log(`${selection.accountKey} — ${selection.reason} (${selection.score}% spark headroom)${lease}`);
+      console.log(
+        selection.lease === null
+          ? `launch: codex-swap run --account ${selection.accountKey} -- --model ${model} <codex args>`
+          : `launch: codex-swap run --claim ${selection.lease.leaseId} -- <codex args>`,
+      );
     } else {
       console.error(`agentusage: ${selection.refusal}: ${selection.detail}`);
     }

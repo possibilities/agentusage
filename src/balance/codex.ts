@@ -126,18 +126,15 @@ export async function selectCodexAccount(options: SelectCodexOptions = {}): Prom
   return delegateCodexSelect(options);
 }
 
-async function delegateCodexSelect(options: SelectCodexOptions, requiredAccountKey?: string): Promise<CodexSelection> {
-  const argv = [...codexSwapArgv(options.env ?? process.env), "select", "--json"];
-  if (options.strategy !== undefined) argv.push("--strategy", options.strategy);
-  if (requiredAccountKey !== undefined) argv.push("--account", requiredAccountKey);
-  if (options.claim === true) argv.push("--claim");
-  if (options.allowUnknown === true) argv.push("--allow-unknown");
+type SelectEnvelopeOutcome =
+  | { ok: true; accountKey: string; reasonSummary: string; score: number | null; lease: CodexLease | null }
+  | { ok: false; refusal: CodexRefusal; detail: string; nextReadyAt?: string | null; exclusions?: unknown[] };
 
-  const run = await runBounded(argv, { timeoutMs: SELECT_TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES });
+/** Shared codex-swap `select` envelope parsing for both main-lane delegation and Spark claims. */
+function parseSelectRun(run: Awaited<ReturnType<typeof runBounded>>, argv: readonly string[]): SelectEnvelopeOutcome {
   if (run.error !== null) {
     return {
       ok: false,
-      lane: "main",
       refusal: run.enoent ? "dependency-unavailable" : "provider-error",
       detail: run.enoent ? `codex-swap binary not found (${argv[0]})` : `codex-swap select ${run.error}`,
     };
@@ -146,7 +143,7 @@ async function delegateCodexSelect(options: SelectCodexOptions, requiredAccountK
   try {
     envelope = JSON.parse(run.stdout) as Record<string, unknown>;
   } catch {
-    return { ok: false, lane: "main", refusal: "provider-error", detail: "codex-swap select emitted invalid JSON" };
+    return { ok: false, refusal: "provider-error", detail: "codex-swap select emitted invalid JSON" };
   }
   const error = envelope.error;
   if (error != null) {
@@ -158,7 +155,6 @@ async function delegateCodexSelect(options: SelectCodexOptions, requiredAccountK
     >;
     return {
       ok: false,
-      lane: "main",
       refusal:
         code === "NO_ELIGIBLE_ACCOUNT"
           ? "no-eligible-account"
@@ -180,7 +176,7 @@ async function delegateCodexSelect(options: SelectCodexOptions, requiredAccountK
   >;
   const accountKey = typeof selection.accountKey === "string" ? selection.accountKey : null;
   if (accountKey === null) {
-    return { ok: false, lane: "main", refusal: "provider-error", detail: "codex-swap select returned no accountKey" };
+    return { ok: false, refusal: "provider-error", detail: "codex-swap select returned no accountKey" };
   }
   const reason = (typeof selection.reason === "object" && selection.reason !== null ? selection.reason : {}) as Record<
     string,
@@ -204,12 +200,33 @@ async function delegateCodexSelect(options: SelectCodexOptions, requiredAccountK
       : null;
   return {
     ok: true,
-    lane: "main",
     accountKey,
-    ...describeAccount(options.observation, accountKey),
-    reason: typeof reason.summary === "string" ? reason.summary : "selected",
+    reasonSummary: typeof reason.summary === "string" ? reason.summary : "selected",
     score: typeof reason.score === "number" && Number.isFinite(reason.score) ? reason.score : null,
     lease,
+  };
+}
+
+async function delegateCodexSelect(options: SelectCodexOptions, requiredAccountKey?: string): Promise<CodexSelection> {
+  const argv = [...codexSwapArgv(options.env ?? process.env), "select", "--json"];
+  if (options.strategy !== undefined) argv.push("--strategy", options.strategy);
+  if (requiredAccountKey !== undefined) argv.push("--account", requiredAccountKey);
+  if (options.claim === true) argv.push("--claim");
+  if (options.allowUnknown === true) argv.push("--allow-unknown");
+
+  const run = await runBounded(argv, { timeoutMs: SELECT_TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES });
+  const outcome = parseSelectRun(run, argv);
+  if (!outcome.ok) {
+    return { lane: "main", ...outcome };
+  }
+  return {
+    ok: true,
+    lane: "main",
+    accountKey: outcome.accountKey,
+    ...describeAccount(options.observation, outcome.accountKey),
+    reason: outcome.reasonSummary,
+    score: outcome.score,
+    lease: outcome.lease,
   };
 }
 
@@ -291,4 +308,87 @@ export function selectCodexSpark(
       activeLeases: entry.account.activeLeases,
     })),
   };
+}
+
+const SPARK_CLAIM_LANE = "codex-spark";
+const MAX_SPARK_CLAIM_ATTEMPTS = 2;
+
+export interface ClaimCodexSparkOptions {
+  observation: CodexObservation;
+  model: string;
+  focusTarget: string | null;
+  env?: Record<string, string | undefined>;
+}
+
+function sparkClaimReason(focusTarget: string | null, accountKey: string): string {
+  if (focusTarget === null) return "spark-headroom";
+  return accountKey === focusTarget ? "full-focus" : "full-focus-fallback (spark-headroom)";
+}
+
+async function runCodexSparkClaim(
+  accountKey: string,
+  model: string,
+  env: Record<string, string | undefined> | undefined,
+): Promise<SelectEnvelopeOutcome> {
+  const argv = [
+    ...codexSwapArgv(env ?? process.env),
+    "select",
+    "--account",
+    accountKey,
+    "--claim",
+    "--metered-lane",
+    SPARK_CLAIM_LANE,
+    "--model",
+    model,
+    "--json",
+  ];
+  const run = await runBounded(argv, { timeoutMs: SELECT_TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES });
+  return parseSelectRun(run, argv);
+}
+
+/**
+ * Claim the account `selectCodexSpark` chose through the frozen codex-swap
+ * `--metered-lane codex-spark` primitive. Only a structured
+ * `NO_ELIGIBLE_ACCOUNT` refusal retries, and only once, against the next
+ * differently keyed account from the already-ranked pool: every other
+ * failure (dependency, malformed envelope, auth, identity, ...) fails
+ * closed immediately, and at most two claim attempts are ever made.
+ */
+export async function claimCodexSpark(
+  selection: CodexSelectionSuccess,
+  options: ClaimCodexSparkOptions,
+): Promise<CodexSelection> {
+  const ranked =
+    selection.pool !== undefined && selection.pool.length > 0
+      ? selection.pool
+      : [{ accountKey: selection.accountKey, headroomPercent: selection.score ?? 0, activeLeases: 0 }];
+
+  const attempted = new Set<string>();
+  let candidate = ranked.find((entry) => entry.accountKey === selection.accountKey) ?? ranked[0]!;
+  let lastDetail = "no spark account was available to claim";
+
+  for (let attempt = 0; attempt < MAX_SPARK_CLAIM_ATTEMPTS; attempt += 1) {
+    attempted.add(candidate.accountKey);
+    const outcome = await runCodexSparkClaim(candidate.accountKey, options.model, options.env);
+    if (outcome.ok) {
+      return {
+        ok: true,
+        lane: "codex-spark",
+        accountKey: outcome.accountKey,
+        ...describeAccount(options.observation, outcome.accountKey),
+        reason: sparkClaimReason(options.focusTarget, outcome.accountKey),
+        score: candidate.headroomPercent,
+        lease: outcome.lease,
+        pool: selection.pool,
+      };
+    }
+    if (outcome.refusal !== "no-eligible-account") {
+      return { lane: "codex-spark", ...outcome };
+    }
+    lastDetail = outcome.detail;
+    const next = ranked.find((entry) => !attempted.has(entry.accountKey));
+    if (next === undefined) break;
+    candidate = next;
+  }
+  return { ok: false, lane: "codex-spark", refusal: "no-spark-capacity", detail: lastDetail };
 }

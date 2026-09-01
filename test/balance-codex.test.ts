@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_OBSERVATION_SCHEMA_VERSION, type CodexAccountView, type CodexObservation } from "../src/codex/types.ts";
-import { selectCodexAccount, selectCodexSpark } from "../src/balance/codex.ts";
+import { claimCodexSpark, selectCodexAccount, selectCodexSpark } from "../src/balance/codex.ts";
 import {
   materializeFullFocusPolicy,
   type FocusStatus,
@@ -304,5 +304,364 @@ describe("codex full focus", () => {
     );
     expect(fallback.ok && fallback.accountKey).toBe("account:b");
     if (fallback.ok) expect(fallback.reason).toBe("full-focus-fallback (spark-headroom)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// claimCodexSpark
+
+type SparkClaimFixtureResponse =
+  | { status: "ok" }
+  | { status: "no-eligible" }
+  | { status: "dependency" }
+  | { status: "malformed" }
+  | { status: "provider-error" };
+
+/**
+ * Fake `codex-swap select --account ... --claim --metered-lane codex-spark`.
+ * `responses` maps accountKey to the fixed outcome for that account; every
+ * invocation's argv is appended as a JSON line to `logPath` so tests can
+ * assert exact argv and attempt counts.
+ */
+function fakeSparkClaimSwap(responses: Record<string, SparkClaimFixtureResponse>, logPath: string): string {
+  const path = join(mkdtempSync(join(tmpdir(), "agentusage-codex-swap-")), "codex-swap");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env bun
+const fs = require("node:fs");
+const args = Bun.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + "\\n");
+const accountAt = args.indexOf("--account");
+const accountKey = accountAt >= 0 ? args[accountAt + 1] : null;
+const responses = ${JSON.stringify(responses)};
+const resp = accountKey !== null ? responses[accountKey] : undefined;
+if (resp === undefined) {
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: null, error: { code: "UNKNOWN", message: "no fixture for account" } }));
+  process.exit(1);
+}
+if (resp.status === "ok") {
+  const leaseId = "lease-" + accountKey;
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: {
+    selection: { accountKey, reason: { summary: "claimed", score: 60 } },
+    lease: { leaseId, ownerNonce: "nonce", accountKey, expiresAt: "2026-08-08T20:01:00.000Z" }
+  }, error: null }));
+  process.exit(0);
+} else if (resp.status === "no-eligible") {
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: null, error: {
+    code: "NO_ELIGIBLE_ACCOUNT", message: "account ineligible",
+    details: { exclusions: [{ accountKey, exclusions: ["max_concurrent_reached"] }] }
+  } }));
+  process.exit(3);
+} else if (resp.status === "dependency") {
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: null, error: {
+    code: "DEPENDENCY_UNAVAILABLE", message: "codex-multi-auth missing"
+  } }));
+  process.exit(2);
+} else if (resp.status === "malformed") {
+  console.log("not json");
+  process.exit(0);
+} else {
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: null, error: { code: "AUTH_ERROR", message: "boom" } }));
+  process.exit(1);
+}
+`,
+    { mode: 0o700 },
+  );
+  chmodSync(path, 0o700);
+  return path;
+}
+
+function makeLogPath(): string {
+  return join(mkdtempSync(join(tmpdir(), "agentusage-codex-swap-log-")), "argv.log");
+}
+
+function readArgvLog(logPath: string): string[][] {
+  return readFileSync(logPath, "utf8")
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as string[]);
+}
+
+describe("claimCodexSpark", () => {
+  test("exhausted main + available spark: claims the selected account and returns a lease", async () => {
+    const preview = selectCodexSpark(codexObservation([account("account:a", { lanes: sparkLanes(60, 60) })]), NOW);
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap({ "account:a": { status: "ok" } }, logPath);
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a", { lanes: sparkLanes(60, 60) })]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.lane).toBe("codex-spark");
+      expect(result.accountKey).toBe("account:a");
+      expect(result.reason).toBe("spark-headroom");
+      expect(result.lease?.leaseId).toBe("lease-account:a");
+    }
+
+    const log = readArgvLog(logPath);
+    expect(log).toEqual([
+      ["select", "--account", "account:a", "--claim", "--metered-lane", "codex-spark", "--model", "gpt-5.3-codex-spark", "--json"],
+    ]);
+  });
+
+  test("no-claim preview launches zero codex-swap subprocesses", () => {
+    // selectCodexSpark is synchronous and pure; the type of `lease` proves
+    // the preview path can never have shelled out to codex-swap.
+    const preview = selectCodexSpark(codexObservation([account("account:a", { lanes: sparkLanes(60, 60) })]), NOW);
+    expect(preview.ok && preview.lease).toBeNull();
+  });
+
+  test("first refusal then second-account success", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok && preview.accountKey).toBe("account:a");
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap(
+      { "account:a": { status: "no-eligible" }, "account:b": { status: "ok" } },
+      logPath,
+    );
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.accountKey).toBe("account:b");
+      expect(result.lease?.leaseId).toBe("lease-account:b");
+    }
+    expect(readArgvLog(logPath).map((argv) => argv[2])).toEqual(["account:a", "account:b"]);
+  });
+
+  test("two refusals then bounded no-spark-capacity, never a third attempt", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap(
+      { "account:a": { status: "no-eligible" }, "account:b": { status: "no-eligible" } },
+      logPath,
+    );
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("no-spark-capacity");
+    expect(readArgvLog(logPath)).toHaveLength(2);
+  });
+
+  test("malformed envelope fails closed without retry", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap({ "account:a": { status: "malformed" } }, logPath);
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("provider-error");
+    expect(readArgvLog(logPath)).toHaveLength(1);
+  });
+
+  test("provider error (non-NO_ELIGIBLE_ACCOUNT) fails closed without retry", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap({ "account:a": { status: "provider-error" } }, logPath);
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("provider-error");
+    expect(readArgvLog(logPath)).toHaveLength(1);
+  });
+
+  test("dependency-unavailable fails closed without retry", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap({ "account:a": { status: "dependency" } }, logPath);
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("dependency-unavailable");
+    expect(readArgvLog(logPath)).toHaveLength(1);
+  });
+
+  test("missing codex-swap binary fails closed as dependency-unavailable without retry", async () => {
+    const preview = selectCodexSpark(codexObservation([account("account:a", { lanes: sparkLanes(60, 60) })]), NOW);
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: "/nonexistent/codex-swap-for-tests" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("dependency-unavailable");
+  });
+
+  test("focus pin: claims the pinned account with reason full-focus", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(20, 90) }),
+        account("account:b", { lanes: sparkLanes(80, 60) }),
+      ]),
+      NOW,
+      "account:a",
+    );
+    expect(preview.ok && preview.accountKey).toBe("account:a");
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap({ "account:a": { status: "ok" } }, logPath);
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: "account:a",
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.accountKey).toBe("account:a");
+      expect(result.reason).toBe("full-focus");
+    }
+  });
+
+  test("focus fallback: pinned account refused, next-ranked account claimed with fallback reason", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+      "account:a",
+    );
+    expect(preview.ok && preview.accountKey).toBe("account:a");
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap(
+      { "account:a": { status: "no-eligible" }, "account:b": { status: "ok" } },
+      logPath,
+    );
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: "account:a",
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.accountKey).toBe("account:b");
+      expect(result.reason).toBe("full-focus-fallback (spark-headroom)");
+    }
+  });
+
+  test("manually disabled, relogin-required, and identity-conflict accounts never enter the ranked claim pool", () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90), manuallyDisabled: true }),
+        account("account:b", { lanes: sparkLanes(80, 80), reloginRequired: true }),
+        account("account:c", { lanes: sparkLanes(70, 70), identityConflict: true }),
+        account("account:d", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+    expect(preview.accountKey).toBe("account:d");
+    expect(preview.pool?.map((entry) => entry.accountKey)).toEqual(["account:d"]);
+  });
+
+  test("concurrency-shaped calls: independent concurrent claims resolve without cross-talk", async () => {
+    const previewA = selectCodexSpark(codexObservation([account("account:a", { lanes: sparkLanes(60, 60) })]), NOW);
+    const previewB = selectCodexSpark(codexObservation([account("account:b", { lanes: sparkLanes(70, 70) })]), NOW);
+    expect(previewA.ok && previewB.ok).toBe(true);
+    if (!previewA.ok || !previewB.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap(
+      { "account:a": { status: "ok" }, "account:b": { status: "ok" } },
+      logPath,
+    );
+    const [resultA, resultB] = await Promise.all([
+      claimCodexSpark(previewA, {
+        observation: codexObservation([account("account:a")]),
+        model: "gpt-5.3-codex-spark",
+        focusTarget: null,
+        env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+      }),
+      claimCodexSpark(previewB, {
+        observation: codexObservation([account("account:b")]),
+        model: "gpt-5.3-codex-spark",
+        focusTarget: null,
+        env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+      }),
+    ]);
+    expect(resultA.ok && resultA.accountKey).toBe("account:a");
+    expect(resultB.ok && resultB.accountKey).toBe("account:b");
+    expect(readArgvLog(logPath)).toHaveLength(2);
   });
 });

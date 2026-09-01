@@ -141,11 +141,19 @@ focus gates its target against the fresh observation, then delegates through
 `codex-swap select --account <accountKey>` so focused launches retain the same
 atomic lease accounting as automatic selections.
 
-**Spark** — `agentusage balance codex --model gpt-5.3-codex-spark --json`
-selects locally on **spark-lane headroom** (min of the lane's 5 h and weekly
-remaining), ignoring main-quota exhaustion entirely — spark is an independent
-quota lane that keeps working when the main lane is exhausted. Only
-auth-broken accounts are excluded. Ties break toward fewer active leases.
+**Spark** — `agentusage balance codex --model gpt-5.3-codex-spark --json
+[--claim]` selects locally on **spark-lane headroom** (min of the lane's 5 h
+and weekly remaining), ignoring main-quota exhaustion entirely — spark is an
+independent quota lane that keeps working when the main lane is exhausted.
+Only auth-broken accounts are excluded. Ties break toward fewer active
+leases. With `--claim`, the chosen (or focus-pinned) account is claimed
+through `codex-swap select --account <accountKey> --claim --metered-lane
+codex-spark --model <spark-model> --json`, and the result carries a lease to
+consume via `codex-swap run --claim <lease-id> -- …`, matching the main-lane
+`--claim` shape. Only a structured `NO_ELIGIBLE_ACCOUNT` refusal retries,
+once, against the next-ranked account in the spark pool; every other
+provider failure fails closed immediately. Without `--claim` the preview
+launches no codex-swap subprocess and `lease` stays `null`.
 
 Exit codes everywhere: `0` selected, `1` failure, `2` usage, `3` no eligible
 account/capacity (matching codex-swap's convention).
