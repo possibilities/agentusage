@@ -325,6 +325,40 @@ function sparkClaimReason(focusTarget: string | null, accountKey: string): strin
   return accountKey === focusTarget ? "full-focus" : "full-focus-fallback (spark-headroom)";
 }
 
+/**
+ * A claim's success envelope is only usable when it actually proves a lease
+ * on the exact account requested: codex-swap's `select --claim` contract is
+ * frozen, so a lease-shaped hole here (null lease, blank lease id, or a
+ * selection/lease `accountKey` that drifted from what was requested) must
+ * fail closed rather than be trusted as a claim on the wrong — or no —
+ * account. This is claim-specific: `parseSelectRun` is shared with plain
+ * `select` delegation, where no lease is a legitimate response.
+ */
+function validateSparkClaimOutcome(requestedAccountKey: string, outcome: SelectEnvelopeOutcome): SelectEnvelopeOutcome {
+  if (!outcome.ok) return outcome;
+  if (outcome.lease === null) {
+    return { ok: false, refusal: "provider-error", detail: "codex-swap select --claim returned no lease" };
+  }
+  if (outcome.accountKey !== requestedAccountKey) {
+    return {
+      ok: false,
+      refusal: "provider-error",
+      detail: `codex-swap select --claim returned selection accountKey "${outcome.accountKey}" for requested "${requestedAccountKey}"`,
+    };
+  }
+  if (outcome.lease.accountKey !== requestedAccountKey) {
+    return {
+      ok: false,
+      refusal: "provider-error",
+      detail: `codex-swap select --claim returned lease accountKey "${outcome.lease.accountKey}" for requested "${requestedAccountKey}"`,
+    };
+  }
+  if (outcome.lease.leaseId.length === 0) {
+    return { ok: false, refusal: "provider-error", detail: "codex-swap select --claim returned an empty leaseId" };
+  }
+  return outcome;
+}
+
 async function runCodexSparkClaim(
   accountKey: string,
   model: string,
@@ -343,7 +377,7 @@ async function runCodexSparkClaim(
     "--json",
   ];
   const run = await runBounded(argv, { timeoutMs: SELECT_TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES });
-  return parseSelectRun(run, argv);
+  return validateSparkClaimOutcome(accountKey, parseSelectRun(run, argv));
 }
 
 /**

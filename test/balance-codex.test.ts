@@ -315,7 +315,11 @@ type SparkClaimFixtureResponse =
   | { status: "no-eligible" }
   | { status: "dependency" }
   | { status: "malformed" }
-  | { status: "provider-error" };
+  | { status: "provider-error" }
+  | { status: "null-lease" }
+  | { status: "wrong-selection-account"; actualAccountKey: string }
+  | { status: "wrong-lease-account"; actualAccountKey: string }
+  | { status: "empty-lease-id" };
 
 /**
  * Fake `codex-swap select --account ... --claim --metered-lane codex-spark`.
@@ -359,6 +363,30 @@ if (resp.status === "ok") {
   process.exit(2);
 } else if (resp.status === "malformed") {
   console.log("not json");
+  process.exit(0);
+} else if (resp.status === "null-lease") {
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: {
+    selection: { accountKey, reason: { summary: "claimed", score: 60 } },
+    lease: null
+  }, error: null }));
+  process.exit(0);
+} else if (resp.status === "wrong-selection-account") {
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: {
+    selection: { accountKey: resp.actualAccountKey, reason: { summary: "claimed", score: 60 } },
+    lease: { leaseId: "lease-" + resp.actualAccountKey, ownerNonce: "nonce", accountKey: resp.actualAccountKey, expiresAt: "2026-08-08T20:01:00.000Z" }
+  }, error: null }));
+  process.exit(0);
+} else if (resp.status === "wrong-lease-account") {
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: {
+    selection: { accountKey, reason: { summary: "claimed", score: 60 } },
+    lease: { leaseId: "lease-" + resp.actualAccountKey, ownerNonce: "nonce", accountKey: resp.actualAccountKey, expiresAt: "2026-08-08T20:01:00.000Z" }
+  }, error: null }));
+  process.exit(0);
+} else if (resp.status === "empty-lease-id") {
+  console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: {
+    selection: { accountKey, reason: { summary: "claimed", score: 60 } },
+    lease: { leaseId: "", ownerNonce: "nonce", accountKey, expiresAt: "2026-08-08T20:01:00.000Z" }
+  }, error: null }));
   process.exit(0);
 } else {
   console.log(JSON.stringify({ schemaVersion: 1, command: "select", data: null, error: { code: "AUTH_ERROR", message: "boom" } }));
@@ -488,6 +516,108 @@ describe("claimCodexSpark", () => {
 
     const logPath = makeLogPath();
     const codexSwap = fakeSparkClaimSwap({ "account:a": { status: "malformed" } }, logPath);
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("provider-error");
+    expect(readArgvLog(logPath)).toHaveLength(1);
+  });
+
+  test("null lease on a nominally successful envelope fails closed without retry", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap({ "account:a": { status: "null-lease" } }, logPath);
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("provider-error");
+    expect(readArgvLog(logPath)).toHaveLength(1);
+  });
+
+  test("selection accountKey mismatched from the requested account fails closed without retry", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap(
+      { "account:a": { status: "wrong-selection-account", actualAccountKey: "account:b" } },
+      logPath,
+    );
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("provider-error");
+    expect(readArgvLog(logPath)).toHaveLength(1);
+  });
+
+  test("lease accountKey mismatched from the requested account fails closed without retry", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap(
+      { "account:a": { status: "wrong-lease-account", actualAccountKey: "account:b" } },
+      logPath,
+    );
+    const result = await claimCodexSpark(preview, {
+      observation: codexObservation([account("account:a"), account("account:b")]),
+      model: "gpt-5.3-codex-spark",
+      focusTarget: null,
+      env: { AGENTUSAGE_CODEX_SWAP_BIN: codexSwap },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal).toBe("provider-error");
+    expect(readArgvLog(logPath)).toHaveLength(1);
+  });
+
+  test("empty leaseId fails closed without retry", async () => {
+    const preview = selectCodexSpark(
+      codexObservation([
+        account("account:a", { lanes: sparkLanes(90, 90) }),
+        account("account:b", { lanes: sparkLanes(50, 50) }),
+      ]),
+      NOW,
+    );
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    const logPath = makeLogPath();
+    const codexSwap = fakeSparkClaimSwap({ "account:a": { status: "empty-lease-id" } }, logPath);
     const result = await claimCodexSpark(preview, {
       observation: codexObservation([account("account:a"), account("account:b")]),
       model: "gpt-5.3-codex-spark",
