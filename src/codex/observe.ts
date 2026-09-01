@@ -105,7 +105,7 @@ export function groupLanes(windows: readonly unknown[]): CodexLane[] {
       codeReview.push(window);
       continue;
     }
-    const identity = wire.meteredFeature ?? wire.limitName;
+    const identity = wire.limitName ?? wire.meteredFeature;
     if (identity === null) {
       unlabeled.push(window);
       continue;

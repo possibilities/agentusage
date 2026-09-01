@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildCodexObservation, groupLanes } from "../src/codex/observe.ts";
-import { laneHeadroomPercent, sparkLane, validateCodexObservation } from "../src/codex/types.ts";
+import { laneHeadroomPercent, SPARK_LANE_ID, sparkLane, validateCodexObservation } from "../src/codex/types.ts";
+import { selectCodexSpark } from "../src/balance/codex.ts";
 
 const NOW = Date.parse("2026-08-08T20:00:00Z");
 
@@ -113,6 +114,27 @@ describe("groupLanes", () => {
     expect(laneHeadroomPercent(spark)).toBe(0);
     expect(laneHeadroomPercent(main)).toBe(45);
   });
+
+  test("production-shaped limitName plus opaque meteredFeature classifies as spark", () => {
+    const lanes = groupLanes([
+      { kind: "other", label: "5h", windowSeconds: 18000, usedPercent: 8, remainingPercent: 92, resetsAt: null, resetAfterSeconds: null, limitName: "GPT-5.3-Codex-Spark", meteredFeature: "codex_bengalfox" },
+    ]);
+    expect(lanes.map((lane) => lane.id)).toEqual([SPARK_LANE_ID]);
+  });
+
+  test("missing limitName still classifies as spark via meteredFeature fallback", () => {
+    const lanes = groupLanes([
+      { kind: "other", label: "5h", windowSeconds: 18000, usedPercent: 8, remainingPercent: 92, resetsAt: null, resetAfterSeconds: null, limitName: null, meteredFeature: "some_spark_codename" },
+    ]);
+    expect(lanes.map((lane) => lane.id)).toEqual([SPARK_LANE_ID]);
+  });
+
+  test("unrelated labeled window is not classified as spark", () => {
+    const lanes = groupLanes([
+      { kind: "other", label: "weekly", windowSeconds: 604800, usedPercent: 10, remainingPercent: 90, resetsAt: null, resetAfterSeconds: null, limitName: "Code Review Extra", meteredFeature: "codex_otherfeature" },
+    ]);
+    expect(lanes.map((lane) => lane.id)).toEqual(["codex-code-review-extra"]);
+  });
 });
 
 describe("buildCodexObservation", () => {
@@ -163,5 +185,20 @@ describe("buildCodexObservation", () => {
     const observation = buildCodexObservation(snapshotEnvelope(), NOW);
     observation.accounts[0]!.resetCreditsAvailable = -1;
     expect(validateCodexObservation(observation)).toBeNull();
+  });
+
+  test("production-shaped spark windows let selectCodexSpark find headroom instead of refusing", () => {
+    const envelope = snapshotEnvelope() as {
+      data: { accounts: Array<{ usage: { measurement: { windows: unknown[] } } }> };
+    };
+    envelope.data.accounts[0]!.usage.measurement.windows = [
+      { kind: "primary", label: "5h", windowSeconds: 18000, usedPercent: 30, remainingPercent: 70, resetsAt: "2026-08-08T22:00:00Z", resetAfterSeconds: 7200, limitName: null, meteredFeature: null },
+      { kind: "other", label: "5h", windowSeconds: 18000, usedPercent: 8, remainingPercent: 92, resetsAt: "2026-08-08T23:00:00Z", resetAfterSeconds: null, limitName: "GPT-5.3-Codex-Spark", meteredFeature: "codex_bengalfox" },
+      { kind: "other", label: "weekly", windowSeconds: 604800, usedPercent: 10, remainingPercent: 90, resetsAt: "2026-08-13T00:00:00Z", resetAfterSeconds: null, limitName: "GPT-5.3-Codex-Spark", meteredFeature: "codex_bengalfox" },
+    ];
+    const observation = buildCodexObservation(envelope, NOW);
+    expect(sparkLane(observation.accounts[0]!)).not.toBeNull();
+    const result = selectCodexSpark(observation, NOW);
+    expect(result.ok).toBe(true);
   });
 });
