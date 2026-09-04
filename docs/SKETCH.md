@@ -77,7 +77,7 @@ remain deliberately out of scope: this command decides but does not launch.
   edits wiring it into AgentStart's `install-agent-clis` and the machine's
   local-service verification.
   Providers are installed by `scripts/install-providers.sh`: claude-swap from
-  `~/src/claude-swap` at the published `integration` commit (current upstream +
+  `~/source/realiti4--claude-swap` at the published `integration` commit (current upstream +
   open PRs #169 capacity-metadata + #166 recover), through the cswax workshop's
   installer, which owns the fork and its maintenance. codex-swap grew its own
   installer and is provisioned by AgentStart directly; this file no longer
@@ -107,7 +107,7 @@ remain deliberately out of scope: this command decides but does not launch.
 - `scripts/install.sh`, `scripts/install-providers.sh`. The daemon's
   LaunchAgent is AgentStart's: `~/code/agentstart/config/launchd/`.
 - `~/code/agentstart`: `scripts/install-agent-clis`, `scripts/install-launchagents`.
-- `~/src/claude-swap`: fork remote + `integration` branch.
+- `~/source/realiti4--claude-swap`: upstream + fork remotes and `integration` branch.
 - `test/` — normalization, balance scoring/tie-breaks/focus overlay, focus
   lifetimes, spark grouping/selection, sidecar IO.
 
