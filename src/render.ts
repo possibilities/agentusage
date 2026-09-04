@@ -114,6 +114,13 @@ function cardLines(card: AccountCard, width: number, comfortable: boolean): Line
       tone: card.dimmed ? "muted" : "good",
       dim: card.dimmed,
     });
+    if (card.resetCreditExpiryText != null) {
+      header.push({
+        text: ` · ${card.resetCreditExpiryText}`,
+        tone: "muted",
+        dim: true,
+      });
+    }
   }
   const lines: Line[] = [header];
   const metadata = [card.detail, card.measuredAgo === null ? null : `sampled ${card.measuredAgo} ago`]

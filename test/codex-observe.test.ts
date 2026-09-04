@@ -48,6 +48,7 @@ function snapshotEnvelope(): unknown {
               planType: "plus",
               limitReached: false,
               resetCreditsAvailable: 1,
+              resetCreditExpirations: ["2026-09-08T12:00:00.000Z", null],
               windows: sparkWindows(),
               fetchedAt: "2026-08-08T19:59:00Z",
             },
@@ -149,6 +150,7 @@ describe("buildCodexObservation", () => {
     expect(primary.measurementSource).toBe("current");
     expect(primary.planType).toBe("plus");
     expect(primary.resetCreditsAvailable).toBe(1);
+    expect(primary.resetCreditExpirations).toEqual(["2026-09-08T12:00:00.000Z", null]);
     expect(primary.activeLeases).toBe(2);
     expect(sparkLane(primary)).not.toBeNull();
     expect(primary.measuredAtMs).toBe(Date.parse("2026-08-08T19:59:00Z"));
@@ -184,6 +186,12 @@ describe("buildCodexObservation", () => {
   test("rejects malformed reset-credit counts in sidecars", () => {
     const observation = buildCodexObservation(snapshotEnvelope(), NOW);
     observation.accounts[0]!.resetCreditsAvailable = -1;
+    expect(validateCodexObservation(observation)).toBeNull();
+  });
+
+  test("rejects malformed reset-credit expiries in sidecars", () => {
+    const observation = buildCodexObservation(snapshotEnvelope(), NOW);
+    observation.accounts[0]!.resetCreditExpirations = ["not-a-date"];
     expect(validateCodexObservation(observation)).toBeNull();
   });
 

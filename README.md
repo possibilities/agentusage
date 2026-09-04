@@ -239,7 +239,8 @@ policy remains active.
   v1 over codex-swap's snapshot: per account auth/trust/selection state plus
   windows regrouped into **lanes** (`main` binding, `codex-spark`,
   `code-review`, extras) with used/remaining percent and reset times, plus
-  available rate-limit reset credits when the provider reports them.
+  available rate-limit reset credits and their nearest known expiry when the
+  provider reports credit details.
 - Grok sidecar `grok-account-routing/observation.json` — agentusage schema v1
   over grok-swap observations: account auth/trust, included-period percentage,
   prepaid balance, PAYG usage/cap, and last-good timestamps. Dollar values are
@@ -259,4 +260,4 @@ bun run typecheck
 
 `docs/SKETCH.md` is the build contract, `CONTEXT.md` the glossary. Provider
 contracts are read defensively across the public claude-swap integration
-branch (maintained by cswax), codex-swap, and grok-swap.
+branch (maintained by cswax), codex-swap `b427534`, and grok-swap.

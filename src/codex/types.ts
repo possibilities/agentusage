@@ -2,8 +2,8 @@ import type { ObservationHealth } from "../claude/types.ts";
 
 /**
  * Codex observation sidecar (agentusage schema v1), built from codex-swap's
- * `snapshot --json` contract (pinned at codex-swap f193bc1; all drift since
- * efce453 is additive). Windows are regrouped into lanes so independent quota
+ * `snapshot --json` contract (pinned at codex-swap b427534). Windows are
+ * regrouped into lanes so independent quota
  * pools — most importantly gpt-5.3-codex-spark — render and balance as units.
  */
 
@@ -55,6 +55,8 @@ export interface CodexAccountView {
   limitReached: boolean | null;
   /** Provider-issued rate-limit resets currently available to this account. */
   resetCreditsAvailable?: number | null;
+  /** Per-credit ISO expiry, with null for provider-declared non-expiring credits. */
+  resetCreditExpirations?: Array<string | null>;
   /** Which measurement produced `lanes`; stale display data is "last-good". */
   measurementSource: "current" | "last-good" | null;
   measuredAtMs: number | null;
@@ -154,6 +156,16 @@ export function validateCodexObservation(value: unknown): CodexObservation | nul
       (typeof resetCreditsAvailable !== "number" ||
         !Number.isSafeInteger(resetCreditsAvailable) ||
         resetCreditsAvailable < 0)
+    ) {
+      return null;
+    }
+    const resetCreditExpirations = account.resetCreditExpirations;
+    if (
+      resetCreditExpirations !== undefined &&
+      (!Array.isArray(resetCreditExpirations) ||
+        !resetCreditExpirations.every(
+          (expiry) => expiry === null || (typeof expiry === "string" && Number.isFinite(Date.parse(expiry))),
+        ))
     ) {
       return null;
     }

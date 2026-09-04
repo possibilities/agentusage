@@ -50,9 +50,9 @@ the included allowance, followed by paid fallback tiers).
 Non-binding lanes are display + lane-targeted balance only.
 
 **Reset credit** — a provider-issued, one-shot Codex allowance for resetting
-rate-limit capacity. Agentusage displays the available count but does not use
-it for eligibility or headroom. _Avoid_: "reset" alone (confusable with a
-window's scheduled reset).
+rate-limit capacity. Agentusage displays the available count and nearest known
+expiry but does not use either for eligibility or headroom. _Avoid_: "reset"
+alone (confusable with a window's scheduled reset).
 
 **Focus** — a durable policy pinning launches to one route. **Fable focus**
 pins launches of the Fable model, whose quota is additional to Claude's

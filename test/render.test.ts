@@ -153,15 +153,16 @@ describe("Signal Room frame", () => {
             name: "codex-1",
             detail: "Plus · a deliberately long account identity",
             resetCreditsAvailable: 1,
+            resetCreditExpiryText: "expires 28d",
           },
         ],
       },
     };
 
-    const text = linesToText(renderFrameLines(resetVm, 40, { title: false }), false);
+    const text = linesToText(renderFrameLines(resetVm, 80, { title: false }), false);
     const header = text.split("\n").find((line) => line.includes("codex-1"));
     const metadata = text.split("\n").find((line) => line.includes("Plus"));
-    expect(header).toContain("[NON-FABLE]  1× reset");
+    expect(header).toContain("[NON-FABLE]  1× reset · expires 28d");
     expect(metadata).not.toContain("reset");
   });
 

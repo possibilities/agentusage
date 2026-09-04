@@ -169,6 +169,12 @@ function parseAccount(value: unknown, notes: string[]): CodexAccountView | null 
     typeof measurement === "object" && measurement !== null ? measurement : {}
   ) as Record<string, unknown>;
   const windows = Array.isArray(measurementRecord.windows) ? measurementRecord.windows : [];
+  const resetCreditExpirations = Array.isArray(measurementRecord.resetCreditExpirations)
+    ? measurementRecord.resetCreditExpirations.filter(
+        (expiry): expiry is string | null =>
+          expiry === null || (typeof expiry === "string" && Number.isFinite(Date.parse(expiry))),
+      )
+    : undefined;
   const measuredAtMs = measuredAtIso !== null && Number.isFinite(Date.parse(measuredAtIso)) ? Date.parse(measuredAtIso) : null;
 
   const lastErrorRaw = usage.lastError;
@@ -197,6 +203,7 @@ function parseAccount(value: unknown, notes: string[]): CodexAccountView | null 
     planType: stringOrNull(measurementRecord.planType),
     limitReached: typeof measurementRecord.limitReached === "boolean" ? measurementRecord.limitReached : null,
     resetCreditsAvailable: nonNegativeIntegerOrNull(measurementRecord.resetCreditsAvailable),
+    ...(resetCreditExpirations !== undefined ? { resetCreditExpirations } : {}),
     measurementSource: measurementSource !== null && windows.length >= 0 ? measurementSource : null,
     measuredAtMs,
     lanes: measurementSource === null ? [] : groupLanes(windows),
