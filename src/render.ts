@@ -1,4 +1,4 @@
-import type { AccountCard, ProviderSection, Tone, UsageViewModel } from "./view.ts";
+import type { AccountCard, ProviderSection, Remediation, Tone, UsageViewModel } from "./view.ts";
 import { SIGNAL_GLYPHS, TONE_HEX } from "./tui/theme.ts";
 
 export { TONE_HEX } from "./tui/theme.ts";
@@ -103,6 +103,7 @@ function cardLines(card: AccountCard, width: number, comfortable: boolean): Line
     });
   }
   const lines: Line[] = [header];
+  if (card.remediation !== null) lines.push(...remediationLines(card.remediation, width, "    "));
   const metadata = [card.detail, card.measuredAgo === null ? null : `sampled ${card.measuredAgo} ago`]
     .filter((part): part is string => part !== null)
     .join(" · ");
@@ -115,6 +116,51 @@ function cardLines(card: AccountCard, width: number, comfortable: boolean): Line
   } else {
     for (const meter of card.meters) lines.push(meterLine(card, meter, width));
   }
+  return lines;
+}
+
+/**
+ * Two lines an operator can act on without reading anything else: what is
+ * wrong, then the command. Shared by the banner and the card so the two views
+ * can never drift apart.
+ */
+function remediationLines(remediation: Remediation, width: number, indent: string): Line[] {
+  const head: Line = [
+    { text: indent },
+    { text: "⚠ ", tone: "over", bold: true },
+    { text: remediation.account, tone: "over", bold: true },
+    { text: ` · ${remediation.reason}`, tone: "over" },
+  ];
+  const command: Line = [
+    { text: `${indent}  ` },
+    { text: remediation.command, tone: "accent", bold: true },
+  ];
+  if (remediation.hint !== null) {
+    const hint = `  (${remediation.hint})`;
+    const used = command.reduce((total, span) => total + span.text.length, 0);
+    if (used + hint.length <= width) command.push({ text: hint, tone: "muted", dim: true });
+  }
+  return [head, command];
+}
+
+/**
+ * Accounts needing a human are announced at the top of the frame, not only on
+ * their card: the card may be scrolled off, and a dead credential is the one
+ * thing in this view that stays broken until someone acts.
+ */
+function bannerLines(remediations: readonly Remediation[], width: number): Line[] {
+  if (remediations.length === 0) return [];
+  const lines: Line[] = [
+    [
+      { text: `${SIGNAL_GLYPHS.rail} `, tone: "over", bold: true },
+      { text: "ACTION REQUIRED", tone: "over", bold: true },
+    ],
+    [],
+  ];
+  for (const remediation of remediations) lines.push(...remediationLines(remediation, width, "  "));
+  lines.push([]);
+  lines.push([{ text: SIGNAL_GLYPHS.rule.repeat(width), tone: "muted", dim: true }]);
+  lines.push([]);
   return lines;
 }
 
@@ -185,6 +231,8 @@ export function renderFrameLines(
     lines.push([{ text: SIGNAL_GLYPHS.rule.repeat(frameWidth), tone: "muted", dim: true }]);
     lines.push([]);
   }
+
+  lines.push(...bannerLines(vm.remediations, frameWidth));
 
   for (const section of [vm.claude, vm.codex]) {
     if (section === null) continue;

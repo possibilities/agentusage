@@ -20,6 +20,7 @@ const vm: UsageViewModel = {
         dimmed: false,
         measuredAgo: "12s",
         focus: ["non-fable"],
+        remediation: null,
         meters: [
           { label: "session", usedPercent: 42, resetText: "3h 12m", tone: "good", spark: false },
           { label: "gpt-5.3-codex-spark", usedPercent: 88.4, resetText: "6d 23h", tone: "hot", spark: true },
@@ -28,6 +29,7 @@ const vm: UsageViewModel = {
     ],
   },
   codex: null,
+  remediations: [],
   focus: [
     { kind: "claude", state: "off", target: null, lifetime: null },
     { kind: "non-fable", state: "active", target: "claude-1", lifetime: "permanent" },

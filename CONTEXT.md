@@ -46,6 +46,11 @@ rate-limit capacity. Agentusage displays the available count but does not use
 it for eligibility or headroom. _Avoid_: "reset" alone (confusable with a
 window's scheduled reset).
 
+**Remediation** — a card-level instruction only a human can carry out, with
+the exact command to run: a dead credential needing a re-login. Distinct from
+an exclusion, which says why balance skipped an account — an exhausted quota
+needs waiting, not an operator. _Avoid_: "issue", "alert", "action item".
+
 **Focus** — a durable policy pinning launches to one route. **Fable focus**
 pins launches that consume the Fable-scoped quota: the Fable model and Claude
 1M-context models (`*-1m` / `*[1m]`). **Non-Fable focus** pins everything

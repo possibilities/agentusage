@@ -224,6 +224,7 @@ async function statusCommand(args: string[]): Promise<number> {
   const claude = readClaudeObservation(paths);
   const codex = readCodexObservation(paths);
   const focus = readFocusStates(paths, claude, codex, nowMs);
+  const remediations = buildViewModel({ claude, codex, ...focus, nowMs }).remediations;
   const codexFocusTarget =
     focus.codexFull.state === "active" && focus.codexFull.policy !== null ? focus.codexFull.policy.target : null;
 
@@ -255,6 +256,7 @@ async function statusCommand(args: string[]): Promise<number> {
       fable_focus: focus.fable,
       non_fable_focus: focus.nonFable,
       previews: { claude: claudePreview, claude_fable: claudeFablePreview, codex_spark: sparkPreview },
+      remediations,
     });
     return 0;
   }
@@ -295,6 +297,9 @@ async function statusCommand(args: string[]): Promise<number> {
   if (codex?.recommendation != null) describe("codex rec.", codex.recommendation.accountKey);
   if (sparkPreview !== null) {
     describe("codex spark", sparkPreview.ok ? `${sparkPreview.accountKey} (${sparkPreview.score}% headroom)` : sparkPreview.refusal);
+  }
+  for (const remediation of remediations) {
+    describe("action needed", `${remediation.account} · ${remediation.reason} → ${remediation.command}`);
   }
   return 0;
 }

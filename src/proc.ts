@@ -69,3 +69,16 @@ export async function runBounded(argv: readonly string[], options: RunOptions): 
     clearTimeout(timer);
   }
 }
+
+/**
+ * Copies text to the macOS clipboard. A no-shell spawn writing on stdin, so
+ * the payload never passes through a command line.
+ */
+export async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    const proc = Bun.spawn({ cmd: ["pbcopy"], stdin: new TextEncoder().encode(text), stdout: "ignore", stderr: "ignore" });
+    return (await proc.exited) === 0;
+  } catch {
+    return false;
+  }
+}

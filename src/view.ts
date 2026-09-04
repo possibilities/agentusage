@@ -1,8 +1,10 @@
 import {
+  AUTH_FAILURE_GRACE_MS,
   CODEX_OBSERVATION_FRESHNESS_CEILING_MS,
   OBSERVATION_FRESHNESS_CEILING_MS,
 } from "./constants.ts";
 import {
+  type AccountObservationIssue,
   displayNameForRouteId,
   MODEL_WINDOW_PREFIX,
   type NormalizedWindow,
@@ -11,7 +13,7 @@ import {
   SPEND_WINDOW,
   WEEK_WINDOW,
 } from "./claude/types.ts";
-import { type CodexObservation, isSparkLane } from "./codex/types.ts";
+import { type CodexAccountView, type CodexObservation, isSparkLane } from "./codex/types.ts";
 import type {
   AccountFocusEffectiveState,
   FableFocusEffectiveState,
@@ -34,6 +36,23 @@ export interface MeterRow {
   spark: boolean;
 }
 
+/**
+ * A remediation is a card-level instruction only a human can carry out, with
+ * the exact command to run. Distinct from an exclusion, which says why balance
+ * skipped an account — an exhausted quota needs waiting, not an operator.
+ */
+export interface Remediation {
+  /** Which account the operator must act on, by display name. */
+  account: string;
+  provider: "claude" | "codex";
+  /** Why the credential is unusable, e.g. "credential rejected 1d 9h". */
+  reason: string;
+  /** The exact command to run. */
+  command: string;
+  /** One clause of context the command itself cannot carry. */
+  hint: string | null;
+}
+
 export interface AccountCard {
   provider: "claude" | "codex";
   name: string;
@@ -44,6 +63,8 @@ export interface AccountCard {
   measuredAgo: string | null;
   meters: MeterRow[];
   focus: string[];
+  /** Set when only a human can restore this account; drives the banner. */
+  remediation: Remediation | null;
 }
 
 export interface ProviderSection {
@@ -67,6 +88,8 @@ export interface UsageViewModel {
   claude: ProviderSection | null;
   codex: ProviderSection | null;
   focus: FocusLine[];
+  /** Every card remediation, rolled up so the banner never needs scrolling. */
+  remediations: Remediation[];
 }
 
 export function formatDurationMs(ms: number): string {
@@ -148,6 +171,25 @@ function capacityDetail(observation: Observation, id: string): string | null {
   return capacity.rateLimitMultiplier !== undefined ? `${capacity.rateLimitMultiplier}×` : null;
 }
 
+/**
+ * The credential subset of cswap's account issues: the ones a re-login fixes.
+ * `api-key`, `usage-unavailable`, `account-unavailable` and the `missing-*`
+ * shapes are left to the status word — no operator command clears them.
+ */
+const CLAUDE_CREDENTIAL_ISSUES: Partial<Record<AccountObservationIssue, string>> = {
+  "relogin-required": "re-login required",
+  "token-expired": "token expired",
+  "no-credentials": "no stored credentials",
+  "keychain-unavailable": "keychain unavailable",
+};
+
+function claudeRemediation(name: string, issue: AccountObservationIssue | undefined): Remediation | null {
+  if (issue === undefined) return null;
+  const reason = CLAUDE_CREDENTIAL_ISSUES[issue];
+  if (reason === undefined) return null;
+  return { account: name, provider: "claude", reason, command: `agentusage recover ${name}`, hint: null };
+}
+
 function buildClaudeSection(
   observation: Observation,
   nowMs: number,
@@ -169,16 +211,20 @@ function buildClaudeSection(
     // still trusted through usageStatus. A route in a fresh observation is
     // therefore live even when an idle account's scheduled sample is old.
     const dimmed = issue !== undefined || !fresh;
+    const name = displayNameForRouteId(id);
+    const remediation = claudeRemediation(name, issue);
     cards.push({
       provider: "claude",
-      name: displayNameForRouteId(id),
+      name,
       detail: capacityDetail(observation, id),
       resetCreditsAvailable: null,
-      status: issue ?? null,
+      // A remediation says everything the status word did, and better.
+      status: remediation === null ? (issue ?? null) : null,
       dimmed,
       measuredAgo: measuredAtMs === null ? null : formatDurationMs(nowMs - measuredAtMs),
       meters: measurement === undefined ? [] : claudeMeters(measurement.windows, nowMs, dimmed),
       focus: focusBadges.get(id) ?? [],
+      remediation,
     });
   }
   return {
@@ -198,6 +244,42 @@ function sectionAgeText(health: string, fresh: boolean, ageMs: number): string {
 
 // ---------------------------------------------------------------------------
 // Codex
+
+const AUTH_HTTP_STATUSES = new Set([401, 403]);
+
+/**
+ * Codex credentials fail in two shapes. codex-swap flags the first itself
+ * (`reloginRequired`, a non-ready auth status). The second it cannot see: the
+ * stored token still looks valid to the auth check, but the usage endpoint
+ * rejects it, so codex-swap just backs off and keeps serving last-good numbers
+ * forever. That one is inferred — an auth-class poll error with no current
+ * measurement, sustained past one poll cycle so a blip does not raise a banner.
+ */
+function codexRemediation(account: CodexAccountView, name: string, nowMs: number): Remediation | null {
+  const login = account.email ?? account.label;
+  const hint = login === null ? null : `sign in as ${login}`;
+  const remediation = (reason: string): Remediation => ({
+    account: name,
+    provider: "codex",
+    reason,
+    command: "codex-swap auth add",
+    hint,
+  });
+
+  if (account.reloginRequired) return remediation("re-login required");
+  if (account.authStatus !== "ready") return remediation(`auth ${account.authStatus}`);
+
+  const error = account.lastError;
+  if (error === null) return null;
+  if (error.code !== "auth" && !(error.httpStatus !== null && AUTH_HTTP_STATUSES.has(error.httpStatus))) return null;
+  if (account.measurementSource === "current") return null;
+  // Without a last-good stamp there is no dwell to measure; an auth-class
+  // failure on an account that never sampled is already worth acting on.
+  const failingForMs = account.measuredAtMs === null ? null : nowMs - account.measuredAtMs;
+  if (failingForMs !== null && failingForMs < AUTH_FAILURE_GRACE_MS) return null;
+  const age = failingForMs === null ? "" : ` ${formatDurationMs(failingForMs)}`;
+  return remediation(`credential rejected${age}`);
+}
 
 function buildCodexSection(
   observation: CodexObservation,
@@ -243,16 +325,20 @@ function buildCodexSection(
     }
     const identity = account.label ?? account.email;
     if (identity !== null) detailParts.push(identity);
+    const name = `codex-${(account.ndyIndex ?? index) + 1}`;
+    const remediation = codexRemediation(account, name, nowMs);
     cards.push({
       provider: "codex",
-      name: `codex-${(account.ndyIndex ?? index) + 1}`,
+      name,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
       resetCreditsAvailable: account.resetCreditsAvailable ?? null,
-      status,
+      // A remediation says everything the status word did, and better.
+      status: remediation === null ? status : null,
       dimmed,
       measuredAgo: account.measuredAtMs === null ? null : formatDurationMs(nowMs - account.measuredAtMs),
       meters,
       focus: focusBadges.get(account.accountKey) ?? [],
+      remediation,
     });
   });
 
@@ -348,10 +434,11 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
     },
   ];
 
-  return {
-    nowMs: input.nowMs,
-    claude: input.claude === null ? null : buildClaudeSection(input.claude, input.nowMs, claudeBadges),
-    codex: input.codex === null ? null : buildCodexSection(input.codex, input.nowMs, codexBadges),
-    focus,
-  };
+  const claude = input.claude === null ? null : buildClaudeSection(input.claude, input.nowMs, claudeBadges);
+  const codex = input.codex === null ? null : buildCodexSection(input.codex, input.nowMs, codexBadges);
+  const remediations = [...(claude?.cards ?? []), ...(codex?.cards ?? [])]
+    .map((card) => card.remediation)
+    .filter((remediation): remediation is Remediation => remediation !== null);
+
+  return { nowMs: input.nowMs, claude, codex, focus, remediations };
 }

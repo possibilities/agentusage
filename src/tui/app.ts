@@ -12,6 +12,7 @@ import {
 } from "../focus.ts";
 import { buildViewModel } from "../view.ts";
 import { renderFrameLines, TONE_HEX, type Line } from "../render.ts";
+import { copyToClipboard } from "../proc.ts";
 import { createCommandPalette } from "./palette.ts";
 import { SIGNAL_GLYPHS, SIGNAL_ROOM } from "./theme.ts";
 
@@ -109,6 +110,22 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     }),
   );
   renderer.root.add(refreshChip);
+  // Same transient contract as the refresh chip: a clipboard copy leaves
+  // nothing on screen, so the chip is the only evidence it happened.
+  const noticeText = new core.TextRenderable(renderer, { content: "", fg: SIGNAL_ROOM.accent });
+  const noticeChip = new core.BoxRenderable(renderer, {
+    id: "usage-notice-chip",
+    position: "absolute",
+    top: 1,
+    right: 2,
+    zIndex: 51,
+    visible: false,
+    paddingLeft: 1,
+    paddingRight: 1,
+    backgroundColor: SIGNAL_ROOM.panel,
+  });
+  noticeChip.add(noticeText);
+  renderer.root.add(noticeChip);
   // Construction-time scrollbar options do not stick; the setter pins them.
   try {
     scroll.verticalScrollBar.visible = false;
@@ -118,6 +135,24 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
   }
 
   let refreshing = false;
+  let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+  const notice = (text: string): void => {
+    noticeText.content = text;
+    noticeChip.visible = true;
+    if (noticeTimer !== null) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => {
+      noticeChip.visible = false;
+      renderer.requestRender();
+    }, 2500);
+    renderer.requestRender();
+  };
+  // Copy, never run: `codex-swap auth add` opens a browser OAuth flow, and
+  // launching that from inside an alternate screen strands both.
+  const copyRemediation = (command: string): void => {
+    void copyToClipboard(command).then((ok) => {
+      notice(ok ? `⧉ COPIED  ${command}` : "⚠ CLIPBOARD UNAVAILABLE");
+    });
+  };
   const paint = (): void => {
     const nowMs = Date.now();
     const columns = process.stdout.columns ?? 100;
@@ -141,6 +176,12 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
       width: columns,
       height: rows,
       commands: [
+        ...vm.remediations.map((remediation) => ({
+          id: `remediate:${remediation.account}`,
+          key: "⏎",
+          label: `copy fix for ${remediation.account} — ${remediation.command}`,
+          onRun: () => copyRemediation(remediation.command),
+        })),
         { id: "refresh", key: "R", label: "refresh providers", onRun: () => void refresh() },
         { id: "up", key: "K", label: "scroll up", onRun: () => scrollBy(-2) },
         { id: "down", key: "J", label: "scroll down", onRun: () => scrollBy(2) },
@@ -162,6 +203,7 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     if (closed) return;
     closed = true;
     clearInterval(interval);
+    if (noticeTimer !== null) clearTimeout(noticeTimer);
     renderer.destroy();
     done();
   };

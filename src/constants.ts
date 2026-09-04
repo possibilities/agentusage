@@ -30,3 +30,10 @@ export const RECOVERY_TIMEOUT_MS = 120_000;
 
 /** Focus leaves larger than this are refused as malformed. */
 export const FOCUS_LEAF_MAX_BYTES = 8_192;
+
+/**
+ * How long a provider may fail authenticated usage polls before agentusage
+ * calls it a remediation. One codex-swap poll cycle (10 min) plus slack, so a
+ * blip that self-heals on the next cycle never raises a banner.
+ */
+export const AUTH_FAILURE_GRACE_MS = 15 * 60_000;
