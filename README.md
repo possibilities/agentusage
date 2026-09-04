@@ -222,7 +222,8 @@ the ordinary eligible pool.
   v1 over codex-swap's snapshot: per account auth/trust/selection state plus
   windows regrouped into **lanes** (`main` binding, `codex-spark`,
   `code-review`, extras) with used/remaining percent and reset times, plus
-  available rate-limit reset credits when the provider reports them.
+  available rate-limit reset credits and their nearest known expiry when the
+  provider reports credit details.
 - Cadence: 3 min + up to 30 s jitter per provider; a weekly window observed at
   100% schedules a one-shot wake 30 s after its reset. Balance trusts
   observations up to 5 min old.
@@ -238,4 +239,4 @@ bun run typecheck
 
 `docs/SKETCH.md` is the build contract, `CONTEXT.md` the glossary. Provider
 contracts are pinned to the public claude-swap fork's `integration` branch
-(maintained by cswax) and codex-swap `f193bc1`; both are read defensively.
+(maintained by cswax) and codex-swap `b427534`; both are read defensively.

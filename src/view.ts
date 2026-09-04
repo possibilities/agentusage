@@ -39,6 +39,7 @@ export interface AccountCard {
   name: string;
   detail: string | null;
   resetCreditsAvailable: number | null;
+  resetCreditExpiryText?: string | null;
   status: string | null;
   dimmed: boolean;
   measuredAgo: string | null;
@@ -243,11 +244,17 @@ function buildCodexSection(
     }
     const identity = account.label ?? account.email;
     if (identity !== null) detailParts.push(identity);
+    const resetCreditExpiryText = describeResetCreditExpiry(
+      account.resetCreditsAvailable ?? 0,
+      account.resetCreditExpirations,
+      nowMs,
+    );
     cards.push({
       provider: "codex",
       name: `codex-${(account.ndyIndex ?? index) + 1}`,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
       resetCreditsAvailable: account.resetCreditsAvailable ?? null,
+      resetCreditExpiryText,
       status,
       dimmed,
       measuredAgo: account.measuredAtMs === null ? null : formatDurationMs(nowMs - account.measuredAtMs),
@@ -264,6 +271,23 @@ function buildCodexSection(
     cards,
     notes: observation.notes,
   };
+}
+
+function describeResetCreditExpiry(
+  available: number,
+  expirations: readonly (string | null)[] | undefined,
+  nowMs: number,
+): string | null {
+  if (available <= 0 || expirations === undefined || expirations.length === 0) return null;
+  const dated = expirations
+    .filter((expiry): expiry is string => expiry !== null)
+    .map((expiry) => Date.parse(expiry))
+    .filter(Number.isFinite);
+  if (dated.length > 0) {
+    const countdown = formatDurationMs(Math.min(...dated) - nowMs);
+    return available === 1 ? `expires ${countdown}` : `next expires ${countdown}`;
+  }
+  return expirations.length >= available ? "no expiry" : null;
 }
 
 // ---------------------------------------------------------------------------

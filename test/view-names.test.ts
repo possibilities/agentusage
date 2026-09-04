@@ -28,6 +28,7 @@ function codexAccount(
   accountKey: string,
   ndyIndex: number | null,
   resetCreditsAvailable: number | null = null,
+  resetCreditExpirations?: Array<string | null>,
 ): CodexAccountView {
   return {
     accountKey,
@@ -45,6 +46,7 @@ function codexAccount(
     planType: null,
     limitReached: false,
     resetCreditsAvailable,
+    ...(resetCreditExpirations !== undefined ? { resetCreditExpirations } : {}),
     measurementSource: "current",
     measuredAtMs: NOW - 5_000,
     lanes: [],
@@ -98,10 +100,14 @@ describe("account display names", () => {
 
   test("codex cards show only positive reset-credit availability", () => {
     const observation = codexObservation();
-    observation.accounts = [codexAccount("account:a", 0, 1), codexAccount("account:b", 1, 0)];
+    observation.accounts = [
+      codexAccount("account:a", 0, 1, ["2026-08-10T20:00:00Z"]),
+      codexAccount("account:b", 1, 0),
+    ];
 
     const model = build(null, observation);
     expect(model.codex?.cards[0]?.resetCreditsAvailable).toBe(1);
+    expect(model.codex?.cards[0]?.resetCreditExpiryText).toBe("expires 2d");
     expect(model.codex?.cards[0]?.detail).toBeNull();
     expect(model.codex?.cards[1]?.resetCreditsAvailable).toBe(0);
     expect(model.codex?.cards[1]?.detail).toBeNull();

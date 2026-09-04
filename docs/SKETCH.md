@@ -26,7 +26,8 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
   the balance port is faithful. Codex sidecar is a new v1 shape built on
   codex-swap's Snapshot contract, with windows grouped into **lanes** —
   `gpt-5.3-codex-spark` becomes a first-class non-binding lane via the
-  `limitName`/`meteredFeature` fields the codex-swap agent just landed.
+  `limitName`/`meteredFeature` fields the codex-swap agent just landed — and
+  carries reset-credit expiries when the provider supplies detail rows.
 - **Balance is explicit** (keeper buried it inside the launcher's
   `selectRoute()`). `balance claude` ports keeper's algorithm: eligibility
   gate (session+week present and <100 %, Fable window required for Fable
@@ -104,7 +105,7 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
 - No accounts are onboarded on this machine yet (cswap store absent,
   codex-swap pool empty) — every surface must render absent/empty states
   honestly; end-to-end verification with real data waits on Mike's logins.
-- codex-swap is under active development; contract pinned at `f193bc1`
+- codex-swap is under active development; contract pinned at `b427534`
   (additive since `efce453`), defensive parsing everywhere, and coordination
   between maintainers when its contract moves.
 - `@opentui/core` 0.3 component-tree API differs from keeper's flat-string
