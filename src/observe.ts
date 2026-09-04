@@ -3,6 +3,8 @@ import { observeClaude } from "./claude/observe.ts";
 import { type Observation, validateObservation } from "./claude/types.ts";
 import { observeCodex } from "./codex/observe.ts";
 import { type CodexObservation, validateCodexObservation } from "./codex/types.ts";
+import { observeGrok } from "./grok/observe.ts";
+import { type GrokObservation, validateGrokObservation } from "./grok/types.ts";
 import type { StatePaths } from "./paths.ts";
 import { providerSafeRefresh, type RefreshResult } from "./refresh.ts";
 import { readSidecar, writeSidecar } from "./sidecar.ts";
@@ -13,6 +15,10 @@ export function readClaudeObservation(paths: StatePaths): Observation | null {
 
 export function readCodexObservation(paths: StatePaths): CodexObservation | null {
   return readSidecar(paths.codexObservation, validateCodexObservation).value;
+}
+
+export function readGrokObservation(paths: StatePaths): GrokObservation | null {
+  return readSidecar(paths.grokObservation, validateGrokObservation).value;
 }
 
 export interface RefreshOverrides {
@@ -48,6 +54,27 @@ export async function refreshCodexObservation(
     freshWithinMs: overrides.freshWithinMs ?? OBSERVATION_FRESHNESS_CEILING_MS,
     produce: () => observeCodex({ env: overrides.env ?? process.env, noFetch: overrides.noFetch }),
     write: (value) => writeSidecar(paths.codexObservation, value),
+    waitMs: 61_000,
+    lockStaleMs: 65_000,
+  });
+}
+
+export async function refreshGrokObservation(
+  paths: StatePaths,
+  overrides: RefreshOverrides & { providerRefresh?: boolean; account?: string } = {},
+): Promise<RefreshResult<GrokObservation>> {
+  return providerSafeRefresh<GrokObservation>({
+    lockPath: paths.grokRefreshLock,
+    read: () => readGrokObservation(paths),
+    observedAtMs: (value) => value.observed_at_ms,
+    freshWithinMs: overrides.freshWithinMs ?? OBSERVATION_FRESHNESS_CEILING_MS,
+    produce: () =>
+      observeGrok({
+        env: overrides.env ?? process.env,
+        refresh: overrides.providerRefresh,
+        account: overrides.account,
+      }),
+    write: (value) => writeSidecar(paths.grokObservation, value),
     waitMs: 61_000,
     lockStaleMs: 65_000,
   });

@@ -81,10 +81,10 @@ const FOCUS_TARGET_ARG: Argument = {
   name: "target",
   type: "string",
   description:
-    "Which focus to act on. fable and non-fable split Claude launches by intent; claude and codex are provider-wide and override them.",
+    "Which focus to act on. fable and non-fable split Claude launches by intent; claude, codex, and grok are provider-wide and override them.",
   positional: true,
   required: true,
-  choices: ["fable", "non-fable", "claude", "codex"],
+  choices: ["fable", "non-fable", "claude", "codex", "grok"],
 };
 
 export const CONTRACT: Contract = {
@@ -93,7 +93,7 @@ export const CONTRACT: Contract = {
     name: "agentusage",
     version: VERSION,
     purpose:
-      "Claude + Codex account usage observations, launch-account balancing, and focus pinning over claude-swap and codex-swap. Chooses an account for a launcher and prints it; launching itself stays with the launcher.",
+      "Claude, Codex, and Grok account usage observations, launch-account balancing, and focus pinning over their swap tools. Chooses an account for a launcher and prints it; launching itself stays with the launcher.",
     audience: "operator",
   },
   commands: [
@@ -213,6 +213,58 @@ export const CONTRACT: Contract = {
             },
           ],
         },
+        {
+          name: "grok",
+          summary: "Choose a Grok account, optionally claiming a short reservation",
+          audience: "operator",
+          mutates: true,
+          guidance:
+            "Delegates selection to grok-swap. Without --claim it is a dry-run preview; --claim creates a short provider-owned reservation. No Grok harness activation is performed.",
+          arguments: [
+            {
+              name: "--strategy",
+              type: "string",
+              description: "Provider selection strategy.",
+              choices: ["best", "next-available"],
+            },
+            {
+              name: "--account",
+              type: "string",
+              description: "Gate selection to one exact accountKey or grok-N display name.",
+              format: "ref",
+            },
+            { name: "--claim", type: "boolean", description: "Create a short grok-swap reservation." },
+            { name: "--dry-run", type: "boolean", description: "Explicitly preview without reserving (the default)." },
+            {
+              name: "--reserve-seconds",
+              type: "integer",
+              description: "Reservation lifetime when --claim is present.",
+              minimum: 1,
+              maximum: 300,
+            },
+            {
+              name: "--allow-unknown",
+              type: "boolean",
+              description: "Allow accounts without a known billing observation.",
+            },
+            JSON_FLAG,
+          ],
+          constraints: [
+            { kind: "conflicts", arguments: ["--claim", "--dry-run"] },
+            { kind: "conflicts", arguments: ["--strategy", "--account"] },
+            { kind: "requires", arguments: ["--reserve-seconds", "--claim"] },
+          ],
+          examples: [
+            {
+              invocation: "agentusage balance grok --json",
+              description: "Preview the best Grok account without reserving it.",
+            },
+            {
+              invocation: "agentusage balance grok --claim --json",
+              description: "Pick a Grok account and reserve it briefly.",
+            },
+          ],
+        },
       ],
     },
     {
@@ -238,14 +290,14 @@ export const CONTRACT: Contract = {
           audience: "operator",
           mutates: true,
           guidance:
-            "Lifetimes current-reset and cycle-end read the observed reset window, so target non-fable accepts only permanent and absolute. ref is a Claude route (route id or claude-N) for fable, non-fable, and claude, and a Codex accountKey for codex.",
+            "Lifetimes current-reset and cycle-end read the observed reset window, so target non-fable accepts only permanent and absolute. ref is a Claude route for fable/non-fable/claude, a Codex accountKey for codex, and an accountKey or grok-N for grok.",
           arguments: [
             FOCUS_TARGET_ARG,
             {
               name: "ref",
               type: "string",
               description:
-                "Account to pin to: a Claude route (route id or claude-N) for fable/non-fable/claude, a Codex accountKey for codex.",
+                "Account to pin to: a Claude route for fable/non-fable/claude, a Codex accountKey for codex, or an accountKey/grok-N for grok.",
               positional: true,
               required: true,
               format: "ref",
@@ -300,6 +352,10 @@ export const CONTRACT: Contract = {
               description: "Pin every Codex launch to one account until its observed reset.",
             },
             {
+              invocation: "agentusage focus set grok grok-1 current-reset",
+              description: "Pin Grok selection until its included-allowance reset.",
+            },
+            {
               invocation: "agentusage focus claude set claude-1 cycle-end",
               description: "The older target-first order, still accepted and identical to `focus set claude claude-1 cycle-end`.",
             },
@@ -343,7 +399,7 @@ export const CONTRACT: Contract = {
           type: "string",
           description: "Which provider to refresh.",
           positional: true,
-          choices: ["claude", "codex", "all"],
+          choices: ["claude", "codex", "grok", "all"],
           default: "all",
         },
         JSON_FLAG,
@@ -438,10 +494,11 @@ export function renderHelp(): string {
   lines.push(
     "The usage viewer is sidecar-backed and daemon-independent. `balance` chooses",
     "an account and prints it — launching stays with the launcher (cswap run",
-    "<slot> --share-history / codex-swap run --account <key>). A provider focus",
-    "(focus set claude|codex) pins every launch for that provider to one account",
-    "and overrides the fable/non-fable focuses; its observed lifetimes follow the",
-    "weekly window. The older target-first order (focus claude set …) still works.",
+    "<slot> --share-history / codex-swap run --account <key>). Grok selection",
+    "currently stops before harness activation. A provider focus",
+    "(focus set claude|codex|grok) pins every launch for that provider to one account",
+    "and overrides the fable/non-fable focuses; observed lifetimes follow the",
+    "provider's binding allowance. The older target-first order still works.",
   );
   return lines.join("\n");
 }

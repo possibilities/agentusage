@@ -71,7 +71,7 @@ function codexObservation(): CodexObservation {
 }
 
 function build(claude: Observation | null, codex: CodexObservation | null) {
-  return buildViewModel({ claude, codex, fable: OFF, nonFable: OFF, claudeFull: OFF, codexFull: OFF, nowMs: NOW });
+  return buildViewModel({ claude, codex, grok: null, fable: OFF, nonFable: OFF, claudeFull: OFF, codexFull: OFF, grokFull: OFF, nowMs: NOW });
 }
 
 describe("account display names", () => {

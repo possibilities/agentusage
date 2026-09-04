@@ -1,9 +1,17 @@
 import type { StatePaths } from "../paths.ts";
-import { readClaudeObservation, readCodexObservation, refreshClaudeObservation, refreshCodexObservation } from "../observe.ts";
+import {
+  readClaudeObservation,
+  readCodexObservation,
+  readGrokObservation,
+  refreshClaudeObservation,
+  refreshCodexObservation,
+  refreshGrokObservation,
+} from "../observe.ts";
 import {
   effectiveClaudeFullFocus,
   effectiveCodexFullFocus,
   effectiveFableFocus,
+  effectiveGrokFullFocus,
   effectiveNonFableFocus,
   readFocusLeaf,
   readFullFocusLeaf,
@@ -125,14 +133,17 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     const width = Math.max(32, Math.min(columns - 4, 116));
     const claude = readClaudeObservation(paths);
     const codex = readCodexObservation(paths);
+    const grok = readGrokObservation(paths);
     const fableDelivery = readFocusLeaf(paths.fableFocusLeaf, true) as FocusDelivery<FableFocusPolicy>;
     const vm = buildViewModel({
       claude,
       codex,
+      grok,
       fable: effectiveFableFocus(fableDelivery, claude, nowMs),
       nonFable: effectiveNonFableFocus(readFocusLeaf(paths.nonFableFocusLeaf, false), nowMs),
       claudeFull: effectiveClaudeFullFocus(readFullFocusLeaf(paths.claudeFullFocusLeaf, "claude"), claude, nowMs),
       codexFull: effectiveCodexFullFocus(readFullFocusLeaf(paths.codexFullFocusLeaf, "codex"), codex, nowMs),
+      grokFull: effectiveGrokFullFocus(readFullFocusLeaf(paths.grokFullFocusLeaf, "grok"), grok, nowMs),
       nowMs,
     });
     body.content = linesToStyled(renderFrameLines(vm, width, { title: false, density: "comfortable" }));
@@ -183,6 +194,7 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     await Promise.allSettled([
       refreshClaudeObservation(paths, { freshWithinMs: 0 }),
       refreshCodexObservation(paths, { freshWithinMs: 0 }),
+      refreshGrokObservation(paths, { freshWithinMs: 0, providerRefresh: true }),
     ]);
     refreshing = false;
     paint();

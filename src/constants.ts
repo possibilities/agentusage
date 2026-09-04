@@ -12,6 +12,9 @@ export const OBSERVE_JITTER_MS = 30_000;
 /** Codex sidecar shares the claude ceiling; codex-swap paces real fetches. */
 export const CODEX_OBSERVATION_FRESHNESS_CEILING_MS = 5 * 60_000;
 
+/** Grok sidecars are decision-grade for the same bounded interval. */
+export const GROK_OBSERVATION_FRESHNESS_CEILING_MS = 5 * 60_000;
+
 export const RESERVATION_TTL_MS = 90_000;
 export const RESERVATION_UTILIZATION_STEP = 0.05;
 export const MAX_RESERVATIONS_PER_ROUTE = 64;

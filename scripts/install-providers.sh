@@ -3,11 +3,11 @@
 # Safe to re-run; it refuses rather than clobbering foreign state, and a
 # failure here never blocks agentusage's own install.
 #
-# Each provider owns its own installation. codex-swap ships scripts/install.sh,
-# which provisions the codex-multi-auth fork it needs and bakes that path into
-# its own command; claude-swap's fork is owned by the cswax workshop, which
-# ships the installer called below. A shim or a checkout dance written from
-# here would overwrite what those own — one command, one owner.
+# Each provider owns its own installation. codex-swap and grok-swap ship
+# scripts/install.sh, invoked directly by AgentStart; claude-swap's fork is
+# owned by the cswax workshop, which ships the installer called below. A shim
+# or checkout dance written here would overwrite what those own — one command,
+# one owner.
 set -uo pipefail
 
 status=0

@@ -3,21 +3,23 @@ import { dirname, join } from "node:path";
 import {
   CODEX_OBSERVATION_FRESHNESS_CEILING_MS,
   FOCUS_LEAF_MAX_BYTES,
+  GROK_OBSERVATION_FRESHNESS_CEILING_MS,
   OBSERVATION_FRESHNESS_CEILING_MS,
 } from "./constants.ts";
 import { FABLE_WINDOW_KEY, WEEK_WINDOW, type Observation } from "./claude/types.ts";
 import { MAIN_LANE_ID, type CodexObservation } from "./codex/types.ts";
+import type { GrokObservation } from "./grok/types.ts";
 
 /**
  * Fable / Non-Fable focus — keeper's policy contract, stored as hardened JSON
  * leaves written directly by the CLI (agentusage has no daemon event rail).
  * One whole policy per leaf; `{"schema_version":1,"policy":null}` means off.
  *
- * The provider-wide focus (`focus claude` / `focus codex`) is an agentusage
+ * The provider-wide focus (`focus claude` / `focus codex` / `focus grok`) is an agentusage
  * extension beyond keeper: one leaf per provider pinning every launch to one
  * account, overriding the intent focuses. Its observed lifetimes read the
- * binding weekly window (claude `week`, codex main-lane secondary), not the
- * Fable window.
+ * binding allowance window (claude `week`, codex main-lane secondary, Grok
+ * included period), not the Fable window.
  */
 
 export const FOCUS_LEAF_SCHEMA_VERSION = 1;
@@ -41,7 +43,7 @@ export interface FableFocusPolicy extends Omit<AccountFocusPolicy<true>, "lifeti
 
 export type NonFableFocusPolicy = AccountFocusPolicy<false>;
 
-export type FocusProvider = "claude" | "codex";
+export type FocusProvider = "claude" | "codex" | "grok";
 
 export type FullFocusLifetime = AccountFocusLifetime | { kind: "cycle-end"; reset_at: string };
 
@@ -271,6 +273,10 @@ export function isCodexObservationFresh(observation: CodexObservation, nowMs: nu
   return nowMs - observation.observed_at_ms <= CODEX_OBSERVATION_FRESHNESS_CEILING_MS;
 }
 
+export function isGrokObservationFresh(observation: GrokObservation, nowMs: number): boolean {
+  return nowMs - observation.observed_at_ms <= GROK_OBSERVATION_FRESHNESS_CEILING_MS;
+}
+
 function matchingFableWindowCompleted(
   policy: FableFocusPolicy,
   observation: Observation | null,
@@ -364,6 +370,24 @@ function codexWeeklyWindowCompleted(
   });
 }
 
+function grokIncludedWindowCompleted(
+  policy: FullFocusPolicy,
+  observation: GrokObservation | null,
+  nowMs: number,
+): boolean {
+  if (policy.lifetime.kind !== "cycle-end" || observation === null) return false;
+  if (observation.health !== "ok" || !isGrokObservationFresh(observation, nowMs)) return false;
+  const account = observation.accounts.find(
+    (candidate) => candidate.accountKey === policy.target || candidate.displayName === policy.target,
+  );
+  if (account?.included?.resetsAt === null || account?.included?.resetsAt === undefined) return false;
+  return (
+    Date.parse(account.included.resetsAt) === Date.parse(policy.lifetime.reset_at) &&
+    account.included.usedPercent !== null &&
+    account.included.usedPercent >= 100
+  );
+}
+
 function effectiveFullFocusCore(
   delivery: FocusDelivery<FullFocusPolicy>,
   provider: FocusProvider,
@@ -405,6 +429,16 @@ export function effectiveCodexFullFocus(
 ): FocusStatus<FullFocusPolicy, FullFocusEffectiveState> {
   return effectiveFullFocusCore(delivery, "codex", nowMs, (policy) =>
     codexWeeklyWindowCompleted(policy, observation, nowMs),
+  );
+}
+
+export function effectiveGrokFullFocus(
+  delivery: FocusDelivery<FullFocusPolicy>,
+  observation: GrokObservation | null,
+  nowMs: number,
+): FocusStatus<FullFocusPolicy, FullFocusEffectiveState> {
+  return effectiveFullFocusCore(delivery, "grok", nowMs, (policy) =>
+    grokIncludedWindowCompleted(policy, observation, nowMs),
   );
 }
 
@@ -490,4 +524,19 @@ export function resolveObservedCodexWeeklyReset(
   const lane = account.lanes.find((candidate) => candidate.id === MAIN_LANE_ID);
   const weekly = lane?.windows.find((window) => window.role === "secondary");
   return resolveResetBoundary(weekly?.resetsAt, nowMs, expectReset);
+}
+
+export function resolveObservedGrokIncludedReset(
+  observation: GrokObservation | null,
+  accountRef: string,
+  nowMs: number,
+  expectReset: string | null,
+): CurrentResetFocusResult {
+  if (observation === null || observation.health !== "ok") return { ok: false, error: "observation-unavailable" };
+  if (!isGrokObservationFresh(observation, nowMs)) return { ok: false, error: "observation-stale" };
+  const account = observation.accounts.find(
+    (candidate) => candidate.accountKey === accountRef || candidate.displayName === accountRef,
+  );
+  if (account === undefined) return { ok: false, error: "target-unavailable" };
+  return resolveResetBoundary(account.included?.resetsAt, nowMs, expectReset);
 }

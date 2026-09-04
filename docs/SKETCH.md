@@ -8,8 +8,23 @@ the machine installers) are the evidence base.
 
 Give this account keeper-`usage` parity as a standalone tool: an observation
 daemon, an explicit `balance` command for launchers, Fable/Non-Fable focus, and
-an OpenTUI usage view — over Claude accounts (via claude-swap) and Codex
-accounts (via codex-swap), installed by AgentStart as a launchagent.
+an OpenTUI usage view — over Claude accounts (via claude-swap), Codex accounts
+(via codex-swap), and Grok accounts (via grok-swap), installed by AgentStart
+as a launchagent.
+
+## Addendum: Grok multi-account observation and decisions (2026-09-04)
+
+Grok is a third provider, owned durably by `grok-swap`. AgentUsage never reads
+Grok credentials or state files: its daemon mirrors bounded, no-shell
+`grok-swap observe --json` output into a Grok sidecar, while explicit
+`refresh grok` calls `grok-swap refresh --json`. Cards show the percentage
+included allowance as a meter and prepaid/PAYG dollars as quiet fact rows.
+
+`balance grok` delegates `best`, `next-available`, and exact-account gating to
+`grok-swap select`. It is a dry-run by default; `--claim` asks grok-swap for a
+short reservation. Provider focus supports Grok and reads the included-period
+reset for observed lifetimes. Harness activation and AgentLaunch integration
+remain deliberately out of scope: this command decides but does not launch.
 
 ## Direction
 
@@ -18,7 +33,7 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
   cadence) and `codex-swap snapshot --json` (same cadence; codex-swap's own
   poll plans govern actual network fetches) and writes normalized sidecars
   under `~/.local/state/agentusage/` — atomic 0600 tmp+rename. claude-swap and
-  codex-swap remain the durable observation stores (both persist last-good
+  codex-swap remain the durable observation stores (each persists last-good
   usage); our sidecars are the render/decision surface, exactly keeper's
   split.
 - **Claude sidecar keeps keeper's Observation schema v7 shape** (routes vs
@@ -85,7 +100,7 @@ accounts (via codex-swap), installed by AgentStart as a launchagent.
 - `src/focus.ts` — policy types, leaf IO, effective-state evaluation.
 - `src/balance/claude.ts` — eligibility, scoring, ledger, focus overlay.
 - `src/balance/codex.ts` — `codex-swap select` delegation + spark selection.
-- `src/daemon.ts` — both provider loops + recovery behind `agentusage daemon`.
+- `src/daemon.ts` — provider loops + recovery behind `agentusage daemon`.
 - `src/cli.ts` — dispatch: `usage` (default), `status`, `balance`, `focus`,
   `recover`, `refresh`, `daemon`, `help`, `version`.
 - `src/tui/` — view model + OpenTUI app; `src/snapshot.ts` — piped frame.
@@ -119,7 +134,7 @@ either — expired policies persist with effective-state fallback).
 ## Addendum: provider-wide focus (2026-08-09)
 
 First deliberate extension beyond keeper parity, sketched and approved in
-session. `focus claude` / `focus codex` pin **every** launch for a provider
+session. `focus claude` / `focus codex` / `focus grok` pin **every** selection for a provider
 to one account, overriding the Fable/Non-Fable focuses — fence included, and
 also during fallback while the target is temporarily ineligible (fallback is
 plain scoring; one policy is in charge at a time). Explicit `--account`

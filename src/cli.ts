@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import {
   CODEX_OBSERVATION_FRESHNESS_CEILING_MS,
+  GROK_OBSERVATION_FRESHNESS_CEILING_MS,
   MAX_OUTPUT_BYTES,
   OBSERVATION_FRESHNESS_CEILING_MS,
   RECOVERY_TIMEOUT_MS,
@@ -9,11 +10,14 @@ import { displayNameForRouteId, type Observation } from "./claude/types.ts";
 import { laneHeadroomPercent, mainLane, type CodexObservation } from "./codex/types.ts";
 import { selectClaudeRoute, resolveRouteRef } from "./balance/claude.ts";
 import { claimCodexSpark, codexAuthEligible, selectCodexAccount, selectCodexSpark } from "./balance/codex.ts";
+import { selectGrokAccount } from "./balance/grok.ts";
 import {
   readClaudeObservation,
   readCodexObservation,
+  readGrokObservation,
   refreshClaudeObservation,
   refreshCodexObservation,
+  refreshGrokObservation,
 } from "./observe.ts";
 import { cswapArgv, statePaths, type StatePaths } from "./paths.ts";
 import { runBounded } from "./proc.ts";
@@ -22,6 +26,7 @@ import {
   effectiveClaudeFullFocus,
   effectiveCodexFullFocus,
   effectiveFableFocus,
+  effectiveGrokFullFocus,
   effectiveNonFableFocus,
   materializeFocusPolicy,
   materializeFullFocusPolicy,
@@ -30,6 +35,7 @@ import {
   readFullFocusLeaf,
   resolveObservedCodexWeeklyReset,
   resolveObservedFableReset,
+  resolveObservedGrokIncludedReset,
   resolveObservedWeekReset,
   writeFocusLeaf,
   type AccountFocusLifetime,
@@ -40,6 +46,7 @@ import {
   type FullFocusLifetime,
 } from "./focus.ts";
 import { buildViewModel } from "./view.ts";
+import { grokAccountEligible, type GrokObservation } from "./grok/types.ts";
 import { daemonRun, daemonStatus } from "./daemon.ts";
 import { VERSION } from "./version.ts";
 import { guideEnvelope, renderAgentHelp, renderAgentTeaser, renderHelp } from "./guide.ts";
@@ -89,7 +96,7 @@ function parseDurationMs(value: string): number | null {
 }
 
 /** Claude provider-focus targets are route ids; codex targets are accountKeys. */
-function providerTargetName(provider: "claude" | "codex", target: string): string {
+function providerTargetName(provider: "claude" | "codex" | "grok", target: string): string {
   return provider === "claude" ? displayNameForRouteId(target) : target;
 }
 
@@ -125,10 +132,27 @@ async function ensureFreshCodex(paths: StatePaths, env: NodeJS.ProcessEnv): Prom
   return refreshed.value ?? current;
 }
 
+async function ensureFreshGrok(paths: StatePaths, env: NodeJS.ProcessEnv): Promise<GrokObservation | null> {
+  const current = readGrokObservation(paths);
+  const nowMs = Date.now();
+  if (
+    current !== null &&
+    current.health === "ok" &&
+    nowMs - current.observed_at_ms <= GROK_OBSERVATION_FRESHNESS_CEILING_MS
+  ) {
+    return current;
+  }
+  // A decision refresh reads grok-swap's durable observation; explicit
+  // network refresh remains `agentusage refresh grok`.
+  const refreshed = await refreshGrokObservation(paths, { env, freshWithinMs: 0 });
+  return refreshed.value ?? current;
+}
+
 function readFocusStates(
   paths: StatePaths,
   observation: Observation | null,
   codexObservation: CodexObservation | null,
+  grokObservation: GrokObservation | null,
   nowMs: number,
 ) {
   const fableDelivery = readFocusLeaf(paths.fableFocusLeaf, true) as FocusDelivery<FableFocusPolicy>;
@@ -138,6 +162,7 @@ function readFocusStates(
     nonFable: effectiveNonFableFocus(nonFableDelivery, nowMs),
     claudeFull: effectiveClaudeFullFocus(readFullFocusLeaf(paths.claudeFullFocusLeaf, "claude"), observation, nowMs),
     codexFull: effectiveCodexFullFocus(readFullFocusLeaf(paths.codexFullFocusLeaf, "codex"), codexObservation, nowMs),
+    grokFull: effectiveGrokFullFocus(readFullFocusLeaf(paths.grokFullFocusLeaf, "grok"), grokObservation, nowMs),
   };
 }
 
@@ -161,7 +186,12 @@ async function usageCommand(args: string[]): Promise<number> {
       return 2;
     }
     const deadline = Date.now() + timeoutMs;
-    while (readClaudeObservation(paths) === null && readCodexObservation(paths) === null && Date.now() < deadline) {
+    while (
+      readClaudeObservation(paths) === null &&
+      readCodexObservation(paths) === null &&
+      readGrokObservation(paths) === null &&
+      Date.now() < deadline
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
@@ -172,6 +202,7 @@ async function usageCommand(args: string[]): Promise<number> {
       generated_at: new Date().toISOString(),
       claude: readClaudeObservation(paths),
       codex: readCodexObservation(paths),
+      grok: readGrokObservation(paths),
     });
     return 0;
   }
@@ -192,14 +223,17 @@ async function usageCommand(args: string[]): Promise<number> {
   const nowMs = Date.now();
   const claude = readClaudeObservation(paths);
   const codex = readCodexObservation(paths);
-  const focus = readFocusStates(paths, claude, codex, nowMs);
+  const grok = readGrokObservation(paths);
+  const focus = readFocusStates(paths, claude, codex, grok, nowMs);
   const vm = buildViewModel({
     claude,
     codex,
+    grok,
     fable: focus.fable,
     nonFable: focus.nonFable,
     claudeFull: focus.claudeFull,
     codexFull: focus.codexFull,
+    grokFull: focus.grokFull,
     nowMs,
   });
   const width = process.stdout.columns ?? 100;
@@ -208,6 +242,7 @@ async function usageCommand(args: string[]): Promise<number> {
     schema_version: 1,
     claude: claude === null ? null : { health: claude.health, age_s: Math.round((nowMs - claude.observed_at_ms) / 1000), accounts: claude.claude_accounts.count },
     codex: codex === null ? null : { health: codex.health, age_s: Math.round((nowMs - codex.observed_at_ms) / 1000), accounts: codex.accounts.length },
+    grok: grok === null ? null : { health: grok.health, age_s: Math.round((nowMs - grok.observed_at_ms) / 1000), accounts: grok.accounts.length },
   };
   process.stdout.write(`agentusage-meta: ${JSON.stringify(meta)}\n`);
   return 0;
@@ -223,7 +258,8 @@ async function statusCommand(args: string[]): Promise<number> {
   const nowMs = Date.now();
   const claude = readClaudeObservation(paths);
   const codex = readCodexObservation(paths);
-  const focus = readFocusStates(paths, claude, codex, nowMs);
+  const grok = readGrokObservation(paths);
+  const focus = readFocusStates(paths, claude, codex, grok, nowMs);
   const codexFocusTarget =
     focus.codexFull.state === "active" && focus.codexFull.policy !== null ? focus.codexFull.policy.target : null;
 
@@ -232,6 +268,10 @@ async function statusCommand(args: string[]): Promise<number> {
   const claudeFablePreview =
     claude === null ? null : selectClaudeRoute({ observation: claude, paths, nowMs, dryRun: true, fableIntent: true });
   const sparkPreview = codex === null ? null : selectCodexSpark(codex, nowMs, codexFocusTarget);
+  const grokPreview =
+    grok === null
+      ? null
+      : await selectGrokAccount({ observation: grok, focus: focus.grokFull, claim: false, nowMs });
 
   if (flags.booleans.has("json")) {
     emitJson({
@@ -250,11 +290,25 @@ async function statusCommand(args: string[]): Promise<number> {
               accounts: codex.accounts.length,
               recommendation: codex.recommendation,
             },
+      grok:
+        grok === null
+          ? null
+          : {
+              health: grok.health,
+              age_s: Math.round((nowMs - grok.observed_at_ms) / 1000),
+              accounts: grok.accounts.length,
+            },
       claude_focus: focus.claudeFull,
       codex_focus: focus.codexFull,
+      grok_focus: focus.grokFull,
       fable_focus: focus.fable,
       non_fable_focus: focus.nonFable,
-      previews: { claude: claudePreview, claude_fable: claudeFablePreview, codex_spark: sparkPreview },
+      previews: {
+        claude: claudePreview,
+        claude_fable: claudeFablePreview,
+        codex_spark: sparkPreview,
+        grok: grokPreview,
+      },
     });
     return 0;
   }
@@ -264,6 +318,7 @@ async function statusCommand(args: string[]): Promise<number> {
   };
   describe("claude", claude === null ? "no observation" : `${claude.health} · ${Math.round((nowMs - claude.observed_at_ms) / 1000)}s old · ${claude.routes.length} routes`);
   describe("codex", codex === null ? "no observation" : `${codex.health} · ${Math.round((nowMs - codex.observed_at_ms) / 1000)}s old · ${codex.accounts.length} accounts`);
+  describe("grok", grok === null ? "no observation" : `${grok.health} · ${Math.round((nowMs - grok.observed_at_ms) / 1000)}s old · ${grok.accounts.length} accounts`);
   describe(
     "claude focus",
     focus.claudeFull.state === "off"
@@ -273,6 +328,10 @@ async function statusCommand(args: string[]): Promise<number> {
   describe(
     "codex focus",
     focus.codexFull.state === "off" ? "off" : `${focus.codexFull.state} → ${focus.codexFull.policy?.target ?? "?"}`,
+  );
+  describe(
+    "grok focus",
+    focus.grokFull.state === "off" ? "off" : `${focus.grokFull.state} → ${focus.grokFull.policy?.target ?? "?"}`,
   );
   describe(
     "fable focus",
@@ -296,6 +355,9 @@ async function statusCommand(args: string[]): Promise<number> {
   if (sparkPreview !== null) {
     describe("codex spark", sparkPreview.ok ? `${sparkPreview.accountKey} (${sparkPreview.score}% headroom)` : sparkPreview.refusal);
   }
+  if (grokPreview !== null) {
+    describe("grok choice", grokPreview.ok ? `${grokPreview.displayName} (${grokPreview.reason})` : grokPreview.refusal);
+  }
   return 0;
 }
 
@@ -304,8 +366,8 @@ async function statusCommand(args: string[]): Promise<number> {
 
 async function balanceCommand(args: string[]): Promise<number> {
   const provider = args[0];
-  if (provider !== "claude" && provider !== "codex") {
-    console.error("agentusage balance: expected provider claude|codex");
+  if (provider !== "claude" && provider !== "codex" && provider !== "grok") {
+    console.error("agentusage balance: expected provider claude|codex|grok");
     return 2;
   }
   const rest = args.slice(1);
@@ -339,6 +401,80 @@ async function balanceCommand(args: string[]): Promise<number> {
     } else if (selection.ok) {
       console.log(`${selection.route.id} (${selection.display_name}) — ${selection.reason}`);
       console.log(`launch: cswap run ${selection.route.slot} --share-history -- <claude args>`);
+    } else {
+      console.error(`agentusage: ${selection.refusal}: ${selection.detail}`);
+    }
+    if (selection.ok) return 0;
+    return selection.refusal === "no-eligible-account" ? 3 : 1;
+  }
+
+  if (provider === "grok") {
+    const flags = parseFlags(rest, ["claim", "dry-run", "json", "allow-unknown"], [
+      "strategy",
+      "account",
+      "reserve-seconds",
+    ]);
+    if (flags === null) return 2;
+    if (flags.booleans.has("claim") && flags.booleans.has("dry-run")) {
+      console.error("agentusage balance grok: --claim and --dry-run are mutually exclusive");
+      return 2;
+    }
+    const strategy = flags.strings.get("strategy");
+    if (strategy !== undefined && strategy !== "best" && strategy !== "next-available") {
+      console.error("agentusage balance grok: --strategy must be best|next-available");
+      return 2;
+    }
+    if (strategy !== undefined && flags.strings.has("account")) {
+      console.error("agentusage balance grok: --strategy and --account are mutually exclusive");
+      return 2;
+    }
+    let reserveSeconds: number | undefined;
+    const reserveToken = flags.strings.get("reserve-seconds");
+    if (reserveToken !== undefined) {
+      reserveSeconds = Number(reserveToken);
+      if (!Number.isSafeInteger(reserveSeconds) || reserveSeconds < 1 || reserveSeconds > 300) {
+        console.error("agentusage balance grok: --reserve-seconds must be an integer from 1 to 300");
+        return 2;
+      }
+      if (!flags.booleans.has("claim")) {
+        console.error("agentusage balance grok: --reserve-seconds requires --claim");
+        return 2;
+      }
+    }
+    const delivery = readFullFocusLeaf(paths.grokFullFocusLeaf, "grok");
+    const observation = delivery.policy === null ? readGrokObservation(paths) : await ensureFreshGrok(paths, process.env);
+    const nowMs = Date.now();
+    const grokFocus = effectiveGrokFullFocus(delivery, observation, nowMs);
+    const selection = await selectGrokAccount({
+      strategy: strategy as "best" | "next-available" | undefined,
+      account: flags.strings.get("account"),
+      claim: flags.booleans.has("claim"),
+      reserveSeconds,
+      allowUnknown: flags.booleans.has("allow-unknown"),
+      observation,
+      focus: grokFocus,
+      nowMs,
+    });
+    if (flags.booleans.has("json")) {
+      emitJson({
+        schema_version: 1,
+        provider: "grok",
+        focus: { state: grokFocus.state, target: grokFocus.policy?.target ?? null },
+        ...selection,
+      });
+    } else if (selection.ok) {
+      const dollars =
+        selection.score.remainingDollars === null ? "" : ` · $${selection.score.remainingDollars.toFixed(2)} remaining`;
+      const included =
+        selection.score.remainingIncludedPercent === null
+          ? ""
+          : ` · ${Math.round(selection.score.remainingIncludedPercent * 10) / 10}% included remaining`;
+      const reservation =
+        selection.reservation === null
+          ? ""
+          : ` · reservation ${selection.reservation.id} until ${selection.reservation.expiresAt ?? "?"}`;
+      console.log(`${selection.displayName} — ${selection.reason} · ${selection.score.tier}${included}${dollars}${reservation}`);
+      console.log("selection only; no Grok harness activation is configured");
     } else {
       console.error(`agentusage: ${selection.refusal}: ${selection.detail}`);
     }
@@ -433,11 +569,11 @@ async function balanceCommand(args: string[]): Promise<number> {
 // ---------------------------------------------------------------------------
 // focus
 
-type FocusKind = "fable" | "non-fable" | "claude" | "codex";
+type FocusKind = "fable" | "non-fable" | "claude" | "codex" | "grok";
 type FocusAction = "show" | "set" | "clear";
 
 function isFocusKind(value: string | undefined): value is FocusKind {
-  return value === "fable" || value === "non-fable" || value === "claude" || value === "codex";
+  return value === "fable" || value === "non-fable" || value === "claude" || value === "codex" || value === "grok";
 }
 
 function isFocusAction(value: string | undefined): value is FocusAction {
@@ -460,14 +596,16 @@ async function focusCommand(args: string[]): Promise<number> {
     console.error("agentusage focus: expected show|set|clear");
     return 2;
   } else {
-    console.error("agentusage focus: expected fable|non-fable|claude|codex");
+    console.error("agentusage focus: expected fable|non-fable|claude|codex|grok");
     return 2;
   }
   const flags = parseFlags(args.slice(2), ["json", "require-eligible"], ["expect-reset"]);
   if (flags === null) return 2;
   const paths = statePaths(process.env);
   const nowMs = Date.now();
-  if (kind === "claude" || kind === "codex") return fullFocusAction(kind, action, flags, paths, nowMs);
+  if (kind === "claude" || kind === "codex" || kind === "grok") {
+    return fullFocusAction(kind, action, flags, paths, nowMs);
+  }
   const leafPath = kind === "fable" ? paths.fableFocusLeaf : paths.nonFableFocusLeaf;
 
   if (action === "show") {
@@ -582,20 +720,27 @@ function parseAbsoluteDeadline(
 }
 
 async function fullFocusAction(
-  provider: "claude" | "codex",
+  provider: "claude" | "codex" | "grok",
   action: "show" | "set" | "clear",
   flags: Flags,
   paths: StatePaths,
   nowMs: number,
 ): Promise<number> {
-  const leafPath = provider === "claude" ? paths.claudeFullFocusLeaf : paths.codexFullFocusLeaf;
+  const leafPath =
+    provider === "claude"
+      ? paths.claudeFullFocusLeaf
+      : provider === "codex"
+        ? paths.codexFullFocusLeaf
+        : paths.grokFullFocusLeaf;
 
   if (action === "show") {
     const delivery = readFullFocusLeaf(leafPath, provider);
     const status =
       provider === "claude"
         ? effectiveClaudeFullFocus(delivery, readClaudeObservation(paths), nowMs)
-        : effectiveCodexFullFocus(delivery, readCodexObservation(paths), nowMs);
+        : provider === "codex"
+          ? effectiveCodexFullFocus(delivery, readCodexObservation(paths), nowMs)
+          : effectiveGrokFullFocus(delivery, readGrokObservation(paths), nowMs);
     if (flags.booleans.has("json")) emitJson({ schema_version: 1, kind: provider, ...status });
     else if (status.state === "off") console.log(`${provider} focus: off`);
     else {
@@ -618,7 +763,9 @@ async function fullFocusAction(
   const targetRef = flags.positionals[0];
   const lifetimeToken = flags.positionals[1];
   if (targetRef === undefined || lifetimeToken === undefined) {
-    console.error(`agentusage focus ${provider} set: expected <${provider === "claude" ? "route|claude-N" : "accountKey"}> <lifetime>`);
+    console.error(
+      `agentusage focus ${provider} set: expected <${provider === "claude" ? "route|claude-N" : provider === "grok" ? "accountKey|grok-N" : "accountKey"}> <lifetime>`,
+    );
     return 2;
   }
 
@@ -638,7 +785,7 @@ async function fullFocusAction(
     target = targetRoute;
     eligible = observation === null ? null : observation.routes.some((route) => route.id === targetRoute);
     resolveReset = (expect) => resolveObservedWeekReset(observation, targetRoute, nowMs, expect);
-  } else {
+  } else if (provider === "codex") {
     const observation = await ensureFreshCodex(paths, process.env);
     if (observation === null || observation.health !== "ok") {
       console.error("agentusage focus codex set: needs a fresh codex observation to resolve the account");
@@ -654,6 +801,22 @@ async function fullFocusAction(
     const headroom = lane === null ? null : laneHeadroomPercent(lane);
     eligible = codexAuthEligible(account) && headroom !== null && headroom > 0;
     resolveReset = (expect) => resolveObservedCodexWeeklyReset(observation, account.accountKey, nowMs, expect);
+  } else {
+    const observation = await ensureFreshGrok(paths, process.env);
+    if (observation === null || observation.health !== "ok") {
+      console.error("agentusage focus grok set: needs a fresh grok observation to resolve the account");
+      return 1;
+    }
+    const account = observation.accounts.find(
+      (candidate) => candidate.accountKey === targetRef || candidate.displayName === targetRef,
+    );
+    if (account === undefined) {
+      console.error(`agentusage focus grok set: unknown grok account ${targetRef}`);
+      return 1;
+    }
+    target = account.accountKey;
+    eligible = grokAccountEligible(account);
+    resolveReset = (expect) => resolveObservedGrokIncludedReset(observation, account.accountKey, nowMs, expect);
   }
 
   let lifetime: FullFocusLifetime;
@@ -734,8 +897,8 @@ async function refreshCommand(args: string[]): Promise<number> {
   const flags = parseFlags(args, ["json"], []);
   if (flags === null) return 2;
   const scope = flags.positionals[0] ?? "all";
-  if (scope !== "claude" && scope !== "codex" && scope !== "all") {
-    console.error("agentusage refresh: expected claude|codex|all");
+  if (scope !== "claude" && scope !== "codex" && scope !== "grok" && scope !== "all") {
+    console.error("agentusage refresh: expected claude|codex|grok|all");
     return 2;
   }
   const paths = statePaths(process.env);
@@ -747,6 +910,10 @@ async function refreshCommand(args: string[]): Promise<number> {
   if (scope === "codex" || scope === "all") {
     const result = await refreshCodexObservation(paths, { freshWithinMs: 0 });
     outcomes.codex = { outcome: result.outcome, health: result.value?.health ?? null };
+  }
+  if (scope === "grok" || scope === "all") {
+    const result = await refreshGrokObservation(paths, { freshWithinMs: 0, providerRefresh: true });
+    outcomes.grok = { outcome: result.outcome, health: result.value?.health ?? null };
   }
   if (flags.booleans.has("json")) emitJson({ schema_version: 1, ...outcomes });
   else {

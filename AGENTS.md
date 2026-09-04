@@ -1,8 +1,9 @@
 # agentusage
 
-Claude + Codex account usage observations, balancing, and a usage TUI, built
-on claude-swap (`cswap`, Python/uv) and codex-swap (Node) as the durable
-per-provider stores. Rebuild of keeper's `usage` subsystem for this account;
+Claude + Codex + Grok account usage observations, balancing, and a usage TUI,
+built on claude-swap (`cswap`, Python/uv), codex-swap (Node), and grok-swap
+(Bun) as the durable per-provider stores. Rebuild of keeper's `usage`
+subsystem for this account;
 `docs/SKETCH.md` is the build contract, `CONTEXT.md` the glossary, `README.md`
 the operator and launcher-integration guide.
 
@@ -13,10 +14,11 @@ the operator and launcher-integration guide.
 - `bun run typecheck` — `tsc --noEmit`.
 - `bash scripts/install.sh --install` — the `agentusage` binary (idempotent);
   AgentStart owns the `agentusage.observer` LaunchAgent.
-- `bash scripts/install-providers.sh` — best-effort cswap + codex-swap
-  installation. cswap comes from the cswax workshop (`~/code/cswax`), which
+- `bash scripts/install-providers.sh` — best-effort cswap installation.
+  cswap comes from the cswax workshop (`~/code/cswax`), which
   owns the claude-swap fork; this repository consumes it and never rebases,
-  publishes, or otherwise maintains that fork.
+  publishes, or otherwise maintains that fork. AgentStart invokes codex-swap
+  and grok-swap's own installers directly.
 
 ## Conventions
 
@@ -27,8 +29,8 @@ the operator and launcher-integration guide.
   inside the TUI entry. The platform-native package top-level-awaits and races
   under parallel `bun test`; TUI-loading tests must stay serial.
 - Provider access is subprocess JSON (`cswap list --json`,
-  `codex-swap snapshot --json`), bounded (timeout, output cap), no-shell
-  spawn. Never parse claude-swap's or codex-swap's on-disk stores directly.
+  `codex-swap snapshot --json`, `grok-swap observe --json`), bounded (timeout,
+  output cap), no-shell spawn. Never parse a provider's on-disk store directly.
 - Sidecars and policy leaves are written atomically (0600 tmp + rename) under
   `~/.local/state/agentusage/`; leaf reads refuse group/other permission bits
   and symlinks.

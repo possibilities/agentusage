@@ -1,5 +1,6 @@
 import {
   CODEX_OBSERVATION_FRESHNESS_CEILING_MS,
+  GROK_OBSERVATION_FRESHNESS_CEILING_MS,
   OBSERVATION_FRESHNESS_CEILING_MS,
 } from "./constants.ts";
 import {
@@ -12,6 +13,7 @@ import {
   WEEK_WINDOW,
 } from "./claude/types.ts";
 import { type CodexObservation, isSparkLane } from "./codex/types.ts";
+import type { GrokObservation } from "./grok/types.ts";
 import type {
   AccountFocusEffectiveState,
   FableFocusEffectiveState,
@@ -34,8 +36,14 @@ export interface MeterRow {
   spark: boolean;
 }
 
+export interface FactRow {
+  label: string;
+  value: string;
+  tone: Tone;
+}
+
 export interface AccountCard {
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "grok";
   name: string;
   detail: string | null;
   resetCreditsAvailable: number | null;
@@ -43,11 +51,12 @@ export interface AccountCard {
   dimmed: boolean;
   measuredAgo: string | null;
   meters: MeterRow[];
+  facts?: FactRow[];
   focus: string[];
 }
 
 export interface ProviderSection {
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "grok";
   health: string;
   ageText: string;
   fresh: boolean;
@@ -56,7 +65,7 @@ export interface ProviderSection {
 }
 
 export interface FocusLine {
-  kind: "fable" | "non-fable" | "claude" | "codex";
+  kind: "fable" | "non-fable" | "claude" | "codex" | "grok";
   state: string;
   target: string | null;
   lifetime: string | null;
@@ -66,6 +75,7 @@ export interface UsageViewModel {
   nowMs: number;
   claude: ProviderSection | null;
   codex: ProviderSection | null;
+  grok: ProviderSection | null;
   focus: FocusLine[];
 }
 
@@ -178,6 +188,7 @@ function buildClaudeSection(
       dimmed,
       measuredAgo: measuredAtMs === null ? null : formatDurationMs(nowMs - measuredAtMs),
       meters: measurement === undefined ? [] : claudeMeters(measurement.windows, nowMs, dimmed),
+      facts: [],
       focus: focusBadges.get(id) ?? [],
     });
   }
@@ -252,12 +263,102 @@ function buildCodexSection(
       dimmed,
       measuredAgo: account.measuredAtMs === null ? null : formatDurationMs(nowMs - account.measuredAtMs),
       meters,
+      facts: [],
       focus: focusBadges.get(account.accountKey) ?? [],
     });
   });
 
   return {
     provider: "codex",
+    health: observation.health,
+    ageText: sectionAgeText(observation.health, fresh, ageMs),
+    fresh,
+    cards,
+    notes: observation.notes,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Grok
+
+function usd(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
+function buildGrokSection(
+  observation: GrokObservation,
+  nowMs: number,
+  focusBadges: Map<string, string[]>,
+): ProviderSection {
+  const ageMs = nowMs - observation.observed_at_ms;
+  const fresh = observation.health === "ok" && ageMs <= GROK_OBSERVATION_FRESHNESS_CEILING_MS;
+  const cards: AccountCard[] = observation.accounts.map((account) => {
+    const dimmed =
+      !fresh || !account.enabled || account.authStatus !== "valid" || account.billingStatus !== "fresh" || account.stale;
+    const status = !account.enabled
+      ? "disabled"
+      : account.authStatus !== "valid"
+        ? `auth-${account.authStatus}`
+        : account.billingStatus !== "fresh"
+          ? account.billingStatus
+          : null;
+    const meters: MeterRow[] = [];
+    if (account.included !== null) {
+      const period = account.included.periodType?.toLowerCase() ?? "included";
+      meters.push({
+        label: period === "included" ? period : `${period} included`,
+        usedPercent: account.included.usedPercent,
+        resetText: countdownTo(account.included.resetsAt, nowMs),
+        tone: dimmed ? "muted" : toneForUtilization(
+          account.included.usedPercent === null ? null : account.included.usedPercent / 100,
+        ),
+        spark: false,
+      });
+    }
+    const facts: FactRow[] = [];
+    if (
+      account.prepaid?.balanceUsd !== null &&
+      account.prepaid?.balanceUsd !== undefined &&
+      account.prepaid.balanceUsd > 0
+    ) {
+      facts.push({
+        label: "prepaid",
+        value: `${usd(account.prepaid.balanceUsd)} available`,
+        tone: dimmed ? "muted" : "plain",
+      });
+    }
+    const payg = account.payg;
+    if (payg?.enabled === true) {
+      const values: string[] = [];
+      if (payg.usedUsd !== null) values.push(`${usd(payg.usedUsd)} used`);
+      if (payg.remainingUsd !== null) values.push(`${usd(payg.remainingUsd)} left`);
+      if (payg.capUsd !== null) values.push(`${usd(payg.capUsd)} cap`);
+      facts.push({
+        label: "pay as you go",
+        value: values.length > 0 ? values.join(" · ") : payg.enabled === true ? "enabled" : "unknown",
+        tone: dimmed ? "muted" : "plain",
+      });
+    }
+    const detailParts: string[] = [];
+    if (account.subscriptionTier !== null) detailParts.push(account.subscriptionTier);
+    const identity = account.alias ?? account.email;
+    if (identity !== null) detailParts.push(identity);
+    const measuredAtMs = account.stale ? account.lastGoodAtMs : account.observedAtMs ?? account.lastGoodAtMs;
+    return {
+      provider: "grok",
+      name: account.displayName,
+      detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
+      resetCreditsAvailable: null,
+      status,
+      dimmed,
+      measuredAgo: measuredAtMs === null ? null : formatDurationMs(nowMs - measuredAtMs),
+      meters,
+      facts,
+      focus: focusBadges.get(account.accountKey) ?? [],
+    };
+  });
+  return {
+    provider: "grok",
     health: observation.health,
     ageText: sectionAgeText(observation.health, fresh, ageMs),
     fresh,
@@ -285,16 +386,19 @@ function lifetimeCountdown(iso: string, nowMs: number): string {
 export interface BuildViewModelInput {
   claude: Observation | null;
   codex: CodexObservation | null;
+  grok: GrokObservation | null;
   fable: FocusStatus<FableFocusPolicy, FableFocusEffectiveState>;
   nonFable: FocusStatus<NonFableFocusPolicy, AccountFocusEffectiveState>;
   claudeFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
   codexFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
+  grokFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
   nowMs: number;
 }
 
 export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
   const claudeBadges = new Map<string, string[]>();
   const codexBadges = new Map<string, string[]>();
+  const grokBadges = new Map<string, string[]>();
   const badge = (map: Map<string, string[]>, key: string, text: string): void => {
     const existing = map.get(key) ?? [];
     existing.push(text);
@@ -305,6 +409,9 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
   }
   if (input.codexFull.state === "active" && input.codexFull.policy !== null) {
     badge(codexBadges, input.codexFull.policy.target, "all⤳");
+  }
+  if (input.grokFull.state === "active" && input.grokFull.policy !== null) {
+    badge(grokBadges, input.grokFull.policy.target, "all⤳");
   }
   if (input.fable.state === "active" && input.fable.policy !== null) {
     badge(claudeBadges, input.fable.policy.target_route, "fable⤳");
@@ -320,6 +427,10 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
     if (index < 0) return accountKey;
     return `codex-${(input.codex?.accounts[index]?.ndyIndex ?? index) + 1}`;
   };
+  const grokName = (accountRef: string): string =>
+    input.grok?.accounts.find(
+      (account) => account.accountKey === accountRef || account.displayName === accountRef,
+    )?.displayName ?? accountRef;
 
   const focus: FocusLine[] = [
     {
@@ -333,6 +444,12 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
       state: input.codexFull.state,
       target: input.codexFull.policy === null ? null : codexName(input.codexFull.policy.target),
       lifetime: input.codexFull.policy === null ? null : lifetimeText(input.codexFull.policy, input.nowMs),
+    },
+    {
+      kind: "grok",
+      state: input.grokFull.state,
+      target: input.grokFull.policy === null ? null : grokName(input.grokFull.policy.target),
+      lifetime: input.grokFull.policy === null ? null : lifetimeText(input.grokFull.policy, input.nowMs),
     },
     {
       kind: "fable",
@@ -352,6 +469,7 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
     nowMs: input.nowMs,
     claude: input.claude === null ? null : buildClaudeSection(input.claude, input.nowMs, claudeBadges),
     codex: input.codex === null ? null : buildCodexSection(input.codex, input.nowMs, codexBadges),
+    grok: input.grok === null ? null : buildGrokSection(input.grok, input.nowMs, grokBadges),
     focus,
   };
 }

@@ -8,13 +8,20 @@ import {
   WEEKLY_RESET_WAKE_SLACK_MS,
 } from "./constants.ts";
 import { type NormalizedWindow, type Observation, WEEK_WINDOW, slotForRouteId } from "./claude/types.ts";
-import { readClaudeObservation, readCodexObservation, refreshClaudeObservation, refreshCodexObservation } from "./observe.ts";
+import {
+  readClaudeObservation,
+  readCodexObservation,
+  readGrokObservation,
+  refreshClaudeObservation,
+  refreshCodexObservation,
+  refreshGrokObservation,
+} from "./observe.ts";
 import { cswapArgv, statePaths, type StatePaths } from "./paths.ts";
 import { runBounded } from "./proc.ts";
 import { VERSION } from "./version.ts";
 
 /**
- * agentusage daemon — both provider observation loops in one launchd-supervised
+ * agentusage daemon — all provider observation loops in one launchd-supervised
  * process. Claude follows keeper's cadence (3 min + jitter, weekly-reset
  * early wake, one due recovery per cycle); codex polls codex-swap on the same
  * cadence while codex-swap's own poll plans pace real network fetches.
@@ -145,6 +152,28 @@ async function codexLoop(paths: StatePaths, signal: AbortSignal, env: Record<str
   }
 }
 
+async function grokLoop(paths: StatePaths, signal: AbortSignal, env: Record<string, string | undefined>): Promise<void> {
+  while (!signal.aborted) {
+    try {
+      const started = Date.now();
+      // grok-swap owns network pacing/backoff and its durable last-good data;
+      // the daemon only mirrors `observe` into AgentUsage's sidecar.
+      const result = await refreshGrokObservation(paths, { freshWithinMs: 60_000, env });
+      const observation = result.value;
+      log(
+        "grok",
+        `${result.outcome} health=${observation?.health ?? "none"} accounts=${observation?.accounts.length ?? 0} (${
+          Date.now() - started
+        }ms)`,
+      );
+    } catch (error) {
+      log("grok", `cycle threw (non-fatal): ${String(error)}`);
+    }
+    if (signal.aborted) return;
+    await sleep(OBSERVE_INTERVAL_MS + Math.random() * OBSERVE_JITTER_MS, signal);
+  }
+}
+
 export async function daemonRun(env: Record<string, string | undefined> = process.env): Promise<void> {
   const paths = statePaths(env);
   const controller = new AbortController();
@@ -158,6 +187,7 @@ export async function daemonRun(env: Record<string, string | undefined> = proces
   await Promise.all([
     claudeLoop(paths, controller.signal, env),
     codexLoop(paths, controller.signal, env),
+    grokLoop(paths, controller.signal, env),
   ]);
   log("daemon", "stopped");
 }
@@ -167,7 +197,8 @@ export function daemonStatus(env: Record<string, string | undefined> = process.e
   const paths = statePaths(env);
   const claude = readClaudeObservation(paths);
   const codex = readCodexObservation(paths);
-  if (claude === null && codex === null) {
+  const grok = readGrokObservation(paths);
+  if (claude === null && codex === null && grok === null) {
     console.log("absent");
     return 1;
   }
@@ -175,7 +206,8 @@ export function daemonStatus(env: Record<string, string | undefined> = process.e
   const staleCeilingMs = 2 * (OBSERVE_INTERVAL_MS + OBSERVE_JITTER_MS) + 60_000;
   const claudeFresh = claude !== null && nowMs - claude.observed_at_ms <= staleCeilingMs;
   const codexFresh = codex !== null && nowMs - codex.observed_at_ms <= staleCeilingMs;
-  if (claudeFresh && codexFresh) {
+  const grokFresh = grok !== null && nowMs - grok.observed_at_ms <= staleCeilingMs;
+  if (claudeFresh && codexFresh && grokFresh) {
     console.log("ready");
     return 0;
   }

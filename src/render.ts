@@ -59,6 +59,19 @@ function meterLine(card: AccountCard, meter: AccountCard["meters"][number], widt
   return line;
 }
 
+function factLine(card: AccountCard, fact: NonNullable<AccountCard["facts"]>[number], width: number): Line {
+  const { labelWidth } = meterGeometry(width);
+  const label = fact.label.length > labelWidth ? `${fact.label.slice(0, labelWidth - 1)}…` : fact.label;
+  return clipLine(
+    [
+      { text: "    " },
+      { text: label.padEnd(labelWidth + 1), tone: "muted", dim: true },
+      { text: fact.value, tone: card.dimmed ? "muted" : fact.tone, dim: card.dimmed },
+    ],
+    width,
+  );
+}
+
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return max <= 1 ? "…" : `${text.slice(0, max - 1)}…`;
@@ -110,10 +123,12 @@ function cardLines(card: AccountCard, width: number, comfortable: boolean): Line
     lines.push([{ text: `    ${truncate(metadata, Math.max(12, width - 4))}`, tone: "muted", dim: true }]);
   }
   if (comfortable) lines.push([]);
-  if (card.meters.length === 0) {
+  const facts = card.facts ?? [];
+  if (card.meters.length === 0 && facts.length === 0) {
     lines.push([{ text: "    no usage data", tone: "muted", dim: true }]);
   } else {
     for (const meter of card.meters) lines.push(meterLine(card, meter, width));
+    for (const fact of facts) lines.push(factLine(card, fact, width));
   }
   return lines;
 }
@@ -186,11 +201,11 @@ export function renderFrameLines(
     lines.push([]);
   }
 
-  for (const section of [vm.claude, vm.codex]) {
+  for (const section of [vm.claude, vm.codex, vm.grok]) {
     if (section === null) continue;
     lines.push(...sectionLines(section, frameWidth, comfortable));
   }
-  if (vm.claude === null && vm.codex === null) {
+  if (vm.claude === null && vm.codex === null && vm.grok === null) {
     lines.push([{ text: "  no observations yet — run `agentusage refresh` or install the daemon", tone: "muted" }]);
     lines.push([]);
   }

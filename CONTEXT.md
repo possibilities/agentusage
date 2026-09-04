@@ -1,16 +1,22 @@
 # Glossary
 
 **Provider** — a source of managed accounts: `claude` (served by claude-swap's
-`cswap` CLI) or `codex` (served by codex-swap). _Avoid_: "backend", "vendor".
+`cswap` CLI), `codex` (served by codex-swap), or `grok` (served by grok-swap).
+_Avoid_: "backend", "vendor".
 
 **Observation** — one normalized reading of a provider's account capacity,
 written as a sidecar file. Claude observations use keeper's schema v7 shape;
-codex observations use agentusage schema v1. _Avoid_: "snapshot" for the
-sidecar (codex-swap's `snapshot` command is the provider's own term).
+Codex and Grok observations use provider-specific agentusage schema v1 shapes.
+_Avoid_: "snapshot" for the sidecar (codex-swap's `snapshot` command is the
+provider's own term).
 
 **Sidecar** — the atomically-replaced JSON file under
 `~/.local/state/agentusage/` that consumers (TUI, balance, status) read;
 providers' own stores stay authoritative. _Avoid_: "cache".
+
+**Included allowance** — Grok's percentage-based current billing period. It
+is a meter. Prepaid balance and pay-as-you-go usage/caps are monetary facts,
+not percentages, and must never be drawn as utilization bars.
 
 **Route** — a launchable Claude account identity, `claude-swap:<slot>`.
 PII-free and durable. Only launch-eligible accounts become routes; every other
@@ -21,12 +27,13 @@ account carries an issue instead — never both, never neither.
 
 **Display name** — the operator-facing 1-indexed name of an account:
 `claude-<slot>` (so `claude-swap:1` is `claude-1`) and `codex-<n>` for the
-nth Codex account. Also the short ref accepted wherever a Claude route id is.
+nth Codex account, plus grok-swap's immutable `grok-<n>`. Also the short ref
+accepted wherever that provider supports it.
 _Avoid_: `c0`/`c1` and `Codex 0` (the retired zero-based forms).
 
-**Ordinal** — zero-based position of a Claude account in cswap inventory
-order, kept in the observation for ordering and bookkeeping. Never displayed
-and never a command ref — that is the display name's job.
+**Ordinal** — provider-owned account order, kept for ordering and bookkeeping.
+Claude/Codex positions are zero-based; Grok ordinals are immutable positive
+integers and produce `grok-N`. The ordinal itself is never a command ref.
 
 **Lane** — a group of Codex rate-limit windows that share one quota pool: the
 binding `main` lane (primary 5 h + secondary weekly), the non-binding
@@ -38,7 +45,8 @@ not drain the main lane and keeps working when main quota is exhausted.
 Identified by `limitName`/`meteredFeature` containing "spark".
 
 **Binding window** — a window that counts toward eligibility and headroom
-(Claude: `session` + `week`; Codex: the main lane's primary + secondary).
+(Claude: `session` + `week`; Codex: the main lane's primary + secondary; Grok:
+the included allowance, followed by paid fallback tiers).
 Non-binding lanes are display + lane-targeted balance only.
 
 **Reset credit** — a provider-issued, one-shot Codex allowance for resetting
@@ -51,8 +59,8 @@ pins launches of the Fable model, whose quota is additional to Claude's
 session and weekly windows. **Non-Fable focus** pins every other Claude model,
 including Haiku and 1M-context variants. An active Fable focus also fences its
 target out of the non-Fable pool. A
-**provider focus** (`focus claude` / `focus codex`) pins every launch for
-that provider to one account and overrides both intent focuses, fence
+**provider focus** (`focus claude` / `focus codex` / `focus grok`) pins every
+launch for that provider to one account and overrides both intent focuses, fence
 included. Lifetimes: `permanent`, `absolute`, and observed `current-reset` /
 `cycle-end` (Fable focus reads the Fable window, provider focus the binding
 weekly window; Non-Fable focus has only the first two). Effective states:
@@ -63,8 +71,8 @@ lifetimes).
 (`agentusage balance <provider> --json`); prints the chosen account, does not
 launch. _Avoid_: "routing" for the command itself (keeper's implicit form).
 
-**Reservation** — a 90 s-TTL record that a balance decision was handed out,
-adding +5 pp pressure per live reservation so concurrent launches spread.
+**Reservation** — a short-lived record that a balance decision was handed out.
+Claude keeps its 90 s ledger locally; grok-swap owns Grok reservations.
 
 **Freshness ceiling** — the maximum sidecar age (5 min) at which balance will
 act; staler observations refuse rather than guess.
@@ -76,4 +84,4 @@ act; staler observations refuse rather than guess.
 **Launcher** — the external tool that actually starts `claude` / `codex`
 using balance's answer (e.g. via `cswap run <slot> --share-history` or
 `codex-swap run --account <key>`). Out of scope here; contract documented in
-README.
+README. No Grok launcher/activation integration exists yet.

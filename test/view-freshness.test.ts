@@ -49,10 +49,12 @@ function build(claude: Observation) {
   return buildViewModel({
     claude,
     codex: null,
+    grok: null,
     fable: OFF,
     nonFable: OFF,
     claudeFull: OFF,
     codexFull: OFF,
+    grokFull: OFF,
     nowMs: NOW,
   });
 }

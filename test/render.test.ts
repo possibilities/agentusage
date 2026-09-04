@@ -28,6 +28,7 @@ const vm: UsageViewModel = {
     ],
   },
   codex: null,
+  grok: null,
   focus: [
     { kind: "claude", state: "off", target: null, lifetime: null },
     { kind: "non-fable", state: "active", target: "claude-1", lifetime: "permanent" },
@@ -162,5 +163,43 @@ describe("Signal Room frame", () => {
     const metadata = text.split("\n").find((line) => line.includes("Plus"));
     expect(header).toContain("[NON-FABLE]  1× reset");
     expect(metadata).not.toContain("reset");
+  });
+
+  test("renders Grok dollars as quiet facts, never percentage meters", () => {
+    const grokVm: UsageViewModel = {
+      ...vm,
+      claude: null,
+      grok: {
+        provider: "grok",
+        health: "ok",
+        ageText: "fresh 2s",
+        fresh: true,
+        notes: [],
+        cards: [
+          {
+            provider: "grok",
+            name: "grok-1",
+            detail: "SuperGrok · work",
+            resetCreditsAvailable: null,
+            status: null,
+            dimmed: false,
+            measuredAgo: "2s",
+            focus: [],
+            meters: [{ label: "weekly included", usedPercent: 20, resetText: "3d", tone: "good", spark: false }],
+            facts: [
+              { label: "prepaid", value: "$12.34 available", tone: "plain" },
+              { label: "pay as you go", value: "$1.25 used · $8.75 left · $10.00 cap", tone: "plain" },
+            ],
+          },
+        ],
+      },
+    };
+    const text = linesToText(renderFrameLines(grokVm, 100, { title: false }), false);
+    expect(text).toContain("weekly included");
+    expect(text).toContain("prepaid");
+    expect(text).toContain("$12.34 available");
+    const prepaidLine = text.split("\n").find((line) => line.includes("prepaid"))!;
+    expect(prepaidLine).not.toContain("%");
+    expect(prepaidLine).not.toContain("▕");
   });
 });
