@@ -38,18 +38,18 @@ function freshPaths() {
 }
 
 describe("isFableRequest", () => {
-  test("recognizes Fable and Claude 1M-context model spellings", () => {
-    for (const model of ["fable", "claude-fable-5", "opus-1m", "sonnet-1m", "opus[1m]", "claude-opus-4-6[1m]"]) {
+  test("recognizes only Fable model spellings", () => {
+    for (const model of ["fable", "claude-fable-5"]) {
       expect(isFableRequest(model)).toBe(true);
     }
   });
 
-  test("keeps ordinary models non-Fable and honors explicit intent", () => {
-    for (const model of ["opus", "sonnet", "haiku", null, undefined]) {
+  test("keeps ordinary and 1M-context models non-Fable and honors explicit intent", () => {
+    for (const model of ["opus", "sonnet", "haiku", "opus-1m", "sonnet-1m", "opus[1m]", "claude-opus-4-6[1m]", null, undefined]) {
       expect(isFableRequest(model)).toBe(false);
     }
-    expect(isFableRequest("opus-1m", false)).toBe(false);
     expect(isFableRequest("opus", true)).toBe(true);
+    expect(isFableRequest("fable", false)).toBe(false);
   });
 });
 
@@ -162,20 +162,44 @@ describe("selectClaudeRoute", () => {
     }
   });
 
-  test("active fable focus wins 1M-context launches and is avoided by non-fable ones", () => {
+  test("active fable focus wins Fable launches and is avoided by non-Fable ones", () => {
     const paths = freshPaths();
     writeFocusLeaf(paths.fableFocusLeaf, materializeFocusPolicy("claude-swap:1", { kind: "permanent" }, true, NOW));
     const routes = () => [
       route(1, { session: 0.9, week: 0.9, fable: 0.9 }),
       route(2, { session: 0.1, week: 0.1, fable: 0.1 }),
     ];
-    const fable = selectClaudeRoute({ observation: observation(routes()), paths, nowMs: NOW, model: "opus-1m" });
+    const fable = selectClaudeRoute({ observation: observation(routes()), paths, nowMs: NOW, model: "fable" });
     expect(fable.ok && fable.route.id).toBe("claude-swap:1");
     if (fable.ok) expect(fable.reason).toBe("fable-focus");
 
     const generic = selectClaudeRoute({ observation: observation(routes()), paths, nowMs: NOW });
     expect(generic.ok && generic.route.id).toBe("claude-swap:2");
     if (generic.ok) expect(generic.reason).toBe("fable-focus-avoided");
+  });
+
+  test("1M-context and Haiku launches use binding windows but ignore exhausted Fable quota", () => {
+    for (const model of ["opus-1m", "sonnet[1m]", "haiku"]) {
+      const result = selectClaudeRoute({
+        observation: observation([route(1, { session: 0.2, week: 0.3, fable: 1 })]),
+        paths: freshPaths(),
+        nowMs: NOW,
+        model,
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.fableIntent).toBe(false);
+    }
+
+    const exhaustedSession = selectClaudeRoute({
+      observation: observation([route(1, { session: 1, week: 0.3, fable: 0.2 })]),
+      paths: freshPaths(),
+      nowMs: NOW,
+      model: "haiku",
+    });
+    expect(exhaustedSession.ok).toBe(false);
+    if (!exhaustedSession.ok) {
+      expect(exhaustedSession.excluded["claude-swap:1"]).toEqual(["session-quota-exhausted"]);
+    }
   });
 
   test("focus on an ineligible target falls back with the fallback reason", () => {

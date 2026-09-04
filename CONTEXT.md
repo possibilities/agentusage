@@ -47,9 +47,10 @@ it for eligibility or headroom. _Avoid_: "reset" alone (confusable with a
 window's scheduled reset).
 
 **Focus** — a durable policy pinning launches to one route. **Fable focus**
-pins launches that consume the Fable-scoped quota: the Fable model and Claude
-1M-context models (`*-1m` / `*[1m]`). **Non-Fable focus** pins everything
-else. An active Fable focus also fences its target out of the non-Fable pool. A
+pins launches of the Fable model, whose quota is additional to Claude's
+session and weekly windows. **Non-Fable focus** pins every other Claude model,
+including Haiku and 1M-context variants. An active Fable focus also fences its
+target out of the non-Fable pool. A
 **provider focus** (`focus claude` / `focus codex`) pins every launch for
 that provider to one account and overrides both intent focuses, fence
 included. Lifetimes: `permanent`, `absolute`, and observed `current-reset` /

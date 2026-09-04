@@ -140,8 +140,7 @@ export function fableUtilization(route: Route): number | null {
 export function isFableRequest(model: string | null | undefined, fableIntent?: boolean | null): boolean {
   if (typeof fableIntent === "boolean") return fableIntent;
   if (typeof model === "string" && model.length > 0) {
-    const normalized = model.trim().toLowerCase();
-    return normalized.includes("fable") || /(?:-1m|\[1m\])$/u.test(normalized);
+    return model.trim().toLowerCase().includes("fable");
   }
   return false;
 }
