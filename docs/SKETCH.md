@@ -72,7 +72,7 @@ remain deliberately out of scope: this command decides but does not launch.
   when piped, `--json` envelope.
 - **Install uses the fleet service convention:** project-owned
   `scripts/install.sh` ships one bun-shim binary, `agentusage`; AgentStart
-  renders and supervises the `agentusage.observer` plist, whose command is
+  renders and supervises the `io.arthack.agentusage.observe` plist, whose command is
   `agentusage daemon run`, with the receipt in
   `~/.local/state/agentusage/` — plus the
   edits wiring it into AgentStart's `install-agent-clis` and the machine's

@@ -13,7 +13,7 @@ the operator and launcher-integration guide.
   temp roots via `AGENTUSAGE_STATE_ROOT`).
 - `bun run typecheck` — `tsc --noEmit`.
 - `bash scripts/install.sh --install` — the `agentusage` binary (idempotent);
-  AgentStart owns the `agentusage.observer` LaunchAgent.
+  AgentStart owns the `io.arthack.agentusage.observe` LaunchAgent.
 - `bash scripts/install-providers.sh` — best-effort cswap installation.
   cswap comes from the cswax workshop (`~/code/cswax`), which
   owns the claude-swap fork; this repository consumes it and never rebases,

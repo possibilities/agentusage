@@ -39,7 +39,7 @@ still reports as trusted.
 ## Install
 
 Via AgentStart (preferred — it installs the command, its provider CLIs, and the
-`agentusage.observer` service):
+`io.arthack.agentusage.observe` service):
 
 ```bash
 ~/code/agentstart/scripts/install.sh --install
@@ -79,7 +79,7 @@ codex-swap auth add       # per Codex account (device auth)
 grok-swap add             # per Grok account (browser OAuth)
 ```
 
-The observer (`agentusage.observer` LaunchAgent, logs at
+The observer (`io.arthack.agentusage.observe` LaunchAgent, logs at
 `~/.local/state/agentusage/observer.log`) starts observing immediately. Until
 accounts exist, every surface renders absent, empty, and stale states honestly.
 

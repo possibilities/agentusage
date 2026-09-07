@@ -27,7 +27,7 @@ STATE_DIR="${AGENTUSAGE_INSTALL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}
 RECEIPT="$STATE_DIR/install-receipt"
 LOG_PATH="$STATE_DIR/observer.log"
 
-# This installer ships the one public binary; the agentusage.observer launch
+# This installer ships the one public binary; the io.arthack.agentusage.observe launch
 # agent belongs to AgentStart, which owns every fleet service
 # (~/code/agentstart/config/launchd/). Installing the service here as well
 # would give one service two owners racing to render it.
@@ -67,5 +67,5 @@ printf 'agentusage-installer-owned:v1\nroot=%s\nbin=%s\nlog=%s\n' \
   "$ROOT" "$BIN_DIR" "$LOG_PATH" >"$RECEIPT"
 chmod 600 "$RECEIPT"
 printf 'installed agentusage commands in %s\n' "$BIN_DIR"
-printf 'the agentusage.observer service is installed by AgentStart: %s\n' \
+printf 'the io.arthack.agentusage.observe service is installed by AgentStart: %s\n' \
   "$HOME/code/agentstart/scripts/install-launchagents --install"
