@@ -1,11 +1,10 @@
 # agentusage
 
-Claude + Codex + Grok account usage observations, balancing, and a usage TUI,
-built on claude-swap (`cswap`, Python/uv), codex-swap (Node), and grok-swap
-(Bun) as the durable per-provider stores. Rebuild of keeper's `usage`
-subsystem for this account;
-`docs/SKETCH.md` is the build contract, `CONTEXT.md` the glossary, `README.md`
-the operator and launcher-integration guide.
+Claude and Codex account ownership, OAuth refresh, observations, balancing,
+and a usage TUI. One existing daemon proxies native sessions; Grok retains its
+subprocess adapter. `docs/ACCOUNT-OWNERSHIP.md` supersedes the Claude/Codex
+ownership sections of `docs/SKETCH.md`; `CONTEXT.md` is the glossary and
+`README.md` the operator and launcher contract.
 
 ## Commands
 
@@ -14,11 +13,6 @@ the operator and launcher-integration guide.
 - `bun run typecheck` — `tsc --noEmit`.
 - `bash scripts/install.sh --install` — the `agentusage` binary (idempotent);
   AgentStart owns the `io.arthack.agentusage.observe` LaunchAgent.
-- `bash scripts/install-providers.sh` — best-effort cswap installation.
-  cswap comes from the cswax workshop (`~/code/cswax`), which
-  owns the claude-swap fork; this repository consumes it and never rebases,
-  publishes, or otherwise maintains that fork. AgentStart invokes codex-swap
-  and grok-swap's own installers directly.
 
 ## Conventions
 
@@ -28,9 +22,11 @@ the operator and launcher-integration guide.
 - Never import `@opentui/core` at module scope — only `await import(...)`
   inside the TUI entry. The platform-native package top-level-awaits and races
   under parallel `bun test`; TUI-loading tests must stay serial.
-- Provider access is subprocess JSON (`cswap list --json`,
-  `codex-swap snapshot --json`, `grok-swap observe --json`), bounded (timeout,
-  output cap), no-shell spawn. Never parse a provider's on-disk store directly.
+- Claude/Codex access uses bounded HTTP against fixed provider origins and the
+  owned account pool. Grok remains subprocess JSON (`grok-swap observe --json`).
+  Never discover or parse legacy swap stores. Credentials never enter logs,
+  argv, result narration, or native homes; launchers transport private prepare
+  JSON and renew opaque leases from their existing process.
 - Sidecars and policy leaves are written atomically (0600 tmp + rename) under
   `~/.local/state/agentusage/`; leaf reads refuse group/other permission bits
   and symlinks.

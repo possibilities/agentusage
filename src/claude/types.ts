@@ -3,12 +3,12 @@
  * so the balance port stays faithful and old tooling can read the file.
  */
 
-export const OBSERVATION_SCHEMA_VERSION = 7;
+export const OBSERVATION_SCHEMA_VERSION = 8;
 
 export interface NormalizedWindow {
   /** "session" | "week" | "spend" | `model:${name}` */
   key: string;
-  /** cswap pct / 100; may exceed 1 when the provider reports over-limit. */
+  /** Provider percent / 100; may exceed 1 when the provider reports over-limit. */
   utilization: number;
   resetsAt: string | null;
 }
@@ -29,7 +29,7 @@ export interface AccountUsageMeasurement {
 export type RouteKind = "managed";
 
 export interface Route {
-  id: string; // `claude-swap:${slot}`
+  id: string; // `claude-${slot}`
   kind: RouteKind;
   slot: number;
   windows: NormalizedWindow[];
@@ -52,7 +52,7 @@ export type AccountObservationIssue =
 
 export interface ClaudeAccountDisplay {
   count: number;
-  /** Managed route id → zero-based position in cswap inventory order. */
+  /** Managed route id → zero-based position in AgentUsage inventory order. */
   ordinals: Record<string, number>;
 }
 
@@ -77,17 +77,17 @@ export const MODEL_WINDOW_PREFIX = "model:";
 export const FABLE_WINDOW_KEY = "model:fable";
 
 export function routeIdForSlot(slot: number): string {
-  return `claude-swap:${slot}`;
+  return `claude-${slot}`;
 }
 
-/** Operator-facing name for a route: `claude-<slot>`, 1-indexed like cswap's own numbering. */
+/** Operator-facing name for a route: `claude-<slot>`, stable and 1-indexed. */
 export function displayNameForRouteId(id: string): string {
   const slot = slotForRouteId(id);
   return slot === null ? id : `claude-${slot}`;
 }
 
 export function slotForRouteId(id: string): number | null {
-  const match = /^claude-swap:([1-9]\d*)$/u.exec(id);
+  const match = /^claude-([1-9]\d*)$/u.exec(id);
   if (match === null) return null;
   const slot = Number(match[1]);
   return Number.isSafeInteger(slot) ? slot : null;

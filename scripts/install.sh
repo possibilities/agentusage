@@ -37,15 +37,6 @@ if (( DRY )); then
   exit 0
 fi
 
-# The directly-owned provider hook (cswap via uv) runs first; best-effort —
-# agentusage renders provider absence honestly rather than failing to install.
-# codex-swap and grok-swap are not here: each ships its own installer, which
-# AgentStart runs.
-if [[ "${AGENTUSAGE_SKIP_PROVIDERS:-0}" != 1 ]]; then
-  bash "$ROOT/scripts/install-providers.sh" || \
-    printf 'install: provider provisioning incomplete (see above); continuing.\n'
-fi
-
 mkdir -p "$BIN_DIR" "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 legacy="$BIN_DIR/agentusaged"

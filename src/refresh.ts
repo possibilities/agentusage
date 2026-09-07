@@ -1,6 +1,4 @@
-import { openSync, closeSync, constants, rmSync, statSync, writeSync } from "node:fs";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { lockFile } from './accounts/storage.ts';
 
 /**
  * Provider-safe refresh: at most one provider subprocess per sidecar at a
@@ -9,7 +7,12 @@ import { dirname } from "node:path";
  * `runProviderSafeRefresh` contract).
  */
 
-export type RefreshOutcome = "already-fresh" | "refreshed" | "peer-published" | "contended" | "provider-failed";
+export type RefreshOutcome =
+  | 'already-fresh'
+  | 'refreshed'
+  | 'peer-published'
+  | 'contended'
+  | 'provider-failed';
 
 export interface RefreshResult<T> {
   outcome: RefreshOutcome;
@@ -29,64 +32,50 @@ export interface RefreshOptions<T> {
   write: (value: T) => void;
   /** How long a contended caller waits for a peer to publish. */
   waitMs: number;
-  /** Locks older than this are presumed abandoned and stolen. */
-  lockStaleMs: number;
   nowMs?: () => number;
   sleep?: (ms: number) => Promise<void>;
 }
 
-function tryAcquireLock(lockPath: string, lockStaleMs: number, nowMs: number): boolean {
-  mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const fd = openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-      try {
-        writeSync(fd, `${process.pid} ${nowMs}\n`);
-      } finally {
-        closeSync(fd);
-      }
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") return false;
-      try {
-        const stat = statSync(lockPath);
-        if (nowMs - stat.mtimeMs <= lockStaleMs) return false;
-        rmSync(lockPath, { force: true });
-      } catch {
-        return false;
-      }
-    }
-  }
-  return false;
-}
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-function releaseLock(lockPath: string): void {
-  rmSync(lockPath, { force: true });
-}
-
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-export async function providerSafeRefresh<T>(options: RefreshOptions<T>): Promise<RefreshResult<T>> {
+export async function providerSafeRefresh<T>(
+  options: RefreshOptions<T>,
+): Promise<RefreshResult<T>> {
   const nowMs = options.nowMs ?? (() => Date.now());
   const sleep = options.sleep ?? defaultSleep;
 
   const initial = options.read();
-  if (initial !== null && nowMs() - options.observedAtMs(initial) <= options.freshWithinMs) {
-    return { outcome: "already-fresh", value: initial };
+  if (
+    initial !== null &&
+    nowMs() - options.observedAtMs(initial) <= options.freshWithinMs
+  ) {
+    return { outcome: 'already-fresh', value: initial };
   }
 
-  if (tryAcquireLock(options.lockPath, options.lockStaleMs, nowMs())) {
+  let release: (() => void) | null = null;
+  try {
+    release = await lockFile(options.lockPath, 0);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !('code' in error) ||
+      error.code !== 'busy'
+    )
+      throw error;
+  }
+  if (release !== null) {
     try {
       let produced: T;
       try {
         produced = await options.produce();
       } catch {
-        return { outcome: "provider-failed", value: initial };
+        return { outcome: 'provider-failed', value: initial };
       }
       options.write(produced);
-      return { outcome: "refreshed", value: produced };
+      return { outcome: 'refreshed', value: produced };
     } finally {
-      releaseLock(options.lockPath);
+      release();
     }
   }
 
@@ -99,7 +88,7 @@ export async function providerSafeRefresh<T>(options: RefreshOptions<T>): Promis
     const observed = options.observedAtMs(current);
     const fresh = nowMs() - observed <= options.freshWithinMs;
     const advanced = baseline === null || observed > baseline;
-    if (fresh || advanced) return { outcome: "peer-published", value: current };
+    if (fresh || advanced) return { outcome: 'peer-published', value: current };
   }
-  return { outcome: "contended", value: options.read() ?? initial };
+  return { outcome: 'contended', value: options.read() ?? initial };
 }

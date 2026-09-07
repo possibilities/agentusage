@@ -11,7 +11,7 @@ function observation(weekUtilization: number, resetsAt: string | null): Observat
     health: "ok",
     routes: [
       {
-        id: "claude-swap:1",
+        id: "claude-1",
         kind: "managed",
         slot: 1,
         measuredAtMs: NOW,
@@ -21,7 +21,7 @@ function observation(weekUtilization: number, resetsAt: string | null): Observat
         ],
       },
     ],
-    claude_accounts: { count: 1, ordinals: { "claude-swap:1": 0 } },
+    claude_accounts: { count: 1, ordinals: { "claude-1": 0 } },
     account_issues: {},
     notes: [],
   };
@@ -42,10 +42,10 @@ describe("weeklyResetWakeDelayMs", () => {
     const base = observation(0.1, null);
     const withIssue: Observation = {
       ...base,
-      account_issues: { "claude-swap:2": "token-expired" },
-      claude_accounts: { count: 2, ordinals: { "claude-swap:1": 0, "claude-swap:2": 1 } },
+      account_issues: { "claude-2": "token-expired" },
+      claude_accounts: { count: 2, ordinals: { "claude-1": 0, "claude-2": 1 } },
       account_measurements: {
-        "claude-swap:2": {
+        "claude-2": {
           measuredAtMs: NOW,
           windows: [{ key: "week", utilization: 1.2, resetsAt: new Date(NOW + 60_000).toISOString() }],
         },

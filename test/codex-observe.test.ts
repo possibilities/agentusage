@@ -3,7 +3,7 @@ import { buildCodexObservation, groupLanes } from "../src/codex/observe.ts";
 import { laneHeadroomPercent, SPARK_LANE_ID, sparkLane, validateCodexObservation } from "../src/codex/types.ts";
 import { selectCodexSpark } from "../src/balance/codex.ts";
 
-const NOW = Date.parse("2026-08-08T20:00:00Z");
+import { managed } from "./managed-fixtures.ts";
 
 function sparkWindows(): unknown[] {
   return [
@@ -14,91 +14,6 @@ function sparkWindows(): unknown[] {
     { kind: "code_review", label: "weekly", windowSeconds: 604800, usedPercent: 2, remainingPercent: 98, resetsAt: null, resetAfterSeconds: null, limitName: null, meteredFeature: null },
     { kind: "other", label: "daily", windowSeconds: 86400, usedPercent: 1, remainingPercent: 99, resetsAt: null, resetAfterSeconds: null, limitName: null, meteredFeature: null },
   ];
-}
-
-function snapshotEnvelope(): unknown {
-  return {
-    schemaVersion: 1,
-    command: "snapshot",
-    generatedAt: "2026-08-08T20:00:00Z",
-    error: null,
-    data: {
-      schemaVersion: 1,
-      dependency: { name: "codex-multi-auth", version: "2.8.3", healthy: true },
-      canonicalCodexHome: "/tmp/x",
-      recommendation: { accountKey: "account:abc" },
-      accounts: [
-        {
-          accountKey: "account:abc",
-          providerAccountId: "abc",
-          email: "codex@example.com",
-          label: "primary",
-          enabled: true,
-          present: true,
-          ndyIndex: 1,
-          auth: { status: "ok", reloginRequired: false },
-          identityConflict: false,
-          policy: { manuallyDisabled: false, priority: 0, weight: 1, maxConcurrent: null },
-          usage: {
-            status: "ok",
-            decisionGrade: true,
-            measurement: {
-              schemaVersion: 1,
-              probeKind: "direct-wham",
-              planType: "plus",
-              limitReached: false,
-              resetCreditsAvailable: 1,
-              resetCreditExpirations: ["2026-09-08T12:00:00.000Z", null],
-              windows: sparkWindows(),
-              fetchedAt: "2026-08-08T19:59:00Z",
-            },
-            fetchedAt: "2026-08-08T19:59:00Z",
-            ageSeconds: 60,
-            nextPollAt: "2026-08-08T20:03:00Z",
-            pollIntervalMs: 240000,
-            lastError: null,
-          },
-          lastGoodUsage: null,
-          selection: { eligible: true, exclusions: [], headroomPercent: 45, activeLeases: 2 },
-        },
-        {
-          accountKey: "account:stale",
-          email: "stale@example.com",
-          label: null,
-          enabled: true,
-          present: true,
-          ndyIndex: 2,
-          auth: { status: "ok", reloginRequired: false },
-          identityConflict: false,
-          policy: { manuallyDisabled: false, priority: 0, weight: 1, maxConcurrent: null },
-          usage: {
-            status: "stale",
-            decisionGrade: false,
-            measurement: null,
-            fetchedAt: null,
-            ageSeconds: null,
-            nextPollAt: null,
-            pollIntervalMs: null,
-            lastError: { code: "http_429", httpStatus: 429, summary: "rate limited", at: "2026-08-08T19:00:00Z" },
-          },
-          lastGoodUsage: {
-            measurement: {
-              schemaVersion: 1,
-              probeKind: "direct-wham",
-              resetCreditsAvailable: 3,
-              windows: [
-                { kind: "primary", label: "5h", windowSeconds: 18000, usedPercent: 100, remainingPercent: 0, resetsAt: "2026-08-08T21:30:00Z", resetAfterSeconds: null, limitName: null, meteredFeature: null },
-              ],
-              fetchedAt: "2026-08-08T18:00:00Z",
-            },
-            fetchedAt: "2026-08-08T18:00:00Z",
-            ageSeconds: 7200,
-          },
-          selection: { eligible: false, exclusions: ["quota_exhausted"], headroomPercent: 0, activeLeases: 0 },
-        },
-      ],
-    },
-  };
 }
 
 describe("groupLanes", () => {
@@ -138,75 +53,81 @@ describe("groupLanes", () => {
   });
 });
 
-describe("buildCodexObservation", () => {
-  test("maps accounts, lanes, recommendation, and last-good fallback", () => {
-    const observation = buildCodexObservation(snapshotEnvelope(), NOW);
-    expect(observation.health).toBe("ok");
+describe("owned Codex observations", () => {
+  test("normalizes native usage, leases, stable identities and reset credits", () => {
+    const a = managed();
+    a.usage!.value.rate_limit_reset_credit_details = { available_count: 2, credits: [{ expires_at: "2026-10-08T12:00:00.000Z" }, { expires_at: null }] };
+    const observation = buildCodexObservation([a], Date.now(), new Map([[a.key, 2]]));
     expect(validateCodexObservation(observation)).not.toBeNull();
-    expect(observation.recommendation).toEqual({ accountKey: "account:abc" });
-    expect(observation.dependency?.healthy).toBe(true);
-
-    const primary = observation.accounts[0]!;
-    expect(primary.measurementSource).toBe("current");
-    expect(primary.planType).toBe("plus");
-    expect(primary.resetCreditsAvailable).toBe(1);
-    expect(primary.resetCreditExpirations).toEqual(["2026-09-08T12:00:00.000Z", null]);
-    expect(primary.activeLeases).toBe(2);
-    expect(sparkLane(primary)).not.toBeNull();
-    expect(primary.measuredAtMs).toBe(Date.parse("2026-08-08T19:59:00Z"));
-
-    const stale = observation.accounts[1]!;
-    expect(stale.measurementSource).toBe("last-good");
-    expect(stale.resetCreditsAvailable).toBe(3);
-    expect(stale.usageStatus).toBe("stale");
-    expect(stale.decisionGrade).toBe(false);
-    expect(stale.exclusions).toEqual(["quota_exhausted"]);
-    expect(stale.lanes[0]!.windows[0]!.usedPercent).toBe(100);
-    expect(stale.lastError?.code).toBe("http_429");
+    const view = observation.accounts[0]!;
+    expect(view).toMatchObject({ accountKey: "codex-1", activeLeases: 2, decisionGrade: true, planType: "plus", resetCreditsAvailable: 2, resetCreditExpirations: ["2026-10-08T12:00:00.000Z", null] });
+    expect(sparkLane(view)?.windows).toHaveLength(2);
+    expect(selectCodexSpark(observation).ok).toBe(true);
   });
-
-  test("error envelopes and unsupported schemas degrade to health", () => {
-    expect(
-      buildCodexObservation({ schemaVersion: 1, command: "snapshot", error: { code: "ndy_unsupported" }, data: null }, NOW)
-        .health,
-    ).toBe("error");
-    expect(buildCodexObservation({ schemaVersion: 9, data: {} }, NOW).health).toBe("unsupported");
-    expect(buildCodexObservation({ schemaVersion: 1, data: { schemaVersion: 2 } }, NOW).health).toBe("unsupported");
-    expect(buildCodexObservation(null, NOW).health).toBe("malformed");
+  test("failed usage preserves last-good display and refuses both lanes", () => {
+    const a = managed("codex", 1, { usage_error: { code: "http-429", status: 429 } });
+    const observation = buildCodexObservation([a], Date.now());
+    expect(observation.accounts[0]).toMatchObject({ measurementSource: "last-good", decisionGrade: false, usageStatus: "error" });
+    expect(observation.accounts[0]!.lanes).toHaveLength(2);
+    expect(selectCodexSpark(observation).ok).toBe(false);
   });
-
-  test("empty pool is healthy with zero accounts", () => {
-    const envelope = snapshotEnvelope() as { data: { accounts: unknown[] } };
-    envelope.data.accounts = [];
-    const observation = buildCodexObservation(envelope, NOW);
-    expect(observation.health).toBe("ok");
-    expect(observation.accounts).toHaveLength(0);
-  });
-
-  test("rejects malformed reset-credit counts in sidecars", () => {
-    const observation = buildCodexObservation(snapshotEnvelope(), NOW);
+  test("malformed credit fields are rejected by sidecar validator", () => {
+    const observation = buildCodexObservation([managed()], Date.now());
     observation.accounts[0]!.resetCreditsAvailable = -1;
     expect(validateCodexObservation(observation)).toBeNull();
-  });
-
-  test("rejects malformed reset-credit expiries in sidecars", () => {
-    const observation = buildCodexObservation(snapshotEnvelope(), NOW);
-    observation.accounts[0]!.resetCreditExpirations = ["not-a-date"];
+    observation.accounts[0]!.resetCreditsAvailable = 1;
+    observation.accounts[0]!.resetCreditExpirations = ["nope"];
     expect(validateCodexObservation(observation)).toBeNull();
   });
-
-  test("production-shaped spark windows let selectCodexSpark find headroom instead of refusing", () => {
-    const envelope = snapshotEnvelope() as {
-      data: { accounts: Array<{ usage: { measurement: { windows: unknown[] } } }> };
-    };
-    envelope.data.accounts[0]!.usage.measurement.windows = [
-      { kind: "primary", label: "5h", windowSeconds: 18000, usedPercent: 30, remainingPercent: 70, resetsAt: "2026-08-08T22:00:00Z", resetAfterSeconds: 7200, limitName: null, meteredFeature: null },
-      { kind: "other", label: "5h", windowSeconds: 18000, usedPercent: 8, remainingPercent: 92, resetsAt: "2026-08-08T23:00:00Z", resetAfterSeconds: null, limitName: "GPT-5.3-Codex-Spark", meteredFeature: "codex_bengalfox" },
-      { kind: "other", label: "weekly", windowSeconds: 604800, usedPercent: 10, remainingPercent: 90, resetsAt: "2026-08-13T00:00:00Z", resetAfterSeconds: null, limitName: "GPT-5.3-Codex-Spark", meteredFeature: "codex_bengalfox" },
-    ];
-    const observation = buildCodexObservation(envelope, NOW);
-    expect(sparkLane(observation.accounts[0]!)).not.toBeNull();
-    const result = selectCodexSpark(observation, NOW);
-    expect(result.ok).toBe(true);
+  test("weekly-only main limits accept a null or omitted secondary window", () => {
+    for (const secondary of [null, undefined]) {
+      const a = managed();
+      a.usage!.value = {
+        plan_type: "pro",
+        rate_limit: {
+          allowed: true,
+          limit_reached: false,
+          primary_window: { used_percent: 14, limit_window_seconds: 604800 },
+          secondary_window: secondary,
+        },
+      };
+      const observation = buildCodexObservation([a], Date.now());
+      expect(validateCodexObservation(observation)).not.toBeNull();
+      expect(observation.accounts[0]).toMatchObject({
+        decisionGrade: true, eligible: true, headroomPercent: 86,
+        lanes: [{ id: "main", windows: [{ role: "primary", label: "weekly" }] }],
+      });
+    }
+  });
+  test("a present malformed binding window never grants main capacity", () => {
+    for (const role of ["primary_window", "secondary_window"]) {
+      for (const window of [{}, [], "invalid", { used_percent: "14" }, { used_percent: -1 }, { used_percent: NaN }]) {
+        const a = managed();
+        (a.usage!.value.rate_limit as Record<string, unknown>)[role] = window;
+        expect(buildCodexObservation([a], Date.now()).accounts[0]).toMatchObject({
+          decisionGrade: false, eligible: false, headroomPercent: null,
+        });
+      }
+    }
+  });
+  test("weekly-only limits still refuse exhausted capacity and explicit limit rejection", () => {
+    for (const [used, limitReached] of [[100, false], [14, true]] as const) {
+      const a = managed();
+      a.usage!.value.rate_limit = {
+        primary_window: { used_percent: used, limit_window_seconds: 604800 },
+        secondary_window: null,
+        limit_reached: limitReached,
+      };
+      expect(buildCodexObservation([a], Date.now()).accounts[0]).toMatchObject({
+        decisionGrade: true, eligible: false, exclusions: ["quota_exhausted"],
+      });
+    }
+  });
+  test("missing required primary windows are not decision-grade; expired samples are stale", () => {
+    const a = managed(); delete (a.usage!.value.rate_limit as Record<string, unknown>).primary_window;
+    const b = managed("codex", 2); b.usage!.measured_at_ms -= 600_000;
+    const observation = buildCodexObservation([a, b], Date.now());
+    expect(observation.accounts.map(a => a.decisionGrade)).toEqual([false, false]);
+    expect(observation.accounts[1]!.usageStatus).toBe("stale");
   });
 });

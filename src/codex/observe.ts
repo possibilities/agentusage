@@ -1,20 +1,9 @@
-import { MAX_OUTPUT_BYTES } from "../constants.ts";
-import { codexSwapArgv } from "../paths.ts";
-import { runBounded } from "../proc.ts";
-import {
-  CODEX_OBSERVATION_SCHEMA_VERSION,
-  type CodexAccountView,
-  type CodexLane,
-  type CodexLaneWindow,
-  type CodexObservation,
-  type CodexUsageStatus,
-  type CodexWindowRole,
-  MAIN_LANE_ID,
-  SPARK_LANE_ID,
-} from "./types.ts";
-
-/** snapshot's fetch pass touches the network (bounded to ~2 accounts). */
-const SNAPSHOT_TIMEOUT_MS = 60_000;
+import { statePaths } from "../paths.ts";
+import { readPool, type ManagedAccount } from "../accounts/store.ts";
+import { record } from "../accounts/storage.ts";
+import { refreshUsage } from "../accounts/usage.ts";
+import { activeCounts, readLeases } from "../service/leases.ts";
+import { CODEX_OBSERVATION_SCHEMA_VERSION, type CodexAccountView, type CodexLane, type CodexLaneWindow, type CodexObservation, type CodexWindowRole, MAIN_LANE_ID, SPARK_LANE_ID, laneHeadroomPercent } from "./types.ts";
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
@@ -84,7 +73,7 @@ function toLaneWindow(window: WireWindow): CodexLaneWindow {
 
 /**
  * Groups measurement windows into lanes. Identity comes from the lane fields
- * codex-swap passes through verbatim; spark detection is the CodexBar
+ * the provider reports; spark detection is the CodexBar
  * convention (lowercased substring "spark") so label drift keeps matching.
  */
 export function groupLanes(windows: readonly unknown[]): CodexLane[] {
@@ -127,203 +116,66 @@ export function groupLanes(windows: readonly unknown[]): CodexLane[] {
   return lanes;
 }
 
-const USAGE_STATUSES: readonly CodexUsageStatus[] = ["ok", "stale", "unknown", "error", "backoff", "quarantined"];
 
-function parseAccount(value: unknown, notes: string[]): CodexAccountView | null {
-  if (typeof value !== "object" || value === null) {
-    notes.push("dropped a non-object codex account row");
-    return null;
-  }
-  const row = value as Record<string, unknown>;
-  const accountKey = stringOrNull(row.accountKey);
-  if (accountKey === null) {
-    notes.push("dropped a codex account row without accountKey");
-    return null;
-  }
-  const auth = (typeof row.auth === "object" && row.auth !== null ? row.auth : {}) as Record<string, unknown>;
-  const policy = (typeof row.policy === "object" && row.policy !== null ? row.policy : {}) as Record<string, unknown>;
-  const usage = (typeof row.usage === "object" && row.usage !== null ? row.usage : {}) as Record<string, unknown>;
-  const selection = (typeof row.selection === "object" && row.selection !== null ? row.selection : {}) as Record<
-    string,
-    unknown
-  >;
-
-  const usageStatus = USAGE_STATUSES.includes(usage.status as CodexUsageStatus)
-    ? (usage.status as CodexUsageStatus)
-    : "unknown";
-
-  let measurement = usage.measurement;
-  let measurementSource: "current" | "last-good" | null = measurement != null ? "current" : null;
-  let measuredAtIso = measurementSource === "current" ? stringOrNull(usage.fetchedAt) : null;
-  if (measurement == null) {
-    const lastGood = row.lastGoodUsage;
-    if (typeof lastGood === "object" && lastGood !== null) {
-      measurement = (lastGood as Record<string, unknown>).measurement;
-      if (measurement != null) {
-        measurementSource = "last-good";
-        measuredAtIso = stringOrNull((lastGood as Record<string, unknown>).fetchedAt);
-      }
-    }
-  }
-  const measurementRecord = (
-    typeof measurement === "object" && measurement !== null ? measurement : {}
-  ) as Record<string, unknown>;
-  const windows = Array.isArray(measurementRecord.windows) ? measurementRecord.windows : [];
-  const resetCreditExpirations = Array.isArray(measurementRecord.resetCreditExpirations)
-    ? measurementRecord.resetCreditExpirations.filter(
-        (expiry): expiry is string | null =>
-          expiry === null || (typeof expiry === "string" && Number.isFinite(Date.parse(expiry))),
-      )
-    : undefined;
-  const measuredAtMs = measuredAtIso !== null && Number.isFinite(Date.parse(measuredAtIso)) ? Date.parse(measuredAtIso) : null;
-
-  const lastErrorRaw = usage.lastError;
-  const lastError =
-    typeof lastErrorRaw === "object" && lastErrorRaw !== null
-      ? {
-          code: stringOrNull((lastErrorRaw as Record<string, unknown>).code) ?? "unknown",
-          httpStatus: finiteOrNull((lastErrorRaw as Record<string, unknown>).httpStatus),
-          summary: stringOrNull((lastErrorRaw as Record<string, unknown>).summary),
-        }
-      : null;
-
-  return {
-    accountKey,
-    email: stringOrNull(row.email),
-    label: stringOrNull(row.label),
-    ndyIndex: finiteOrNull(row.ndyIndex),
-    enabled: row.enabled === true,
-    present: row.present === true,
-    authStatus: stringOrNull(auth.status) ?? "unknown",
-    reloginRequired: auth.reloginRequired === true,
-    identityConflict: row.identityConflict === true,
-    manuallyDisabled: policy.manuallyDisabled === true,
-    usageStatus,
-    decisionGrade: usage.decisionGrade === true,
-    planType: stringOrNull(measurementRecord.planType),
-    limitReached: typeof measurementRecord.limitReached === "boolean" ? measurementRecord.limitReached : null,
-    resetCreditsAvailable: nonNegativeIntegerOrNull(measurementRecord.resetCreditsAvailable),
-    ...(resetCreditExpirations !== undefined ? { resetCreditExpirations } : {}),
-    measurementSource: measurementSource !== null && windows.length >= 0 ? measurementSource : null,
-    measuredAtMs,
-    lanes: measurementSource === null ? [] : groupLanes(windows),
-    eligible: selection.eligible === true,
-    exclusions: Array.isArray(selection.exclusions)
-      ? selection.exclusions.filter((entry): entry is string => typeof entry === "string")
-      : [],
-    headroomPercent: finiteOrNull(selection.headroomPercent),
-    activeLeases: finiteOrNull(selection.activeLeases) ?? 0,
-    nextPollAt: stringOrNull(usage.nextPollAt),
-    lastError,
-  };
+export function parseCodexUsage(value:unknown,measuredAtMs:number):{lanes:CodexLane[];planType:string|null;limitReached:boolean|null;resetCreditsAvailable:number|null;resetCreditExpirations?:Array<string|null>}{
+ const raw=record(value)??{};
+ const windows:unknown[]=[];
+ const append=(input:unknown,kind:CodexWindowRole,lane?:Record<string,unknown>)=>{
+  const w=record(input);if(!w||typeof w.used_percent!=='number'||!Number.isFinite(w.used_percent)||w.used_percent<0)return;
+  const seconds=finiteOrNull(w.limit_window_seconds);
+  const after=finiteOrNull(w.reset_after_seconds);
+  let resetMs=typeof w.reset_at==='number'?w.reset_at*1000:null;
+  if(resetMs===null||!Number.isFinite(resetMs)||resetMs<=0||resetMs>measuredAtMs+2*365*86400_000)resetMs=after!==null&&after>=0&&after<2*365*86400?measuredAtMs+after*1000:null;
+  windows.push({kind,label:seconds===18000?'5h':seconds===604800?'weekly':seconds===86400?'daily':seconds?`${seconds}s`:'window',windowSeconds:seconds,usedPercent:w.used_percent,remainingPercent:Math.max(0,100-w.used_percent),resetsAt:resetMs===null?null:new Date(resetMs).toISOString(),resetAfterSeconds:after,limitName:lane?.limit_name,meteredFeature:lane?.metered_feature});
+ };
+ const main=record(raw.rate_limit);
+ append(main?.primary_window,'primary');append(main?.secondary_window,'secondary');
+ const review=record(raw.code_review_rate_limit);append(review?.primary_window,'code_review');append(review?.secondary_window,'code_review');
+ for(const candidate of Array.isArray(raw.additional_rate_limits)?raw.additional_rate_limits:[]){
+  const lane=record(candidate);if(!lane)continue;const limits=record(lane.rate_limit);const feature=String(lane.metered_feature??lane.limit_name??'').toLowerCase();const kind=feature.includes('code_review')||feature.includes('code-review')?'code_review':'other';
+  // Do not silently select a partially malformed two-window lane.
+  const first=record(limits?.primary_window),second=record(limits?.secondary_window);
+  if((first&&typeof first.used_percent!=='number')||(second&&typeof second.used_percent!=='number'))continue;
+  append(first,kind,lane);append(second,kind,lane);
+ }
+ const credits=record(raw.rate_limit_reset_credit_details)??record(raw.rate_limit_reset_credits);
+ const expirations=Array.isArray(credits?.credits)?credits.credits.map(c=>record(c)?.expires_at):undefined;
+ const validExpirations=expirations?.every(x=>x==null||(typeof x==='string'&&Number.isFinite(Date.parse(x))));
+ return {lanes:groupLanes(windows),planType:stringOrNull(raw.plan_type),limitReached:typeof main?.limit_reached==='boolean'?main.limit_reached:null,resetCreditsAvailable:nonNegativeIntegerOrNull(credits?.available_count),...(validExpirations?{resetCreditExpirations:expirations!.map(x=>x==null?null:new Date(x as string).toISOString())}:{})};
 }
 
-function emptyCodexObservation(nowMs: number, health: CodexObservation["health"], notes: string[]): CodexObservation {
-  return {
-    schema_version: CODEX_OBSERVATION_SCHEMA_VERSION,
-    observed_at_ms: nowMs,
-    health,
-    dependency: null,
-    recommendation: null,
-    accounts: [],
-    notes,
-  };
+/** Native plans can report one weekly primary window and no secondary window. */
+export function hasCodexBindingWindows(
+  value: unknown,
+  lanes: readonly CodexLane[],
+): boolean {
+  const limits = record(record(value)?.rate_limit);
+  const main = lanes.find((lane) => lane.id === MAIN_LANE_ID);
+  if (!limits || !main?.windows.some((window) => window.role === "primary"))
+    return false;
+  // Missing/null is optional; a present malformed window must still fail closed.
+  return limits.secondary_window == null ||
+    main.windows.some((window) => window.role === "secondary");
 }
 
-/** Builds the codex observation from a parsed `codex-swap snapshot --json` envelope. */
-export function buildCodexObservation(envelope: unknown, nowMs: number): CodexObservation {
-  if (typeof envelope !== "object" || envelope === null) {
-    return emptyCodexObservation(nowMs, "malformed", ["codex-swap envelope is not an object"]);
-  }
-  const root = envelope as Record<string, unknown>;
-  if (root.schemaVersion !== 1) {
-    return emptyCodexObservation(nowMs, "unsupported", [`codex-swap envelope schemaVersion ${String(root.schemaVersion)}`]);
-  }
-  if (root.error != null) {
-    const error = root.error as Record<string, unknown>;
-    const code = stringOrNull(error.code) ?? "unknown";
-    const summary = stringOrNull(error.summary) ?? stringOrNull(error.message) ?? "";
-    return emptyCodexObservation(nowMs, "error", [`codex-swap snapshot error ${code}${summary ? `: ${summary}` : ""}`]);
-  }
-  const data = root.data;
-  if (typeof data !== "object" || data === null) {
-    return emptyCodexObservation(nowMs, "malformed", ["codex-swap envelope has no data"]);
-  }
-  const snapshot = data as Record<string, unknown>;
-  if (snapshot.schemaVersion !== 1) {
-    return emptyCodexObservation(nowMs, "unsupported", [`codex-swap snapshot schemaVersion ${String(snapshot.schemaVersion)}`]);
-  }
-
-  const notes: string[] = [];
-  const accounts: CodexAccountView[] = [];
-  if (Array.isArray(snapshot.accounts)) {
-    for (const row of snapshot.accounts) {
-      const account = parseAccount(row, notes);
-      if (account !== null) accounts.push(account);
-    }
-  } else {
-    notes.push("codex-swap snapshot has no accounts array");
-  }
-
-  const dependencyRaw = snapshot.dependency;
-  const dependency =
-    typeof dependencyRaw === "object" && dependencyRaw !== null
-      ? {
-          name: stringOrNull((dependencyRaw as Record<string, unknown>).name) ?? "codex-multi-auth",
-          version: stringOrNull((dependencyRaw as Record<string, unknown>).version),
-          healthy: (dependencyRaw as Record<string, unknown>).healthy === true,
-        }
-      : null;
-
-  const recommendationRaw = snapshot.recommendation;
-  const recommendationKey =
-    typeof recommendationRaw === "object" && recommendationRaw !== null
-      ? stringOrNull((recommendationRaw as Record<string, unknown>).accountKey)
-      : null;
-
-  return {
-    schema_version: CODEX_OBSERVATION_SCHEMA_VERSION,
-    observed_at_ms: nowMs,
-    health: "ok",
-    dependency,
-    recommendation: recommendationKey === null ? null : { accountKey: recommendationKey },
-    accounts,
-    notes,
-  };
+export function buildCodexObservation(accounts:readonly ManagedAccount[],nowMs:number,counts:Map<string,number>=new Map()):CodexObservation{
+ const views:CodexAccountView[]=accounts.filter(a=>a.provider==='codex').map(a=>{
+  const data=parseCodexUsage(a.usage?.value,a.usage?.measured_at_ms??nowMs);
+  const main=data.lanes.find(l=>l.id==='main');
+  const complete=hasCodexBindingWindows(a.usage?.value,data.lanes);
+  const fresh=a.usage!==null&&a.usage.measured_at_ms<=nowMs+1000&&nowMs-a.usage.measured_at_ms<=300_000;
+  const healthy=a.enabled&&a.auth_error===null;
+  const trusted=!!complete&&fresh&&a.usage_error===null;
+  const headroom=trusted&&main?laneHeadroomPercent(main):null;
+  const exclusions:string[]=[];
+  if(!a.enabled)exclusions.push('manually_disabled');if(a.auth_error)exclusions.push('relogin_required');if(!trusted)exclusions.push('usage_unknown');if(data.limitReached||headroom===0)exclusions.push('quota_exhausted');
+  return {accountKey:a.key,providerAccountId:a.account_id,email:a.email,label:a.label,ordinal:a.ordinal-1,enabled:a.enabled,present:true,authStatus:a.auth_error??'ok',reloginRequired:a.auth_error!==null,identityConflict:a.auth_error==='identity-mismatch',manuallyDisabled:!a.enabled,usageStatus:a.auth_error?'quarantined':a.usage_error?'error':!a.usage?'unknown':fresh?'ok':'stale',decisionGrade:trusted,...data,measurementSource:a.usage?(fresh&&a.usage_error===null?'current':'last-good'):null,measuredAtMs:a.usage?.measured_at_ms??null,eligible:healthy&&trusted&&headroom!==null&&headroom>0&&!data.limitReached,exclusions,headroomPercent:headroom,activeLeases:counts.get(a.key)??0,quotaBlockedUntilMs:a.quota_blocks,nextPollAt:new Date(a.next_poll_at_ms).toISOString(),lastError:a.usage_error?{code:a.usage_error.code,httpStatus:a.usage_error.status,summary:null}:null};
+ });
+ return {schema_version:CODEX_OBSERVATION_SCHEMA_VERSION,observed_at_ms:nowMs,health:'ok',dependency:null,recommendation:null,accounts:views,notes:[]};
 }
-
-export interface ObserveCodexOptions {
-  env?: Record<string, string | undefined>;
-  /** Serve stored state only — no network fetch (TUI/status refreshes). */
-  noFetch?: boolean;
-}
-
-export async function observeCodex(options: ObserveCodexOptions = {}): Promise<CodexObservation> {
-  const nowMs = Date.now();
-  const env = options.env ?? process.env;
-  const argv = [...codexSwapArgv(env), "snapshot", "--json"];
-  if (options.noFetch === true) argv.push("--no-fetch");
-  const run = await runBounded(argv, { timeoutMs: SNAPSHOT_TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES });
-  if (run.error === "spawn-failed") {
-    return emptyCodexObservation(nowMs, run.enoent ? "absent" : "error", [
-      run.enoent ? `codex-swap binary not found (${argv[0]})` : "codex-swap spawn failed",
-    ]);
-  }
-  if (run.error === "timeout") return emptyCodexObservation(nowMs, "error", ["codex-swap snapshot timed out"]);
-  if (run.error === "output-cap") return emptyCodexObservation(nowMs, "error", ["codex-swap snapshot output exceeded cap"]);
-  let payload: unknown = null;
-  if (run.stdout.trim().length > 0) {
-    try {
-      payload = JSON.parse(run.stdout);
-    } catch {
-      return emptyCodexObservation(nowMs, "malformed", ["codex-swap snapshot emitted invalid JSON"]);
-    }
-  }
-  if (run.code !== 0 && payload === null) {
-    const detail = run.stderr.trim().split("\n").at(-1) ?? "";
-    return emptyCodexObservation(nowMs, "error", [
-      `codex-swap snapshot exited ${run.code}${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-    ]);
-  }
-  return buildCodexObservation(payload, nowMs);
+export interface ObserveCodexOptions{env?:Record<string,string|undefined>;noFetch?:boolean}
+export async function observeCodex(options:ObserveCodexOptions={}):Promise<CodexObservation>{
+ const env=options.env??process.env,paths=statePaths(env);
+ const accounts=options.noFetch?readPool(paths).accounts:await refreshUsage(paths,'codex',env);
+ return buildCodexObservation(accounts,Date.now(),activeCounts(readLeases(paths)));
 }

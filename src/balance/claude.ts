@@ -30,7 +30,7 @@ import {
   readFocusLeaf,
   readFullFocusLeaf,
 } from "../focus.ts";
-import { acquirePathLock, releasePathLock } from "./lock.ts";
+import { tryLockFile } from "../accounts/storage.ts";
 
 /**
  * Keeper's Claude account selection, ported: eligibility gate, Fable
@@ -96,7 +96,7 @@ export interface ClaudeSelectionSuccess {
   route: Route;
   /** Operator-facing `claude-<slot>` name for the chosen route. */
   display_name: string;
-  /** Zero-based position in cswap inventory order; bookkeeping, not display. */
+  /** Zero-based position in the stable account order; bookkeeping, not display. */
   ordinal: number | null;
   reason: SelectionReason;
   fableIntent: boolean;
@@ -354,13 +354,13 @@ export interface SelectClaudeOptions {
 
 export function resolveRouteRef(observation: Observation, ref: string): string | null {
   // `claude-<slot>` is the display name; it names the slot directly, so an
-  // account cswap knows about resolves whether or not it is launch-eligible.
+  // managed account resolves whether or not it is launch-eligible.
   const nameMatch = /^claude-([1-9]\d*)$/u.exec(ref);
   if (nameMatch !== null) {
     const id = routeIdForSlot(Number(nameMatch[1]));
     return id in observation.claude_accounts.ordinals ? id : null;
   }
-  return /^claude-swap:[1-9]\d*$/u.test(ref) ? ref : null;
+  return /^claude-[1-9]\d*$/u.test(ref) ? ref : null;
 }
 
 export function selectClaudeRoute(options: SelectClaudeOptions): ClaudeSelection {
@@ -428,7 +428,7 @@ export function selectClaudeRoute(options: SelectClaudeOptions): ClaudeSelection
 
   const focusViews = readFocusViews(options.paths, observation, nowMs, intent);
 
-  const locked = acquirePathLock(options.paths.reservationsLock, { staleMs: 5_000, waitMs: 2_000 });
+  const release = options.dryRun ? () => {} : tryLockFile(options.paths.reservationsLock);
   try {
     const ledger = pruneLedger(loadLedger(options.paths.reservations), nowMs);
 
@@ -504,6 +504,6 @@ export function selectClaudeRoute(options: SelectClaudeOptions): ClaudeSelection
     if (avoided) return finish(chosen, "fable-focus-avoided", ledger, pool);
     return finish(chosen, candidates.length === 1 ? "sole-candidate" : "selected", ledger, pool);
   } finally {
-    if (locked) releasePathLock(options.paths.reservationsLock);
+    release();
   }
 }

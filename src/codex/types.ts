@@ -1,13 +1,8 @@
 import type { ObservationHealth } from "../claude/types.ts";
 
-/**
- * Codex observation sidecar (agentusage schema v1), built from codex-swap's
- * `snapshot --json` contract (pinned at codex-swap b427534). Windows are
- * regrouped into lanes so independent quota
- * pools — most importantly gpt-5.3-codex-spark — render and balance as units.
- */
+/** AgentUsage-owned Codex observation, with independent quota lanes. */
 
-export const CODEX_OBSERVATION_SCHEMA_VERSION = 1;
+export const CODEX_OBSERVATION_SCHEMA_VERSION = 2;
 
 export type CodexWindowRole = "primary" | "secondary" | "code_review" | "other";
 
@@ -40,9 +35,11 @@ export type CodexUsageStatus = "ok" | "stale" | "unknown" | "error" | "backoff" 
 
 export interface CodexAccountView {
   accountKey: string;
+  /** Native workspace/account identity, exposed for unambiguous pins. */
+  providerAccountId?: string;
   email: string | null;
   label: string | null;
-  ndyIndex: number | null;
+  ordinal: number | null;
   enabled: boolean;
   present: boolean;
   authStatus: string;
@@ -65,6 +62,7 @@ export interface CodexAccountView {
   exclusions: string[];
   headroomPercent: number | null;
   activeLeases: number;
+  quotaBlockedUntilMs?: Record<string, number>;
   nextPollAt: string | null;
   lastError: { code: string; httpStatus: number | null; summary: string | null } | null;
 }
@@ -84,8 +82,8 @@ export function isSparkLane(lane: CodexLane): boolean {
 }
 
 /**
- * A lane's usable headroom is bounded by its tightest window (both the 5-hour
- * and weekly windows must have room), mirroring binding-window semantics.
+ * A lane's usable headroom is bounded by its tightest reported window.
+ * Plans can have a single weekly window or several binding windows.
  */
 export function laneHeadroomPercent(lane: CodexLane): number | null {
   if (lane.windows.length === 0) return null;
@@ -137,6 +135,7 @@ export function validateCodexObservation(value: unknown): CodexObservation | nul
     if (typeof candidate !== "object" || candidate === null) return null;
     const account = candidate as Record<string, unknown>;
     if (typeof account.accountKey !== "string" || account.accountKey.length === 0) return null;
+    if (account.providerAccountId !== undefined && (typeof account.providerAccountId !== "string" || account.providerAccountId.length === 0)) return null;
     if (!USAGE_STATUSES.includes(account.usageStatus as CodexUsageStatus)) return null;
     if (!Array.isArray(account.lanes)) return null;
     for (const lane of account.lanes) {
@@ -150,6 +149,7 @@ export function validateCodexObservation(value: unknown): CodexObservation | nul
       return null;
     }
     const resetCreditsAvailable = account.resetCreditsAvailable;
+    if (account.quotaBlockedUntilMs !== undefined && (typeof account.quotaBlockedUntilMs !== 'object' || account.quotaBlockedUntilMs === null || Array.isArray(account.quotaBlockedUntilMs) || Object.values(account.quotaBlockedUntilMs).some(x => typeof x !== 'number' || !Number.isFinite(x) || x < 0))) return null;
     if (
       resetCreditsAvailable !== undefined &&
       resetCreditsAvailable !== null &&

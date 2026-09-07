@@ -36,10 +36,9 @@ export async function refreshClaudeObservation(
     read: () => readClaudeObservation(paths),
     observedAtMs: (value) => value.observed_at_ms,
     freshWithinMs: overrides.freshWithinMs ?? OBSERVATION_FRESHNESS_CEILING_MS,
-    produce: () => observeClaude(overrides.env ?? process.env),
+    produce: () => observeClaude({ ...(overrides.env ?? process.env), AGENTUSAGE_STATE_ROOT: paths.stateRoot }),
     write: (value) => writeSidecar(paths.claudeObservation, value),
     waitMs: SUBPROCESS_TIMEOUT_MS + 1_000,
-    lockStaleMs: SUBPROCESS_TIMEOUT_MS + 5_000,
   });
 }
 
@@ -52,10 +51,9 @@ export async function refreshCodexObservation(
     read: () => readCodexObservation(paths),
     observedAtMs: (value) => value.observed_at_ms,
     freshWithinMs: overrides.freshWithinMs ?? OBSERVATION_FRESHNESS_CEILING_MS,
-    produce: () => observeCodex({ env: overrides.env ?? process.env, noFetch: overrides.noFetch }),
+    produce: () => observeCodex({ env: { ...(overrides.env ?? process.env), AGENTUSAGE_STATE_ROOT: paths.stateRoot }, noFetch: overrides.noFetch }),
     write: (value) => writeSidecar(paths.codexObservation, value),
     waitMs: 61_000,
-    lockStaleMs: 65_000,
   });
 }
 
@@ -70,12 +68,11 @@ export async function refreshGrokObservation(
     freshWithinMs: overrides.freshWithinMs ?? OBSERVATION_FRESHNESS_CEILING_MS,
     produce: () =>
       observeGrok({
-        env: overrides.env ?? process.env,
+        env: { ...(overrides.env ?? process.env), AGENTUSAGE_STATE_ROOT: paths.stateRoot },
         refresh: overrides.providerRefresh,
         account: overrides.account,
       }),
     write: (value) => writeSidecar(paths.grokObservation, value),
     waitMs: 61_000,
-    lockStaleMs: 65_000,
   });
 }

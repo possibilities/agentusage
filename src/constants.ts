@@ -9,7 +9,7 @@ export const OBSERVATION_FRESHNESS_CEILING_MS = 5 * 60_000;
 export const OBSERVE_INTERVAL_MS = 3 * 60_000;
 export const OBSERVE_JITTER_MS = 30_000;
 
-/** Codex sidecar shares the claude ceiling; codex-swap paces real fetches. */
+/** Codex sidecar shares the claude ceiling; the owned pool paces real fetches. */
 export const CODEX_OBSERVATION_FRESHNESS_CEILING_MS = 5 * 60_000;
 
 /** Grok sidecars are decision-grade for the same bounded interval. */
@@ -27,9 +27,6 @@ export const MAX_CSWAP_ACCOUNTS = 32;
 /** Wake this long after an exhausted weekly window's reset to observe it. */
 export const WEEKLY_RESET_WAKE_SLACK_MS = 30_000;
 
-/** At most one `cswap recover` attempt per account per this interval. */
-export const RECOVERY_MIN_INTERVAL_MS = 15 * 60_000;
-export const RECOVERY_TIMEOUT_MS = 120_000;
 
 /** Focus leaves larger than this are refused as malformed. */
 export const FOCUS_LEAF_MAX_BYTES = 8_192;

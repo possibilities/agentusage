@@ -50,19 +50,6 @@ export function statePaths(env: Record<string, string | undefined> = process.env
   };
 }
 
-export function cswapArgv(env: Record<string, string | undefined> = process.env): string[] {
-  const bin = env.AGENTUSAGE_CSWAP_BIN && env.AGENTUSAGE_CSWAP_BIN !== "" ? env.AGENTUSAGE_CSWAP_BIN : "cswap";
-  return [bin];
-}
-
-export function codexSwapArgv(env: Record<string, string | undefined> = process.env): string[] {
-  const bin =
-    env.AGENTUSAGE_CODEX_SWAP_BIN && env.AGENTUSAGE_CODEX_SWAP_BIN !== ""
-      ? env.AGENTUSAGE_CODEX_SWAP_BIN
-      : "codex-swap";
-  return [bin];
-}
-
 export function grokSwapArgv(env: Record<string, string | undefined> = process.env): string[] {
   const bin =
     env.AGENTUSAGE_GROK_SWAP_BIN && env.AGENTUSAGE_GROK_SWAP_BIN !== ""

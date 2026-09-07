@@ -11,7 +11,7 @@ import { linesToText, renderFrameLines } from "../src/render.ts";
 import { buildViewModel } from "../src/view.ts";
 
 const NOW = Date.parse("2026-08-17T16:00:00Z");
-const ID = "claude-swap:1";
+const ID = "claude-1";
 const OFF = { state: "off", policy: null, raw: null } as never;
 const WINDOWS: NormalizedWindow[] = [
   { key: "session", utilization: 0.2, resetsAt: "2026-08-17T19:30:00Z" },

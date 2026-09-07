@@ -1,3 +1,5 @@
+> Claude/Codex ownership and launch contracts below are superseded by [ACCOUNT-OWNERSHIP.md](ACCOUNT-OWNERSHIP.md). Grok and the viewer/policy contracts remain applicable.
+
 # agentusage — build sketch
 
 Self-approved 2026-08-08 under Mike's standing authorization; investigation

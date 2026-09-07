@@ -15,10 +15,10 @@ function claudeObservation(): Observation {
     // Slot 3 with no slot 2: display names follow the slot, so a gap in cswap's
     // numbering can never make a card name disagree with its route id.
     routes: [
-      { id: "claude-swap:1", kind: "managed", slot: 1, windows: [], measuredAtMs: NOW - 5_000 },
-      { id: "claude-swap:3", kind: "managed", slot: 3, windows: [], measuredAtMs: NOW - 5_000 },
+      { id: "claude-1", kind: "managed", slot: 1, windows: [], measuredAtMs: NOW - 5_000 },
+      { id: "claude-3", kind: "managed", slot: 3, windows: [], measuredAtMs: NOW - 5_000 },
     ],
-    claude_accounts: { count: 2, ordinals: { "claude-swap:1": 0, "claude-swap:3": 1 } },
+    claude_accounts: { count: 2, ordinals: { "claude-1": 0, "claude-3": 1 } },
     account_issues: {},
     notes: [],
   };
@@ -26,7 +26,7 @@ function claudeObservation(): Observation {
 
 function codexAccount(
   accountKey: string,
-  ndyIndex: number | null,
+  ordinal: number | null,
   resetCreditsAvailable: number | null = null,
   resetCreditExpirations?: Array<string | null>,
 ): CodexAccountView {
@@ -34,7 +34,7 @@ function codexAccount(
     accountKey,
     email: null,
     label: null,
-    ndyIndex,
+    ordinal,
     enabled: true,
     present: true,
     authStatus: "ready",
@@ -66,7 +66,7 @@ function codexObservation(): CodexObservation {
     health: "ok",
     dependency: null,
     recommendation: null,
-    // codex-swap's ndyIndex is zero-based; display names add one.
+    // codex-swap's ordinal is zero-based; display names add one.
     accounts: [codexAccount("account:a", 0), codexAccount("account:b", 1)],
     notes: [],
   };
@@ -82,7 +82,7 @@ describe("account display names", () => {
     expect(model.claude?.cards.map((card) => card.name)).toEqual(["claude-1", "claude-3"]);
   });
 
-  test("codex cards are 1-indexed over the zero-based ndyIndex", () => {
+  test("codex cards are 1-indexed over the zero-based ordinal", () => {
     const model = build(null, codexObservation());
     expect(model.codex?.cards.map((card) => card.name)).toEqual(["codex-1", "codex-2"]);
   });

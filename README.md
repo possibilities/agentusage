@@ -1,263 +1,196 @@
-# AgentUsage
+# agentusage
 
-[![CI](https://github.com/possibilities/agentusage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/possibilities/agentusage/actions/workflows/ci.yml)
+AgentUsage owns Claude and Codex accounts, OAuth refresh, usage observations,
+account selection, and one shared native-request proxy. It also shows Grok usage
+through grok-swap and provides the existing usage TUI and focus policies.
+Claude/Codex operation needs no claude-swap, codex-swap, codex-multi-auth, or
+separate balancing CLI.
 
-How much capacity every Claude, Codex, and Grok account has left, in one place: a
-background observer, a live TUI, and one explicit `balance` verb that launchers
-call to pick an account.
+The existing `agentusage daemon run` process owns the loopback listener and
+observation loops. Native sessions receive opaque session credentials; refresh
+tokens remain in AgentUsage. AgentLaunch starts the native CLIs and renews leases
+in its existing parent process. Native `CODEX_HOME` and `CLAUDE_CONFIG_DIR` remain
+unchanged, so account changes preserve shared history, trust, skills and config.
 
-This is the standalone rebuild of keeper's `usage` subsystem, with
-[claude-swap], [codex-swap], and [grok-swap] as the per-provider account managers and durable
-observation stores.
+## Install and onboard
 
-[claude-swap]: https://github.com/possibilities/claude-swap
-[codex-swap]: https://github.com/possibilities/codex-swap
-[grok-swap]: https://github.com/possibilities/grok-swap
+Requires Bun >= 1.3.14 and the native Claude/Codex binaries for interactive login.
 
-```
-                       ┌─────────────────────────┐
-  cswap list --json ◄──┤ agentusage observer      ├──► codex-swap snapshot --json
-  cswap recover N  ◄──┤  3min + jitter cadence   ├──► grok-swap observe --json
-                       └───────────┬─────────────┘
-                                   ▼ atomic 0600 sidecars
-                  ~/.local/state/agentusage/{account-routing,codex-account-routing,grok-account-routing}/observation.json
-                                   ▼
-        agentusage (TUI · status · balance · focus)  ◄── launchers call `balance … --json`
-```
-
-The providers own the truth: claude-swap persists last-good usage per account,
-codex-swap keeps a SQLite store with trust, backoff, and leases, and grok-swap
-owns xAI OAuth, last-good billing, backoff, and reservations. agentusage
-shells their JSON CLIs and normalizes the results into observation sidecars. It
-never parses their on-disk stores directly.
-
-For Claude cards, `●` means the account is a route in a fresh observation. A
-dim `○` means the account has an issue or the provider observation is stale;
-`sampled … ago` is diagnostic metadata and does not demote a route that cswap
-still reports as trusted.
-
-## Install
-
-Via AgentStart (preferred — it installs the command, its provider CLIs, and the
-`io.arthack.agentusage.observe` service):
-
-```bash
-~/code/agentstart/scripts/install.sh --install
-```
-
-Or directly:
-
-```bash
+```sh
+bun install --frozen-lockfile
 bash scripts/install.sh --install
+agentusage accounts login codex --device-auth --label work
+agentusage accounts login claude --label personal
+agentusage accounts list codex --json
+agentusage daemon run
 ```
 
-AgentStart installs all three provider CLIs. A direct AgentUsage install runs
-its best-effort claude-swap hook (`scripts/install-providers.sh`); codex-swap
-and grok-swap keep their own installers and are invoked by AgentStart:
+AgentStart owns the single `io.arthack.agentusage.observe` LaunchAgent. Its full
+installer installs AgentUsage before AgentLaunch and converges that existing
+service. Do not create another daemon per provider or native session. The binary
+installer does not install providers or modify credentials.
 
-- **cswap** — installed by the [cswax](https://github.com/possibilities/cswax)
-  workshop, which owns the public
-  [`possibilities/claude-swap`](https://github.com/possibilities/claude-swap)
-  fork. Its `integration` branch carries `subscriptionType`/`rateLimitMultiplier`
-  on `--json` rows for cross-tier capacity comparison, and `cswap recover`, the
-  owner-held expired-token recovery the daemon runs one-due-per-cycle.
-  `scripts/install-providers.sh` calls `cswax/scripts/install.sh --install
-  --published` and does nothing else about the fork: the workshop clones it when
-  absent, binds a clean checkout to the published commit, and refuses dirty,
-  divergent, or unpublished provider code. Rebasing the fork onto upstream is
-  cswax's `/maintain` cycle, deliberately run — never a side effect of an
-  install.
-- **codex-swap** — installed by its own hardened `scripts/install.sh`.
-- **grok-swap** — installed by its own hardened `scripts/install.sh`; it owns
-  xAI OAuth, billing observations, last-good data, and reservations.
+Login runs the native OAuth flow in a private temporary home, imports the result,
+and removes only that temporary state and its scoped Claude keychain item.
+Claude import obtains the account UUID from the provider profile endpoint.
+Native login output goes to stderr; account command envelopes never contain tokens.
 
-Then onboard accounts (one-time, interactive):
+For an explicit, private native credential file:
 
-```bash
-cswap add                 # per Claude account, logged in via Claude Code
-codex-swap auth add       # per Codex account (device auth)
-grok-swap add             # per Grok account (browser OAuth)
+```sh
+agentusage accounts import codex --file /private/path/auth.json --label work
+agentusage accounts import claude --file /private/path/credentials.json
+agentusage accounts login codex --account codex-1
+agentusage accounts disable codex codex-1
+agentusage accounts enable codex codex-1
+agentusage accounts remove codex codex-1
 ```
 
-The observer (`io.arthack.agentusage.observe` LaunchAgent, logs at
-`~/.local/state/agentusage/observer.log`) starts observing immediately. Until
-accounts exist, every surface renders absent, empty, and stale states honestly.
+Imports require a private regular file and parent directory owned by the user. Codex accepts native
+`tokens` JSON with its account identity and JWT expiry; Claude accepts
+`claudeAiOauth`. Reauthentication must retain the original provider identity.
+Keys are stable `claude-N` and `codex-N`; removed numbers are never reused.
+Account commands and `prepare --account` accept that key, the native account ID,
+ordinal, email or label, and refuse ambiguous matches. `accounts list --json`
+includes the nonsecret `account_id` so workspaces sharing an email can be
+distinguished during enrollment. Codex observations expose the same identity as
+`providerAccountId`; `balance codex --account` accepts it too.
+No command discovers or parses an old swap store.
 
-## Commands
+## Cutover
 
-```
-agentusage                       live TUI (q quit · r refresh · j/k scroll · g/G ends)
-agentusage usage --snapshot      one frame + agentusage-meta line (auto when piped)
-agentusage usage --watch         force the TUI even when piped or non-TTY
-agentusage usage --timeout 5s    wait up to <dur> for a first sidecar before rendering
-agentusage usage --json          all observations, machine-readable
-agentusage status [--json]       health, focus states, would-choose previews
-agentusage balance claude [...]  pick a Claude account (records a reservation)
-agentusage balance codex [...]   pick a Codex account (delegates to codex-swap select)
-agentusage balance grok [...]    pick/reserve a Grok account (delegates to grok-swap select)
-agentusage focus show|set|clear fable|non-fable|claude|codex|grok ...
-                                 (the older `focus fable set ...` order still works)
-agentusage recover <route|claude-N>
-                                 one explicit cswap token recovery
-agentusage refresh [claude|codex|grok|all]
-agentusage daemon run|status
-```
+Follow the [coordinated cutover runbook](docs/CUTOVER.md). Land and validate
+the AgentUsage, AgentLaunch, and AgentStart bundle together,
+then converge installation last. Stop legacy sessions that own the credentials
+being transferred before importing them, or use fresh native login. A copied
+refresh token must never keep rotating in both an old process and AgentUsage.
+Existing native session files can be resumed after onboarding without moving
+them into per-account homes.
 
-The TUI follows the fleet chromeless-shell contract: no header or footer
-rows and no identity row — the usage frame is the whole surface. A
-transient overlay chip announces a running refresh, and every action lives
-in the ctrl+k command palette — type to filter, arrows to select, enter to
-run, rows tappable — which doubles as the key reference. Direct hotkeys
-keep working while the palette is closed.
+Old wrapper commands, checkouts, backups and credential stores are not deleted
+by this bundle. They are no longer required by installation or runtime. Recreate
+focus targets using the new stable account keys: the old sidecar schemas and
+Claude route identities are replaced, not silently migrated. Grok is unchanged.
 
-## Launcher integration
+## Operator commands
 
-agentusage picks; the launcher launches. Contract:
-
-**Claude** — `agentusage balance claude --json [--fable|--no-fable|--model m]`
-returns `{ ok, route: {id, slot}, display_name, reason, … }`. Launch with
-`cswap run <slot> --share-history -- <claude args…>`. Selection is keeper's
-algorithm. Every Claude model uses the session and weekly windows, including
-Haiku and 1M-context variants. Only the Fable model additionally uses the
-Fable window; `--fable` / `--no-fable` explicitly override model inference.
-Selection is applied in order:
-
-1. eligibility — session and weekly windows present and under 100%, with a
-   Fable window required for Fable intent;
-2. Fable conservation — Fable launches chase the lowest Fable utilization;
-   non-Fable launches prefer Fable-less accounts, then the most-burned Fable;
-3. +5 pp pressure per live reservation (90 s TTL);
-4. least-recently-selected, then lexicographic.
-
-`--dry-run` previews without reserving. `--account <route|cN>` pins the pick
-(reason `requested-account`) but still runs the eligibility gate, refusing
-`requested-unknown` or `requested-ineligible` rather than launching into an
-exhausted account. An active provider focus (`focus claude`) sits between the
-two: an explicit `--account` beats it, and it beats the fable/non-fable overlay
-(reasons `full-focus` / `full-focus-fallback`). When the sidecar is older than
-5 minutes, balance tries one bounded refresh, then refuses with
-`observation-stale` rather than guessing.
-
-**Codex** — `agentusage balance codex --json [--strategy best|next-available]
-[--claim]` delegates to `codex-swap select`; with `--claim` the result carries
-a lease to consume via `codex-swap run --claim <lease-id> -- …`, otherwise
-launch with `codex-swap run --account <accountKey> -- …`. An active codex
-focus gates its target against the fresh observation, then delegates through
-`codex-swap select --account <accountKey>` so focused launches retain the same
-atomic lease accounting as automatic selections.
-
-**Spark** — `agentusage balance codex --model gpt-5.3-codex-spark --json
-[--claim]` selects locally on **spark-lane headroom** (min of the lane's 5 h
-and weekly remaining), ignoring main-quota exhaustion entirely — spark is an
-independent quota lane that keeps working when the main lane is exhausted.
-Only auth-broken accounts are excluded. Ties break toward fewer active
-leases. With `--claim`, the chosen (or focus-pinned) account is claimed
-through `codex-swap select --account <accountKey> --claim --metered-lane
-codex-spark --model <spark-model> --json`, and the result carries a lease to
-consume via `codex-swap run --claim <lease-id> -- …`, matching the main-lane
-`--claim` shape. Only a structured `NO_ELIGIBLE_ACCOUNT` refusal retries,
-once, against the next-ranked account in the spark pool; every other
-provider failure fails closed immediately. Without `--claim` the preview
-launches no codex-swap subprocess and `lease` stays `null`.
-
-**Grok** — `agentusage balance grok --json [--strategy
-best|next-available] [--account <accountKey|grok-N>] [--claim]` delegates to
-`grok-swap select`. Without `--claim` (or with explicit `--dry-run`) it only
-previews. `--claim` creates a short provider-owned reservation, adjustable
-with `--reserve-seconds`. Included allowance is preferred; prepaid and PAYG
-are fallback tiers. AgentUsage deliberately does not activate an account or
-launch a Grok harness yet.
-
-Exit codes everywhere: `0` selected, `1` failure, `2` usage, `3` no eligible
-account/capacity (matching codex-swap's convention).
-
-## Focus
-
-Durable policies pinning launches to one route, stored as hardened 0600
-leaves under `~/.local/state/agentusage/account-routing/` (Codex and Grok
-provider focuses use their corresponding `*-account-routing/` directories):
-
-```bash
-agentusage focus set fable claude-2 permanent            # all Fable launches → claude-2
-agentusage focus set fable claude-2 cycle-end            # …until the observed Fable window resets or hits 100%
-agentusage focus set fable claude-2 current-reset        # …until that reset time (absolute)
-agentusage focus set non-fable claude-1 absolute 2026-08-12T00:00:00Z
-agentusage focus clear fable
-agentusage focus fable set claude-2 permanent            # the older target-first order, still accepted
+```sh
+agentusage                         # interactive usage viewer
+agentusage usage --snapshot         # one frame
+agentusage usage --json             # sidecars only
+agentusage status --json
+agentusage refresh claude           # observe now, respecting provider backoff
+agentusage recover codex-1          # refresh an expired credential if recoverable
+agentusage balance claude --model fable --dry-run --json
+agentusage balance codex --model gpt-5.3-codex-spark --dry-run --json
+agentusage focus set codex codex-2 permanent
+agentusage focus set claude claude-1 current-reset
+agentusage focus set fable claude-1 cycle-end
+agentusage focus clear codex
 ```
 
-`set` warns when the target is not currently launch-eligible, and
-`--require-eligible` turns that warning into a refusal. The two observed
-lifetimes read the reset out of the live Fable window, so they need a fresh
-healthy observation. `--expect-reset <UTC>` asserts which reset you meant and
-fails `reset-mismatch` if the window has already rolled underneath you.
+`balance` keeps the existing headroom, Fable/non-Fable, focus/fallback, and Spark
+lane behavior. Explicit pins are subject to the same eligibility checks. Codex
+main selection applies five percentage points of pressure per active lease;
+equal choices rotate. Spark uses its independent windows even when main quota
+is exhausted. Reset credits are displayed, never spent automatically.
 
-An active Fable focus also **fences its target out of the non-Fable pool**, so
-generic launches stop draining the account you are conserving for Fable.
-Effective states are `off · active · expired · invalid · unavailable`, plus
-`completed` for observed lifetimes. Expired policies are not auto-cleared
-(parity with keeper): routing falls back and `show` names the state. Machine
-consumers read focus from `status --json` — `usage --json` carries observations
-only.
+Provider focus takes precedence over Claude intent focuses. An unavailable
+focused account falls back to other eligible accounts; an unavailable explicit
+account pin refuses. Fable requires its additional model window; ordinary and
+1M/Haiku models do not inherit Fable exhaustion. Stale or failed usage remains
+visible as last-good data but cannot authorize selection.
 
-A **provider focus** pins *every* launch for one provider to a single account —
-Fable and non-Fable alike, and for Codex the main and spark paths, since
-they all ride `balance codex`. It overrides both intent focuses entirely, fence
-included, and stays in charge during fallback while its target is temporarily
-ineligible; one policy governs at a time. An explicit `--account` still wins.
+## Launcher contract
 
-Its observed lifetimes follow the **binding allowance window** (Claude `week`,
-Codex main-lane weekly, Grok included period) rather than the Fable window, which makes draining an
-account whose week resets soon a single command:
-
-```bash
-agentusage focus set claude claude-1 cycle-end           # everything → claude-1 until its week resets or hits 100%
-agentusage focus set codex <accountKey> current-reset
-agentusage focus set grok grok-1 current-reset
-agentusage focus clear claude
+```sh
+agentusage prepare codex --json [--account codex-1] [--model MODEL] [--dry-run]
+agentusage prepare claude --json [--account claude-1] [--model MODEL] [--dry-run]
 ```
 
-Codex targets are accountKeys resolved against a fresh observation. While a
-codex focus is active, `balance codex --claim` requests a pinned provider
-selection and returns its lease normally. If the target is temporarily
-ineligible, the active focus remains in charge while selection falls back to
-the ordinary eligible pool.
+Success is `{schema_version:1,ok:true,provider,account_key,reason,args,env,
+unset_env,lease}`. A real lease contains `{id,token,url,expires_at_ms}`. Treat
+this JSON as private process transport: do not log it or put the token in argv.
+Refusal is `{schema_version:1,ok:false,provider,refusal,detail}` with nonzero exit.
 
-Grok targets accept accountKeys or immutable `grok-N` display names and are
-stored by accountKey. Active focus uses exact-account selection through
-grok-swap; temporary ineligibility falls back to its ordinary pool while the
-policy remains active.
+Apply `unset_env`, then `env`, without changing either native home. Claude gets
+its opaque OAuth bearer and loopback base URL. Codex gets a custom Responses
+provider. Insert its `args` after native/resource options and before the first
+literal `--`: current stock Codex discards global `-c` overrides when a
+subcommand has local overrides. Resources also need the effective scope for
+nested `exec resume`. Reject explicit conflicting provider/auth options before
+preparing a lease. Utility invocations, including `codex app-server`, remain
+native and bypass preparation.
 
-## Data
+Renew with `POST lease.url`, `Authorization: Bearer <token>`, every 25 seconds.
+The response is `{schema_version:1,ok:true,account_key}`; `account_key` reports the
+current assignment, which can differ from the initial selection for automatic
+Codex sessions. Stop and await renewal before `DELETE` at failed spawn or exit.
+HTTP calls must be bounded, loopback only, and refuse redirects. Cleanup of an
+expired/already-released lease never changes native exit status. After sleep
+past the 90-second TTL, the parent ends the native child and tells the operator
+to resume; expired credentials cannot be revived.
 
-- Claude sidecar `account-routing/observation.json` — keeper's schema v7:
-  every account is in exactly one of `routes` (launch-eligible, both binding
-  windows present) or `account_issues`; display measurements and capacity
-  metadata ride alongside. Windows: `session`, `week`, `spend`,
-  `model:<name>` with utilization 0..1+.
-- Codex sidecar `codex-account-routing/observation.json` — agentusage schema
-  v1 over codex-swap's snapshot: per account auth/trust/selection state plus
-  windows regrouped into **lanes** (`main` binding, `codex-spark`,
-  `code-review`, extras) with used/remaining percent and reset times, plus
-  available rate-limit reset credits and their nearest known expiry when the
-  provider reports credit details.
-- Grok sidecar `grok-account-routing/observation.json` — agentusage schema v1
-  over grok-swap observations: account auth/trust, included-period percentage,
-  prepaid balance, PAYG usage/cap, and last-good timestamps. Dollar values are
-  displayed as facts, never percentage bars.
-- Cadence: 3 min + up to 30 s jitter per provider; a weekly window observed at
-  100% schedules a one-shot wake 30 s after its reset. Balance trusts
-  observations up to 5 min old.
-- All refreshes go through a non-blocking per-sidecar lock; contended callers
-  re-read instead of stacking provider calls.
+Dry-run requires neither daemon liveness nor a reservation and emits no token.
+AgentLaunch's human output is a credential-free AgentLaunch invocation that
+prepares afresh. Its JSON `command` is the planned native argv;
+`command_requires_prepare` and `reprepare_command` make that distinction explicit.
 
-## Develop
+## Exhaustion and restart
 
-```bash
-bun test            # no network, temp state roots
+Every resume selects again. The proxy also records confirmed Codex
+`usage_limit_reached` HTTP 429 responses immediately as lane-specific cooldowns.
+For an unpinned, self-contained Responses request, it can reassign the lease and
+retry against another eligible account, with at most three account attempts.
+It never retries across accounts for generic throttling, 5xx errors, disconnects,
+timeouts, a `previous_response_id`, uploaded-object references, encrypted
+reasoning, or a response already streaming. Explicit pins remain fixed. Parent renewal reports reassignment without changing the
+native thread ID or history.
+
+The daemon reuses its private endpoint and lease state on restart. Existing
+streams can fail during restart; valid leases continue against the same account
+or their last committed reassignment. The proxy serves Responses, not Realtime
+or App Server. AgentVoice's native `codex app-server` path stays outside it.
+
+## State and limits
+
+All private JSON leaves use mode 0600, atomic fsynced replacement and kernel
+flock. Reads refuse symlinks and group/other permissions. Account credentials
+and last-good usage live in `accounts/pool.json`; only hashes of opaque session
+credentials live in `service/leases.json`. `service/endpoint.json` holds the
+stable listener port and private health credential. Default port: 43623 on
+literal `127.0.0.1`; `AGENTUSAGE_PROXY_PORT` selects the initial port.
+
+The proxy limits concurrent requests to 32, request bodies to 32 MiB, aggregate
+request buffers to 128 MiB, headers/uploads to 90 seconds, idle streams to five
+minutes and stream lifetime to one hour. Credential refresh retries once on a
+401 against the same identity and adopts an already-refreshed generation when
+concurrent requests race. A second 401 quarantines only the rejected generation
+until reauthentication. Observation calls are paced and preserve last-good
+measurements on invalid responses, network errors and Retry-After backoff.
+
+`AGENTUSAGE_STATE_ROOT` isolates state for tests. Test provider-origin overrides
+require that variable and a literal HTTP IPv4 loopback origin; production
+provider origins are fixed.
+
+## Validation
+
+```sh
+bun test
 bun run typecheck
 ```
 
-`docs/SKETCH.md` is the build contract, `CONTEXT.md` the glossary. Provider
-contracts are read defensively across the public claude-swap integration
-branch (maintained by cswax), codex-swap `b427534`, and grok-swap.
+Fixtures never access real state or accounts. The bundle is also tested through
+the installed native CLIs against a local synthetic upstream, covering common
+history, profile/config/resource overlays, resume and opaque authentication.
+Claude live subscription acceptance remains unavailable while the subscription
+is inactive; local native transport acceptance is separate evidence.
+
+Reproduce the native producer/consumer checks with [native acceptance](docs/NATIVE-ACCEPTANCE.md).
+
+## Credits
+
+The account implementation builds on codex-swap's behavior, Claude/Codex
+protocol research from claude-swap, codex-multi-auth and OpenAI Codex, and the
+original Keeper usage subsystem. [Source credits and upstream license
+notices](THIRD_PARTY_NOTICES.md) record the authors, revisions and scope.

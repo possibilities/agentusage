@@ -176,7 +176,7 @@ function buildClaudeSection(
     const issue = observation.account_issues[id];
     const measurement = route ?? observation.account_measurements?.[id];
     const measuredAtMs = measurement?.measuredAtMs ?? null;
-    // cswap owns per-account measurement cadence and reports whether a row is
+    // AgentUsage owns per-account measurement cadence and reports whether a row is
     // still trusted through usageStatus. A route in a fresh observation is
     // therefore live even when an idle account's scheduled sample is old.
     const dimmed = issue !== undefined || !fresh;
@@ -262,7 +262,7 @@ function buildCodexSection(
     );
     cards.push({
       provider: "codex",
-      name: `codex-${(account.ndyIndex ?? index) + 1}`,
+      name: `codex-${(account.ordinal ?? index) + 1}`,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
       resetCreditsAvailable: account.resetCreditsAvailable ?? null,
       resetCreditExpiryText,
@@ -449,7 +449,7 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
   const codexName = (accountKey: string): string => {
     const index = input.codex?.accounts.findIndex((account) => account.accountKey === accountKey) ?? -1;
     if (index < 0) return accountKey;
-    return `codex-${(input.codex?.accounts[index]?.ndyIndex ?? index) + 1}`;
+    return `codex-${(input.codex?.accounts[index]?.ordinal ?? index) + 1}`;
   };
   const grokName = (accountRef: string): string =>
     input.grok?.accounts.find(

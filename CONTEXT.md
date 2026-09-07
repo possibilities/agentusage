@@ -1,87 +1,45 @@
 # Glossary
 
-**Provider** — a source of managed accounts: `claude` (served by claude-swap's
-`cswap` CLI), `codex` (served by codex-swap), or `grok` (served by grok-swap).
-_Avoid_: "backend", "vendor".
+**Provider** — the account service `claude`, `codex`, or `grok`. AgentUsage owns Claude/Codex credentials and observations; Grok uses the grok-swap adapter. _Avoid_: backend, vendor.
 
-**Observation** — one normalized reading of a provider's account capacity,
-written as a sidecar file. Claude observations use keeper's schema v7 shape;
-Codex and Grok observations use provider-specific agentusage schema v1 shapes.
-_Avoid_: "snapshot" for the sidecar (codex-swap's `snapshot` command is the
-provider's own term).
+**Managed account** — an AgentUsage-owned OAuth identity and credential generation. Its stable key is `claude-N` or `codex-N`; removal never reuses N. _Avoid_: profile, swap account.
 
-**Sidecar** — the atomically-replaced JSON file under
-`~/.local/state/agentusage/` that consumers (TUI, balance, status) read;
-providers' own stores stay authoritative. _Avoid_: "cache".
+**Ordinal** — the immutable positive number in a managed account key. Observation view indexes are zero-based presentation fields, not identities.
 
-**Included allowance** — Grok's percentage-based current billing period. It
-is a meter. Prepaid balance and pay-as-you-go usage/caps are monetary facts,
-not percentages, and must never be drawn as utilization bars.
+**Route** — a launchable Claude managed account. Every observed account has either a route or an issue, never both and never neither.
 
-**Route** — a launchable Claude account identity, `claude-swap:<slot>`.
-PII-free and durable. Only launch-eligible accounts become routes; every other
-account carries an issue instead — never both, never neither.
+**Slot** — the positive ordinal carried in a Claude route for selection bookkeeping. It no longer names a provider command.
 
-**Slot** — claude-swap's positive-integer account number, the argument to
-`cswap run <slot>`.
+**Display name** — the stable managed key, or Grok's immutable `grok-N`. Account selectors can also use an unambiguous email, label, or ordinal.
 
-**Display name** — the operator-facing 1-indexed name of an account:
-`claude-<slot>` (so `claude-swap:1` is `claude-1`) and `codex-<n>` for the
-nth Codex account, plus grok-swap's immutable `grok-<n>`. Also the short ref
-accepted wherever that provider supports it.
-_Avoid_: `c0`/`c1` and `Codex 0` (the retired zero-based forms).
+**Observation** — one normalized provider reading in a sidecar. Claude schema 8, Codex schema 2, and Grok schema 1 are independent envelopes.
 
-**Ordinal** — provider-owned account order, kept for ordering and bookkeeping.
-Claude/Codex positions are zero-based; Grok ordinals are immutable positive
-integers and produce `grok-N`. The ordinal itself is never a command ref.
+**Sidecar** — the atomically replaced JSON file under `~/.local/state/agentusage/` read by the viewer, status and balance commands. The managed account pool remains authoritative for credentials and last-good usage. _Avoid_: cache.
 
-**Lane** — a group of Codex rate-limit windows that share one quota pool: the
-binding `main` lane (primary 5 h + secondary weekly), the non-binding
-`codex-spark` lane, `code-review`, or another metered feature. _Avoid_:
-"scope" (keeper's Claude term), "window" (one lane holds several).
+**Decision-grade** — a fresh, successful usage sample with complete binding windows. Last-good usage stays visible after errors but cannot authorize a launch.
 
-**Spark lane** — the `gpt-5.3-codex-spark` lane: independent quota that does
-not drain the main lane and keeps working when main quota is exhausted.
-Identified by `limitName`/`meteredFeature` containing "spark".
+**Freshness ceiling** — the five-minute maximum sample age for a balance decision. An old observation or measurement refuses.
 
-**Binding window** — a window that counts toward eligibility and headroom
-(Claude: `session` + `week`; Codex: the main lane's primary + secondary; Grok:
-the included allowance, followed by paid fallback tiers).
-Non-binding lanes are display + lane-targeted balance only.
+**Lane** — Codex windows sharing a quota pool: `main`, `codex-spark`, `code-review`, or another metered feature. _Avoid_: window (one lane contains several).
 
-**Reset credit** — a provider-issued, one-shot Codex allowance for resetting
-rate-limit capacity. Agentusage displays the available count and nearest known
-expiry but does not use either for eligibility or headroom. _Avoid_: "reset"
-alone (confusable with a window's scheduled reset).
+**Spark lane** — independent Codex Spark quota, identified by the provider's limit name or metered feature. Main quota exhaustion does not exhaust Spark.
 
-**Focus** — a durable policy pinning launches to one route. **Fable focus**
-pins launches of the Fable model, whose quota is additional to Claude's
-session and weekly windows. **Non-Fable focus** pins every other Claude model,
-including Haiku and 1M-context variants. An active Fable focus also fences its
-target out of the non-Fable pool. A
-**provider focus** (`focus claude` / `focus codex` / `focus grok`) pins every
-launch for that provider to one account and overrides both intent focuses, fence
-included. Lifetimes: `permanent`, `absolute`, and observed `current-reset` /
-`cycle-end` (Fable focus reads the Fable window, provider focus the binding
-weekly window; Non-Fable focus has only the first two). Effective states:
-`off | active | expired | invalid | unavailable` (+ `completed` for observed
-lifetimes).
+**Binding window** — a window that limits eligibility: Claude session and week, Codex main primary and secondary, or Grok's included allowance before paid fallback.
 
-**Balance** — the explicit account-selection verb a launcher calls
-(`agentusage balance <provider> --json`); prints the chosen account, does not
-launch. _Avoid_: "routing" for the command itself (keeper's implicit form).
+**Reset credit** — a one-shot provider allowance to reset Codex quota. Display only; AgentUsage never spends it or changes eligibility from its presence.
 
-**Reservation** — a short-lived record that a balance decision was handed out.
-Claude keeps its 90 s ledger locally; grok-swap owns Grok reservations.
+**Included allowance** — Grok's percentage-based billing-period meter. Prepaid balance and pay-as-you-go are monetary facts, never utilization percentages.
 
-**Freshness ceiling** — the maximum sidecar age (5 min) at which balance will
-act; staler observations refuse rather than guess.
+**Focus** — durable account preference, subject to capacity and authentication gates. Provider focus overrides Claude's Fable and non-Fable focuses. Lifetimes are permanent, absolute, or an observed current-reset/cycle-end; non-Fable focus supports permanent and absolute only.
 
-**Decision-grade** — codex-swap's own trust verdict on a measurement
-(`usage.decisionGrade`); stale-but-displayable numbers live in
-`lastGoodUsage`.
+**Balance** — account selection and optional short reservation. It does not launch a native process. Launchers use prepare for authentication. _Avoid_: activation.
 
-**Launcher** — the external tool that actually starts `claude` / `codex`
-using balance's answer (e.g. via `cswap run <slot> --share-history` or
-`codex-swap run --account <key>`). Out of scope here; contract documented in
-README. No Grok launcher/activation integration exists yet.
+**Prepare** — selection plus an authenticated native launch contract, issued by `agentusage prepare`. A real prepare requires the daemon; dry-run is read-only and contains no credential.
+
+**Session lease** — a 90-second account assignment authenticated by an opaque bearer credential. The existing launcher parent renews and releases it. Explicit pins stay fixed; automatic Codex assignments can change after a confirmed, replayable quota rejection. Native history identity does not change.
+
+**Reservation** — a short-lived selection-pressure record. Claude balance keeps a local ledger; managed launches also hold session leases, and Grok retains its own reservations.
+
+**Quota cooldown** — a lane-specific exclusion recorded from an explicit Codex usage-limit rejection. It is separate from transient request throttling and survives daemon restart.
+
+**Launcher** — the process owner, such as AgentLaunch, that applies prepare arguments and environment, starts the native CLI, and maintains its lease. Native homes, trust, configuration and history remain native.

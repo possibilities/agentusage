@@ -1,428 +1,324 @@
-import { CODEX_OBSERVATION_FRESHNESS_CEILING_MS, MAX_OUTPUT_BYTES } from "../constants.ts";
-import { codexSwapArgv } from "../paths.ts";
-import { runBounded } from "../proc.ts";
+import { CODEX_OBSERVATION_FRESHNESS_CEILING_MS } from '../constants.ts';
+import { statePaths } from '../paths.ts';
+import { readPool, findAccount } from '../accounts/store.ts';
+import { AccountError } from '../accounts/storage.ts';
+import {
+  activeCounts,
+  changeLeases,
+  issueLease,
+  readLeases,
+  type LeaseState,
+  type IssuedLease,
+} from '../service/leases.ts';
 import {
   type CodexAccountView,
   type CodexObservation,
   laneHeadroomPercent,
   mainLane,
   sparkLane,
-} from "../codex/types.ts";
-import type { FocusStatus, FullFocusEffectiveState, FullFocusPolicy } from "../focus.ts";
+} from '../codex/types.ts';
+import type {
+  FocusStatus,
+  FullFocusEffectiveState,
+  FullFocusPolicy,
+} from '../focus.ts';
 
-/**
- * Codex balance. The main lane delegates to `codex-swap select` — the
- * claude-swap-approach selection codex-swap already implements (leases,
- * cooldowns, decision-grade trust). The spark lane is selected locally from
- * the observation: spark quota is independent of the main lane and keeps
- * working after main exhaustion, so main-lane exclusions must not veto it.
- *
- * An active codex focus uses the observation to gate its target, then
- * delegates a pinned selection to codex-swap so real launches retain atomic
- * lease accounting. An ineligible focus target falls back to plain selection.
- */
-
-const SELECT_TIMEOUT_MS = 60_000;
-
-export interface CodexLease {
-  leaseId: string;
-  ownerNonce: string | null;
-  accountKey: string;
-  expiresAt: string | null;
-}
-
+export type CodexLease = IssuedLease;
 export interface CodexSelectionSuccess {
   ok: true;
-  lane: "main" | "codex-spark";
+  lane: 'main' | 'codex-spark';
   accountKey: string;
   email: string | null;
   label: string | null;
   reason: string;
   score: number | null;
   lease: CodexLease | null;
-  /** Spark only: every considered account with its lane headroom. */
-  pool?: Array<{ accountKey: string; headroomPercent: number; activeLeases: number }>;
+  pool?: Array<{
+    accountKey: string;
+    headroomPercent: number;
+    activeLeases: number;
+  }>;
 }
-
 export type CodexRefusal =
-  | "no-eligible-account"
-  | "dependency-unavailable"
-  | "provider-error"
-  | "observation-unavailable"
-  | "observation-stale"
-  | "no-spark-capacity";
-
+  | 'no-eligible-account'
+  | 'provider-error'
+  | 'observation-unavailable'
+  | 'observation-stale'
+  | 'no-spark-capacity';
 export interface CodexSelectionRefusal {
   ok: false;
-  lane: "main" | "codex-spark";
+  lane: 'main' | 'codex-spark';
   refusal: CodexRefusal;
   detail: string;
   nextReadyAt?: string | null;
   exclusions?: unknown[];
 }
-
 export type CodexSelection = CodexSelectionSuccess | CodexSelectionRefusal;
-
 export interface SelectCodexOptions {
-  strategy?: "best" | "next-available";
+  model?: string;
+  strategy?: 'best' | 'next-available';
+  account?: string;
   claim?: boolean;
   allowUnknown?: boolean;
   env?: Record<string, string | undefined>;
-  /** Filled from the observation sidecar when available, for email/label. */
   observation?: CodexObservation | null;
-  /** Effective codex focus; an eligible active target pins provider selection. */
   focus?: FocusStatus<FullFocusPolicy, FullFocusEffectiveState> | null;
   nowMs?: number;
 }
-
-function describeAccount(
-  observation: CodexObservation | null | undefined,
-  accountKey: string,
-): { email: string | null; label: string | null } {
-  const account = observation?.accounts.find((candidate) => candidate.accountKey === accountKey);
-  return { email: account?.email ?? null, label: account?.label ?? null };
-}
-
-export async function selectCodexAccount(options: SelectCodexOptions = {}): Promise<CodexSelection> {
-  const focus = options.focus ?? null;
-  const focusTarget = focus !== null && focus.state === "active" && focus.policy !== null ? focus.policy.target : null;
-  if (focusTarget !== null) {
-    const observation = options.observation ?? null;
-    if (observation === null || observation.health !== "ok") {
-      return {
-        ok: false,
-        lane: "main",
-        refusal: "observation-unavailable",
-        detail: "codex focus needs a healthy observation to gate its target",
-      };
-    }
-    const nowMs = options.nowMs ?? Date.now();
-    const ageMs = nowMs - observation.observed_at_ms;
-    if (ageMs > CODEX_OBSERVATION_FRESHNESS_CEILING_MS) {
-      return {
-        ok: false,
-        lane: "main",
-        refusal: "observation-stale",
-        detail: `codex observation is ${Math.round(ageMs / 1000)}s old`,
-      };
-    }
-    const account = observation.accounts.find((candidate) => candidate.accountKey === focusTarget);
-    const lane = account === undefined ? null : mainLane(account);
-    const headroom = lane === null ? null : laneHeadroomPercent(lane);
-    if (account !== undefined && codexAuthEligible(account) && headroom !== null && headroom > 0) {
-      const pinned = await delegateCodexSelect(options, focusTarget);
-      if (pinned.ok) return { ...pinned, reason: "full-focus" };
-      if (pinned.refusal === "no-eligible-account") {
-        const delegated = await delegateCodexSelect(options);
-        if (delegated.ok) return { ...delegated, reason: `full-focus-fallback (${delegated.reason})` };
-        return delegated;
-      }
-      return pinned;
-    }
-    const delegated = await delegateCodexSelect(options);
-    if (delegated.ok) return { ...delegated, reason: `full-focus-fallback (${delegated.reason})` };
-    return delegated;
-  }
-  return delegateCodexSelect(options);
-}
-
-type SelectEnvelopeOutcome =
-  | { ok: true; accountKey: string; reasonSummary: string; score: number | null; lease: CodexLease | null }
-  | { ok: false; refusal: CodexRefusal; detail: string; nextReadyAt?: string | null; exclusions?: unknown[] };
-
-/** Shared codex-swap `select` envelope parsing for both main-lane delegation and Spark claims. */
-function parseSelectRun(run: Awaited<ReturnType<typeof runBounded>>, argv: readonly string[]): SelectEnvelopeOutcome {
-  if (run.error !== null) {
-    return {
-      ok: false,
-      refusal: run.enoent ? "dependency-unavailable" : "provider-error",
-      detail: run.enoent ? `codex-swap binary not found (${argv[0]})` : `codex-swap select ${run.error}`,
-    };
-  }
-  let envelope: Record<string, unknown>;
-  try {
-    envelope = JSON.parse(run.stdout) as Record<string, unknown>;
-  } catch {
-    return { ok: false, refusal: "provider-error", detail: "codex-swap select emitted invalid JSON" };
-  }
-  const error = envelope.error;
-  if (error != null) {
-    const record = error as Record<string, unknown>;
-    const code = typeof record.code === "string" ? record.code : "unknown";
-    const details = (typeof record.details === "object" && record.details !== null ? record.details : {}) as Record<
-      string,
-      unknown
-    >;
-    return {
-      ok: false,
-      refusal:
-        code === "NO_ELIGIBLE_ACCOUNT"
-          ? "no-eligible-account"
-          : code === "DEPENDENCY_UNSUPPORTED" || code === "DEPENDENCY_UNAVAILABLE"
-            ? "dependency-unavailable"
-            : "provider-error",
-      detail: typeof record.message === "string" ? record.message : code,
-      nextReadyAt: typeof details.nextReadyAt === "string" ? details.nextReadyAt : null,
-      exclusions: Array.isArray(details.exclusions) ? details.exclusions : [],
-    };
-  }
-  const data = (typeof envelope.data === "object" && envelope.data !== null ? envelope.data : {}) as Record<
-    string,
-    unknown
-  >;
-  const selection = (typeof data.selection === "object" && data.selection !== null ? data.selection : {}) as Record<
-    string,
-    unknown
-  >;
-  const accountKey = typeof selection.accountKey === "string" ? selection.accountKey : null;
-  if (accountKey === null) {
-    return { ok: false, refusal: "provider-error", detail: "codex-swap select returned no accountKey" };
-  }
-  const reason = (typeof selection.reason === "object" && selection.reason !== null ? selection.reason : {}) as Record<
-    string,
-    unknown
-  >;
-  const leaseRaw = data.lease;
-  const lease =
-    typeof leaseRaw === "object" && leaseRaw !== null
-      ? {
-          leaseId: String((leaseRaw as Record<string, unknown>).leaseId ?? ""),
-          ownerNonce:
-            typeof (leaseRaw as Record<string, unknown>).ownerNonce === "string"
-              ? ((leaseRaw as Record<string, unknown>).ownerNonce as string)
-              : null,
-          accountKey: String((leaseRaw as Record<string, unknown>).accountKey ?? accountKey),
-          expiresAt:
-            typeof (leaseRaw as Record<string, unknown>).expiresAt === "string"
-              ? ((leaseRaw as Record<string, unknown>).expiresAt as string)
-              : null,
-        }
-      : null;
-  return {
-    ok: true,
-    accountKey,
-    reasonSummary: typeof reason.summary === "string" ? reason.summary : "selected",
-    score: typeof reason.score === "number" && Number.isFinite(reason.score) ? reason.score : null,
-    lease,
-  };
-}
-
-async function delegateCodexSelect(options: SelectCodexOptions, requiredAccountKey?: string): Promise<CodexSelection> {
-  const argv = [...codexSwapArgv(options.env ?? process.env), "select", "--json"];
-  if (options.strategy !== undefined) argv.push("--strategy", options.strategy);
-  if (requiredAccountKey !== undefined) argv.push("--account", requiredAccountKey);
-  if (options.claim === true) argv.push("--claim");
-  if (options.allowUnknown === true) argv.push("--allow-unknown");
-
-  const run = await runBounded(argv, { timeoutMs: SELECT_TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES });
-  const outcome = parseSelectRun(run, argv);
-  if (!outcome.ok) {
-    return { lane: "main", ...outcome };
-  }
-  return {
-    ok: true,
-    lane: "main",
-    accountKey: outcome.accountKey,
-    ...describeAccount(options.observation, outcome.accountKey),
-    reason: outcome.reasonSummary,
-    score: outcome.score,
-    lease: outcome.lease,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Spark lane — local selection over the observation sidecar.
-
-export function codexAuthEligible(account: CodexAccountView): boolean {
+export function codexAuthEligible(a: CodexAccountView): boolean {
   return (
-    account.present &&
-    account.enabled &&
-    !account.manuallyDisabled &&
-    !account.reloginRequired &&
-    !account.identityConflict
+    a.present &&
+    a.enabled &&
+    !a.manuallyDisabled &&
+    !a.reloginRequired &&
+    !a.identityConflict
   );
 }
-
-export function selectCodexSpark(
-  observation: CodexObservation,
-  nowMs: number = Date.now(),
-  focusTarget: string | null = null,
+function choose(
+  observation: CodexObservation | null,
+  lane: 'main' | 'codex-spark',
+  options: SelectCodexOptions,
+  focusTarget: string | null,
+  counts?: Map<string, number>,
+  lastSelected?: string,
 ): CodexSelection {
-  if (observation.health !== "ok") {
+  const now = options.nowMs ?? Date.now();
+  if (!observation || observation.health !== 'ok')
     return {
       ok: false,
-      lane: "codex-spark",
-      refusal: "observation-unavailable",
-      detail: `codex observation health is ${observation.health}`,
+      lane,
+      refusal: 'observation-unavailable',
+      detail: 'Codex selection needs a healthy observation',
     };
-  }
-  const ageMs = nowMs - observation.observed_at_ms;
-  if (ageMs > CODEX_OBSERVATION_FRESHNESS_CEILING_MS) {
+  if (
+    now - observation.observed_at_ms > CODEX_OBSERVATION_FRESHNESS_CEILING_MS ||
+    observation.observed_at_ms > now + 1000
+  )
     return {
       ok: false,
-      lane: "codex-spark",
-      refusal: "observation-stale",
-      detail: `codex observation is ${Math.round(ageMs / 1000)}s old`,
+      lane,
+      refusal: 'observation-stale',
+      detail: 'Codex observation is stale',
     };
+  // Resolve identity before eligibility: an ambiguous email must not change
+  // workspaces merely because one of its accounts is disabled or exhausted.
+  let requestedKey: string | undefined;
+  if (options.account !== undefined) {
+    const matches = observation.accounts.filter((a) =>
+      [a.accountKey, a.providerAccountId, a.email, a.label, String((a.ordinal ?? -1) + 1)]
+        .includes(options.account),
+    );
+    if (matches.length !== 1)
+      return {
+        ok: false,
+        lane,
+        refusal: 'no-eligible-account',
+        detail: 'Account selector must resolve to exactly one account',
+      };
+    requestedKey = matches[0]!.accountKey;
   }
-
-  const pool: Array<{ account: CodexAccountView; headroomPercent: number }> = [];
-  for (const account of observation.accounts) {
-    if (!codexAuthEligible(account)) continue;
-    const lane = sparkLane(account);
-    if (lane === null) continue;
-    const headroom = laneHeadroomPercent(lane);
-    if (headroom === null || headroom <= 0) continue;
-    pool.push({ account, headroomPercent: headroom });
+  const pool: Array<{
+    account: CodexAccountView;
+    headroomPercent: number;
+    activeLeases: number;
+    score: number;
+  }> = [];
+  for (const a of observation.accounts) {
+    if (!codexAuthEligible(a)) continue;
+    if ((a.quotaBlockedUntilMs?.[lane] ?? 0) > now) continue;
+    if (requestedKey !== undefined && a.accountKey !== requestedKey) continue;
+    const windows = lane === 'main' ? mainLane(a) : sparkLane(a);
+    const fresh =
+      a.measuredAtMs !== null &&
+      a.measuredAtMs <= now + 1000 &&
+      now - a.measuredAtMs <= CODEX_OBSERVATION_FRESHNESS_CEILING_MS &&
+      a.usageStatus === 'ok';
+    const trusted = fresh && (lane === 'codex-spark' || a.decisionGrade);
+    const headroom = trusted && windows ? laneHeadroomPercent(windows) : null;
+    if (lane === 'main' && a.limitReached === true) continue;
+    if (headroom === 0) continue;
+    if (headroom === null && !(lane === 'main' && options.allowUnknown))
+      continue;
+    const leases = counts?.get(a.accountKey) ?? a.activeLeases;
+    pool.push({
+      account: a,
+      headroomPercent: headroom ?? 0,
+      activeLeases: leases,
+      score: (headroom ?? 0) - (lane === 'main' ? 5 * leases : 0),
+    });
   }
-  if (pool.length === 0) {
+  if (options.account && pool.length > 1)
     return {
       ok: false,
-      lane: "codex-spark",
-      refusal: "no-spark-capacity",
-      detail:
-        observation.accounts.length === 0
-          ? "no codex accounts observed"
-          : "no auth-eligible account has spark headroom",
+      lane,
+      refusal: 'no-eligible-account',
+      detail: 'Account selector is ambiguous',
     };
+  if (!pool.length)
+    return {
+      ok: false,
+      lane,
+      refusal: lane === 'main' ? 'no-eligible-account' : 'no-spark-capacity',
+      detail: options.account
+        ? 'Requested account is unavailable or has no trusted capacity'
+        : `No eligible account has ${lane} capacity`,
+    };
+  pool.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.activeLeases - b.activeLeases ||
+      a.account.accountKey.localeCompare(b.account.accountKey),
+  );
+  const pinned = options.account
+    ? pool[0]
+    : pool.find((x) => x.account.accountKey === focusTarget);
+  let chosen = pinned ?? pool[0]!;
+  if (!pinned) {
+    const candidates =
+      options.strategy === 'next-available'
+        ? pool
+        : pool.filter(
+            (x) =>
+              Math.abs(x.score - pool[0]!.score) < 1e-9 &&
+              x.activeLeases === pool[0]!.activeLeases,
+          );
+    candidates.sort((a, b) =>
+      a.account.accountKey.localeCompare(b.account.accountKey),
+    );
+    chosen =
+      candidates.find(
+        (x) =>
+          lastSelected !== undefined && x.account.accountKey > lastSelected,
+      ) ?? candidates[0]!;
   }
-  pool.sort((a, b) => {
-    if (a.headroomPercent !== b.headroomPercent) return b.headroomPercent - a.headroomPercent;
-    if (a.account.activeLeases !== b.account.activeLeases) return a.account.activeLeases - b.account.activeLeases;
-    return a.account.accountKey < b.account.accountKey ? -1 : 1;
-  });
-  const pinned = focusTarget === null ? undefined : pool.find((entry) => entry.account.accountKey === focusTarget);
-  const chosen = pinned ?? pool[0]!;
+  const reason = options.account
+    ? 'requested-account'
+    : pinned
+      ? 'full-focus'
+      : focusTarget
+        ? `full-focus-fallback (${lane === 'main' ? 'headroom' : 'spark-headroom'})`
+        : lane === 'main'
+          ? options.strategy === 'next-available'
+            ? 'next-available'
+            : 'headroom'
+          : 'spark-headroom';
   return {
     ok: true,
-    lane: "codex-spark",
+    lane,
     accountKey: chosen.account.accountKey,
     email: chosen.account.email,
     label: chosen.account.label,
-    reason: pinned !== undefined ? "full-focus" : focusTarget !== null ? "full-focus-fallback (spark-headroom)" : "spark-headroom",
-    score: chosen.headroomPercent,
+    reason,
+    score: chosen.score,
     lease: null,
-    pool: pool.map((entry) => ({
-      accountKey: entry.account.accountKey,
-      headroomPercent: entry.headroomPercent,
-      activeLeases: entry.account.activeLeases,
+    pool: pool.map((x) => ({
+      accountKey: x.account.accountKey,
+      headroomPercent: x.headroomPercent,
+      activeLeases: x.activeLeases,
     })),
   };
 }
-
-const SPARK_CLAIM_LANE = "codex-spark";
-const MAX_SPARK_CLAIM_ATTEMPTS = 2;
-
+export function chooseCodexWithLeases(
+  observation: CodexObservation | null,
+  lane: 'main' | 'codex-spark',
+  options: SelectCodexOptions,
+  state: LeaseState,
+  focusTarget: string | null,
+): CodexSelection {
+  return choose(
+    observation,
+    lane,
+    options,
+    focusTarget,
+    activeCounts(state),
+    state.last_selected.codex,
+  );
+}
+export async function selectCodexAccount(
+  options: SelectCodexOptions = {},
+): Promise<CodexSelection> {
+  const focus =
+    options.focus?.state === 'active'
+      ? (options.focus.policy?.target ?? null)
+      : null;
+  return selectManaged(
+    options.model && /spark/iu.test(options.model) ? 'codex-spark' : 'main',
+    options,
+    focus,
+  );
+}
+async function selectManaged(
+  lane: 'main' | 'codex-spark',
+  options: SelectCodexOptions,
+  focus: string | null,
+): Promise<CodexSelection> {
+  const paths = statePaths(options.env ?? process.env);
+  const select = (s: LeaseState) => {
+    const selection = chooseCodexWithLeases(
+      options.observation ?? null,
+      lane,
+      options,
+      s,
+      focus,
+    );
+    if (!selection.ok || !options.claim) return selection;
+    const account = findAccount(readPool(paths), 'codex', selection.accountKey);
+    if (!account.enabled || account.auth_error)
+      return {
+        ok: false as const,
+        lane,
+        refusal: 'no-eligible-account' as const,
+        detail: 'Selected account was disabled or requires login',
+      };
+    return {
+      ...selection,
+      lease: issueLease(s, 'codex', account.key, Date.now(), {
+        pinned: options.account !== undefined,
+        model: options.model,
+      }),
+    };
+  };
+  try {
+    return options.claim
+      ? await changeLeases(paths, select)
+      : select(readLeases(paths));
+  } catch (e) {
+    return {
+      ok: false,
+      lane,
+      refusal: 'provider-error',
+      detail:
+        e instanceof AccountError
+          ? e.message
+          : 'Cannot read managed account state',
+    };
+  }
+}
+export function selectCodexSpark(
+  observation: CodexObservation,
+  nowMs = Date.now(),
+  focusTarget: string | null = null,
+): CodexSelection {
+  return choose(observation, 'codex-spark', { nowMs }, focusTarget);
+}
 export interface ClaimCodexSparkOptions {
   observation: CodexObservation;
   model: string;
   focusTarget: string | null;
   env?: Record<string, string | undefined>;
 }
-
-function sparkClaimReason(focusTarget: string | null, accountKey: string): string {
-  if (focusTarget === null) return "spark-headroom";
-  return accountKey === focusTarget ? "full-focus" : "full-focus-fallback (spark-headroom)";
-}
-
-/**
- * A claim's success envelope is only usable when it actually proves a lease
- * on the exact account requested: codex-swap's `select --claim` contract is
- * frozen, so a lease-shaped hole here (null lease, blank lease id, or a
- * selection/lease `accountKey` that drifted from what was requested) must
- * fail closed rather than be trusted as a claim on the wrong — or no —
- * account. This is claim-specific: `parseSelectRun` is shared with plain
- * `select` delegation, where no lease is a legitimate response.
- */
-function validateSparkClaimOutcome(requestedAccountKey: string, outcome: SelectEnvelopeOutcome): SelectEnvelopeOutcome {
-  if (!outcome.ok) return outcome;
-  if (outcome.lease === null) {
-    return { ok: false, refusal: "provider-error", detail: "codex-swap select --claim returned no lease" };
-  }
-  if (outcome.accountKey !== requestedAccountKey) {
-    return {
-      ok: false,
-      refusal: "provider-error",
-      detail: `codex-swap select --claim returned selection accountKey "${outcome.accountKey}" for requested "${requestedAccountKey}"`,
-    };
-  }
-  if (outcome.lease.accountKey !== requestedAccountKey) {
-    return {
-      ok: false,
-      refusal: "provider-error",
-      detail: `codex-swap select --claim returned lease accountKey "${outcome.lease.accountKey}" for requested "${requestedAccountKey}"`,
-    };
-  }
-  if (outcome.lease.leaseId.length === 0) {
-    return { ok: false, refusal: "provider-error", detail: "codex-swap select --claim returned an empty leaseId" };
-  }
-  return outcome;
-}
-
-async function runCodexSparkClaim(
-  accountKey: string,
-  model: string,
-  env: Record<string, string | undefined> | undefined,
-): Promise<SelectEnvelopeOutcome> {
-  const argv = [
-    ...codexSwapArgv(env ?? process.env),
-    "select",
-    "--account",
-    accountKey,
-    "--claim",
-    "--metered-lane",
-    SPARK_CLAIM_LANE,
-    "--model",
-    model,
-    "--json",
-  ];
-  const run = await runBounded(argv, { timeoutMs: SELECT_TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES });
-  return validateSparkClaimOutcome(accountKey, parseSelectRun(run, argv));
-}
-
-/**
- * Claim the account `selectCodexSpark` chose through the frozen codex-swap
- * `--metered-lane codex-spark` primitive. Only a structured
- * `NO_ELIGIBLE_ACCOUNT` refusal retries, and only once, against the next
- * differently keyed account from the already-ranked pool: every other
- * failure (dependency, malformed envelope, auth, identity, ...) fails
- * closed immediately, and at most two claim attempts are ever made.
- */
 export async function claimCodexSpark(
-  selection: CodexSelectionSuccess,
+  _selection: CodexSelectionSuccess,
   options: ClaimCodexSparkOptions,
 ): Promise<CodexSelection> {
-  const ranked =
-    selection.pool !== undefined && selection.pool.length > 0
-      ? selection.pool
-      : [{ accountKey: selection.accountKey, headroomPercent: selection.score ?? 0, activeLeases: 0 }];
-
-  const attempted = new Set<string>();
-  let candidate = ranked.find((entry) => entry.accountKey === selection.accountKey) ?? ranked[0]!;
-  let lastDetail = "no spark account was available to claim";
-
-  for (let attempt = 0; attempt < MAX_SPARK_CLAIM_ATTEMPTS; attempt += 1) {
-    attempted.add(candidate.accountKey);
-    const outcome = await runCodexSparkClaim(candidate.accountKey, options.model, options.env);
-    if (outcome.ok) {
-      return {
-        ok: true,
-        lane: "codex-spark",
-        accountKey: outcome.accountKey,
-        ...describeAccount(options.observation, outcome.accountKey),
-        reason: sparkClaimReason(options.focusTarget, outcome.accountKey),
-        score: candidate.headroomPercent,
-        lease: outcome.lease,
-        pool: selection.pool,
-      };
-    }
-    if (outcome.refusal !== "no-eligible-account") {
-      return { lane: "codex-spark", ...outcome };
-    }
-    lastDetail = outcome.detail;
-    const next = ranked.find((entry) => !attempted.has(entry.accountKey));
-    if (next === undefined) break;
-    candidate = next;
-  }
-  return { ok: false, lane: "codex-spark", refusal: "no-spark-capacity", detail: lastDetail };
+  return selectManaged(
+    'codex-spark',
+    {
+      observation: options.observation,
+      env: options.env,
+      claim: true,
+      model: options.model,
+    },
+    options.focusTarget,
+  );
 }

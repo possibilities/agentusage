@@ -32,7 +32,7 @@ function observationWithFable(resetAt: string, utilization: number): Observation
     health: "ok",
     routes: [
       {
-        id: "claude-swap:1",
+        id: "claude-1",
         kind: "managed",
         slot: 1,
         measuredAtMs: NOW - 10_000,
@@ -43,7 +43,7 @@ function observationWithFable(resetAt: string, utilization: number): Observation
         ],
       },
     ],
-    claude_accounts: { count: 1, ordinals: { "claude-swap:1": 0 } },
+    claude_accounts: { count: 1, ordinals: { "claude-1": 0 } },
     account_issues: {},
     notes: [],
   };
@@ -56,7 +56,7 @@ function observationWithWeek(resetAt: string, utilization: number): Observation 
     health: "ok",
     routes: [
       {
-        id: "claude-swap:1",
+        id: "claude-1",
         kind: "managed",
         slot: 1,
         measuredAtMs: NOW - 10_000,
@@ -67,7 +67,7 @@ function observationWithWeek(resetAt: string, utilization: number): Observation 
         ],
       },
     ],
-    claude_accounts: { count: 1, ordinals: { "claude-swap:1": 0 } },
+    claude_accounts: { count: 1, ordinals: { "claude-1": 0 } },
     account_issues: {},
     notes: [],
   };
@@ -85,7 +85,7 @@ function codexObservationWithWeekly(resetAt: string | null, remainingPercent: nu
         accountKey: "account:a",
         email: null,
         label: null,
-        ndyIndex: null,
+        ordinal: null,
         enabled: true,
         present: true,
         authStatus: "ok",
@@ -124,11 +124,11 @@ function codexObservationWithWeekly(resetAt: string | null, remainingPercent: nu
 describe("focus leaves", () => {
   test("round-trips a policy and a null clear", () => {
     const path = tempLeaf();
-    const policy = materializeFocusPolicy("claude-swap:2", { kind: "permanent" }, true, NOW);
+    const policy = materializeFocusPolicy("claude-2", { kind: "permanent" }, true, NOW);
     writeFocusLeaf(path, policy);
     const delivered = readFocusLeaf(path, true);
     expect(delivered.available).toBe(true);
-    expect(delivered.policy?.target_route).toBe("claude-swap:2");
+    expect(delivered.policy?.target_route).toBe("claude-2");
 
     writeFocusLeaf(path, null);
     const cleared = readFocusLeaf(path, true);
@@ -146,7 +146,7 @@ describe("focus leaves", () => {
 
   test("group/other-readable leaves are refused as insecure", () => {
     const path = tempLeaf();
-    writeFocusLeaf(path, materializeFocusPolicy("claude-swap:1", { kind: "permanent" }, false, NOW));
+    writeFocusLeaf(path, materializeFocusPolicy("claude-1", { kind: "permanent" }, false, NOW));
     chmodSync(path, 0o644);
     const delivery = readFocusLeaf(path, false);
     expect(delivery.available).toBe(false);
@@ -159,18 +159,18 @@ describe("focus leaves", () => {
     expect(readFocusLeaf(path, true).diagnostic).toBe("delivery-malformed");
 
     const other = tempLeaf();
-    writeFocusLeaf(other, materializeFocusPolicy("claude-swap:1", { kind: "permanent" }, false, NOW));
+    writeFocusLeaf(other, materializeFocusPolicy("claude-1", { kind: "permanent" }, false, NOW));
     expect(readFocusLeaf(other, true).diagnostic).toBe("policy-invalid");
   });
 });
 
 describe("effective focus states", () => {
   test("permanent and absolute lifetimes", () => {
-    const permanent = materializeFocusPolicy("claude-swap:1", { kind: "permanent" }, false, NOW);
+    const permanent = materializeFocusPolicy("claude-1", { kind: "permanent" }, false, NOW);
     expect(effectiveNonFableFocus({ available: true, policy: permanent, diagnostic: "none" }, NOW).state).toBe("active");
 
     const future = materializeFocusPolicy(
-      "claude-swap:1",
+      "claude-1",
       { kind: "absolute", deadline_at: "2026-08-09T00:00:00Z" },
       false,
       NOW,
@@ -184,7 +184,7 @@ describe("effective focus states", () => {
 
   test("cycle-end completes at the boundary or when the pinned window burns out", () => {
     const reset = "2026-08-10T00:00:00.000Z";
-    const policy = materializeFocusPolicy("claude-swap:1", { kind: "cycle-end", reset_at: reset }, true, NOW);
+    const policy = materializeFocusPolicy("claude-1", { kind: "cycle-end", reset_at: reset }, true, NOW);
     const delivery = { available: true as const, policy, diagnostic: "none" as const };
 
     expect(effectiveFableFocus(delivery, observationWithFable(reset, 0.5), NOW).state).toBe("active");
@@ -199,10 +199,10 @@ describe("effective focus states", () => {
 describe("full focus leaves", () => {
   test("round-trips per provider and refuses the other provider's leaf", () => {
     const path = tempLeaf();
-    writeFocusLeaf(path, materializeFullFocusPolicy("claude", "claude-swap:1", { kind: "permanent" }, NOW));
+    writeFocusLeaf(path, materializeFullFocusPolicy("claude", "claude-1", { kind: "permanent" }, NOW));
     const delivered = readFullFocusLeaf(path, "claude");
     expect(delivered.available).toBe(true);
-    expect(delivered.policy?.target).toBe("claude-swap:1");
+    expect(delivered.policy?.target).toBe("claude-1");
     expect(readFullFocusLeaf(path, "codex").diagnostic).toBe("policy-invalid");
   });
 
@@ -223,7 +223,7 @@ describe("full focus leaves", () => {
 describe("effective full focus", () => {
   test("claude cycle-end completes at the boundary or when the week burns out", () => {
     const reset = "2026-08-10T00:00:00.000Z";
-    const policy = materializeFullFocusPolicy("claude", "claude-swap:1", { kind: "cycle-end", reset_at: reset }, NOW);
+    const policy = materializeFullFocusPolicy("claude", "claude-1", { kind: "cycle-end", reset_at: reset }, NOW);
     const delivery = { available: true as const, policy, diagnostic: "none" as const };
 
     expect(effectiveClaudeFullFocus(delivery, observationWithWeek(reset, 0.5), NOW).state).toBe("active");
@@ -249,12 +249,12 @@ describe("observed weekly resets", () => {
   test("claude week reset resolves with the usual guards", () => {
     const reset = "2026-08-10T00:00:00.000Z";
     const observation = observationWithWeek(reset, 0.4);
-    expect(resolveObservedWeekReset(observation, "claude-swap:1", NOW, null)).toEqual({ ok: true, resetAt: reset });
-    expect(resolveObservedWeekReset(observation, "claude-swap:9", NOW, null)).toEqual({
+    expect(resolveObservedWeekReset(observation, "claude-1", NOW, null)).toEqual({ ok: true, resetAt: reset });
+    expect(resolveObservedWeekReset(observation, "claude-9", NOW, null)).toEqual({
       ok: false,
       error: "target-unavailable",
     });
-    expect(resolveObservedWeekReset(observation, "claude-swap:1", NOW, "2026-08-10T01:00:00Z")).toEqual({
+    expect(resolveObservedWeekReset(observation, "claude-1", NOW, "2026-08-10T01:00:00Z")).toEqual({
       ok: false,
       error: "reset-mismatch",
     });
@@ -281,22 +281,22 @@ describe("resolveObservedFableReset", () => {
   test("resolves, guards, and refuses to advance cycles", () => {
     const reset = "2026-08-10T00:00:00.000Z";
     const observation = observationWithFable(reset, 0.4);
-    expect(resolveObservedFableReset(observation, "claude-swap:1", NOW, null)).toEqual({ ok: true, resetAt: reset });
-    expect(resolveObservedFableReset(observation, "claude-swap:9", NOW, null)).toEqual({
+    expect(resolveObservedFableReset(observation, "claude-1", NOW, null)).toEqual({ ok: true, resetAt: reset });
+    expect(resolveObservedFableReset(observation, "claude-9", NOW, null)).toEqual({
       ok: false,
       error: "target-unavailable",
     });
-    expect(resolveObservedFableReset(observation, "claude-swap:1", NOW, "2026-08-10T01:00:00Z")).toEqual({
+    expect(resolveObservedFableReset(observation, "claude-1", NOW, "2026-08-10T01:00:00Z")).toEqual({
       ok: false,
       error: "reset-mismatch",
     });
     const nearReset = { ...observation, observed_at_ms: Date.parse(reset) - 1_000 };
-    expect(resolveObservedFableReset(nearReset, "claude-swap:1", Date.parse(reset) + 1, null)).toEqual({
+    expect(resolveObservedFableReset(nearReset, "claude-1", Date.parse(reset) + 1, null)).toEqual({
       ok: false,
       error: "reset-elapsed",
     });
     const stale = { ...observation, observed_at_ms: NOW - 10 * 60_000 };
-    expect(resolveObservedFableReset(stale, "claude-swap:1", NOW, null)).toEqual({
+    expect(resolveObservedFableReset(stale, "claude-1", NOW, null)).toEqual({
       ok: false,
       error: "observation-stale",
     });

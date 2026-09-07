@@ -82,7 +82,7 @@ export interface FocusStatus<P, S> {
   diagnostic: FocusDeliveryDiagnostic;
 }
 
-const ROUTE_PATTERN = /^claude-swap:([1-9]\d*)$/u;
+const ROUTE_PATTERN = /^claude-([1-9]\d*)$/u;
 
 export function normalizeRouteId(value: string): string | null {
   return ROUTE_PATTERN.test(value) ? value : null;
