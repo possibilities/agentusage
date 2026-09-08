@@ -18,9 +18,9 @@
 
 **Sidecar** — the atomically replaced JSON file under `~/.local/state/agentusage/` read by the viewer, status and balance commands. The managed account pool remains authoritative for credentials and last-good usage. _Avoid_: cache.
 
-**Decision-grade** — a fresh, successful usage sample with complete binding windows. Last-good usage stays visible after errors but cannot authorize a launch.
+**Decision-grade** — provider-specific evidence sufficient for selection. Claude/Codex require fresh, successful usage with complete binding windows. Grok retains last-good billing for at most 24 hours, including after a non-authentication billing error; missing capacity needs explicit `--allow-unknown`, and invalid or rejected credentials always refuse.
 
-**Freshness ceiling** — the five-minute maximum sample age for a balance decision. An old observation or measurement refuses.
+**Freshness ceiling** — the five-minute limit for public observation freshness and Claude/Codex decision measurements. Grok's owned selector separately applies its 24-hour last-good billing limit; a newly published sidecar does not renew that billing timestamp.
 
 **Lane** — Codex windows sharing a quota pool: `main`, `codex-spark`, `code-review`, or another metered feature. _Avoid_: window (one lane contains several).
 
