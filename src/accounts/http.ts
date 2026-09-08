@@ -2,7 +2,7 @@ import { AccountError } from './storage.ts';
 import type { ManagedProvider } from './store.ts';
 export type Env = Record<string, string | undefined>;
 export function providerURL(
-  provider: ManagedProvider,
+  provider: ManagedProvider | 'grok',
   path: string,
   env: Env = process.env,
   oauth = false,
@@ -10,7 +10,11 @@ export function providerURL(
   const testOrigin = env[`AGENTUSAGE_TEST_${provider.toUpperCase()}_ORIGIN`];
   const origin =
     testOrigin ??
-    (provider === 'codex'
+    (provider === 'grok'
+      ? oauth
+        ? 'https://auth.x.ai'
+        : 'https://cli-chat-proxy.grok.com'
+      : provider === 'codex'
       ? oauth
         ? 'https://auth.openai.com'
         : 'https://chatgpt.com'

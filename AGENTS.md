@@ -1,10 +1,11 @@
 # agentusage
 
-Claude and Codex account ownership, OAuth refresh, observations, balancing,
-and a usage TUI. One existing daemon proxies native sessions; Grok retains its
-subprocess adapter. `docs/ACCOUNT-OWNERSHIP.md` supersedes the Claude/Codex
+Claude, Codex, and Grok account ownership, OAuth refresh, observations,
+balancing, and a usage TUI. One existing daemon proxies Claude/Codex native
+sessions and observes every provider. `docs/ACCOUNT-OWNERSHIP.md` supersedes the Claude/Codex
 ownership sections of `docs/SKETCH.md`; `CONTEXT.md` is the glossary and
-`README.md` the operator and launcher contract.
+`README.md` the operator and launcher contract. Grok ownership and its explicit
+snapshot transfer are recorded in `docs/adr/0001-own-grok-account-lifecycle.md`.
 
 ## Commands
 
@@ -22,9 +23,12 @@ ownership sections of `docs/SKETCH.md`; `CONTEXT.md` is the glossary and
 - Never import `@opentui/core` at module scope — only `await import(...)`
   inside the TUI entry. The platform-native package top-level-awaits and races
   under parallel `bun test`; TUI-loading tests must stay serial.
-- Claude/Codex access uses bounded HTTP against fixed provider origins and the
-  owned account pool. Grok remains subprocess JSON (`grok-swap observe --json`).
-  Never discover or parse legacy swap stores. Credentials never enter logs,
+- Every provider uses bounded HTTP against fixed origins and owned credentials.
+  Grok's private `accounts/grok.json` preserves its billing, cursor and short
+  reservations separately from the Claude/Codex proxy pool. Never discover
+  legacy stores; the operator may explicitly restore a private Grok snapshot
+  into an empty inventory after stopping the previous refresh-token owner.
+  Credentials never enter logs,
   argv, result narration, or native homes; launchers transport private prepare
   JSON and renew opaque leases from their existing process.
 - Sidecars and policy leaves are written atomically (0600 tmp + rename) under

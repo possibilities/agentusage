@@ -1,10 +1,9 @@
 # agentusage
 
-AgentUsage owns Claude and Codex accounts, OAuth refresh, usage observations,
-account selection, and one shared native-request proxy. It also shows Grok usage
-through grok-swap and provides the existing usage TUI and focus policies.
-Claude/Codex operation needs no claude-swap, codex-swap, codex-multi-auth, or
-separate balancing CLI.
+AgentUsage owns Claude, Codex, and Grok accounts, OAuth refresh, usage
+observations, account selection, and focus policies. One shared proxy serves
+native Claude/Codex requests; the usage TUI shows all three providers. No swap
+CLI is required for observation or selection.
 
 The existing `agentusage daemon run` process owns the loopback listener and
 observation loops. Native sessions receive opaque session credentials; refresh
@@ -21,6 +20,7 @@ bun install --frozen-lockfile
 bash scripts/install.sh --install
 agentusage accounts login codex --device-auth --label work
 agentusage accounts login claude --label personal
+agentusage accounts login grok --label work
 agentusage accounts list codex --json
 agentusage daemon run
 ```
@@ -30,10 +30,13 @@ installer installs AgentUsage before AgentLaunch and converges that existing
 service. Do not create another daemon per provider or native session. The binary
 installer does not install providers or modify credentials.
 
-Login runs the native OAuth flow in a private temporary home, imports the result,
+Claude/Codex login runs the native OAuth flow in a private temporary home, imports the result,
 and removes only that temporary state and its scoped Claude keychain item.
 Claude import obtains the account UUID from the provider profile endpoint.
 Native login output goes to stderr; account command envelopes never contain tokens.
+Grok uses xAI device authorization directly and needs no installed Grok CLI.
+`accounts login grok --no-open` prints the verification URL and user code for
+manual browser access. `--account grok-N` reauthenticates the same identity.
 
 For an explicit, private native credential file:
 
@@ -49,15 +52,16 @@ agentusage accounts remove codex codex-1
 Imports require a private regular file and parent directory owned by the user. Codex accepts native
 `tokens` JSON with its account identity and JWT expiry; Claude accepts
 `claudeAiOauth`. Reauthentication must retain the original provider identity.
-Keys are stable `claude-N` and `codex-N`; removed numbers are never reused.
+Keys are stable `claude-N`, `codex-N`, and `grok-N`; removed numbers are never reused.
 Account commands and `prepare --account` accept that key, the native account ID,
 ordinal, email or label, and refuse ambiguous matches. `accounts list --json`
 includes the nonsecret `account_id` so workspaces sharing an email can be
 distinguished during enrollment. Codex observations expose the same identity as
 `providerAccountId`; `balance codex --account` accepts it too.
-No command discovers or parses an old swap store.
+No command discovers an old swap store. Grok snapshot import is an explicit
+transfer described below.
 
-## Cutover
+## Claude/Codex cutover
 
 Follow the [coordinated cutover runbook](docs/CUTOVER.md). Land and validate
 the AgentUsage, AgentLaunch, and AgentStart bundle together,
@@ -70,7 +74,42 @@ them into per-account homes.
 Old wrapper commands, checkouts, backups and credential stores are not deleted
 by this bundle. They are no longer required by installation or runtime. Recreate
 focus targets using the new stable account keys: the old sidecar schemas and
-Claude route identities are replaced, not silently migrated. Grok is unchanged.
+Claude route identities are replaced, not silently migrated.
+
+## Grok account transfer
+
+Grok's inventory lives in `accounts/grok.json` under AgentUsage's state root.
+To transfer an existing inventory, first stop its previous refresh-token owner,
+then explicitly import its complete private version-1 state file:
+
+```sh
+agentusage accounts import grok --file /private/path/grok-state.json --json
+agentusage accounts list grok --json
+agentusage refresh grok
+agentusage balance grok --dry-run --json
+```
+
+Import preserves account numbers, labels, credentials, last-good billing,
+backoff, the selection cursor, and reservations. It requires an empty Grok
+inventory; repeating an identical import is a no-op, while replacing an occupied
+inventory is refused. Keep the source as a private backup with its previous
+owner stopped. The transfer does not read or change the native Grok Build home.
+
+`accounts label grok grok-1 --label work` changes a label; `--clear-label`
+removes it. Enable, disable and remove use the same account command forms as
+the other providers. `refresh grok --account grok-1` refreshes one account while
+keeping every account in the public observation. `recover grok-1` forces a
+credential/billing recovery attempt; use `accounts login grok --account grok-1`
+when fresh human authorization is needed.
+
+Grok selection retains its existing priority: included allowance, prepaid
+balance, then enabled pay-as-you-go. It requires valid credentials and billing
+no older than 24 hours; a billing authentication rejection blocks selection
+immediately. Unknown capacity requires explicit `--allow-unknown`, while known
+exhaustion still refuses. `balance grok` is a preview by default; `--claim`
+creates a reservation lasting 1–300 seconds. It does not activate a Grok harness
+or create a proxy lease. [ADR 0001](docs/adr/0001-own-grok-account-lifecycle.md)
+records the ownership and transfer decisions.
 
 ## Operator commands
 
@@ -81,6 +120,8 @@ agentusage usage --json             # sidecars only
 agentusage status --json
 agentusage refresh claude           # observe now, respecting provider backoff
 agentusage recover codex-1          # refresh an expired credential if recoverable
+agentusage refresh grok --account grok-1
+agentusage balance grok --claim --reserve-seconds 30 --json
 agentusage balance claude --model fable --dry-run --json
 agentusage balance codex --model gpt-5.3-codex-spark --dry-run --json
 agentusage focus set codex codex-2 permanent
@@ -98,8 +139,9 @@ is exhausted. Reset credits are displayed, never spent automatically.
 Provider focus takes precedence over Claude intent focuses. An unavailable
 focused account falls back to other eligible accounts; an unavailable explicit
 account pin refuses. Fable requires its additional model window; ordinary and
-1M/Haiku models do not inherit Fable exhaustion. Stale or failed usage remains
-visible as last-good data but cannot authorize selection.
+1M/Haiku models do not inherit Fable exhaustion. Claude/Codex stale or failed
+usage remains visible as last-good data but cannot authorize selection. Grok
+retains the decision age and backoff behavior described above.
 
 ## Launcher contract
 
@@ -156,7 +198,8 @@ or App Server. AgentVoice's native `codex app-server` path stays outside it.
 
 All private JSON leaves use mode 0600, atomic fsynced replacement and kernel
 flock. Reads refuse symlinks and group/other permissions. Account credentials
-and last-good usage live in `accounts/pool.json`; only hashes of opaque session
+and last-good usage live in `accounts/pool.json` for Claude/Codex and
+`accounts/grok.json` for Grok; only hashes of opaque session
 credentials live in `service/leases.json`. `service/endpoint.json` holds the
 stable listener port and private health credential. Default port: 43623 on
 literal `127.0.0.1`; `AGENTUSAGE_PROXY_PORT` selects the initial port.
@@ -168,6 +211,11 @@ minutes and stream lifetime to one hour. Credential refresh retries once on a
 concurrent requests race. A second 401 quarantines only the rejected generation
 until reauthentication. Observation calls are paced and preserve last-good
 measurements on invalid responses, network errors and Retry-After backoff.
+Grok billing uses a separate bounded exponential backoff. Its requests each
+have a 15-second limit, and an observation cycle has a 55-second provider
+budget. A verified OAuth rotation is saved before fetching billing, so a later
+billing failure cannot discard the new refresh token. Identity verification
+must succeed before a rotation is adopted.
 
 `AGENTUSAGE_STATE_ROOT` isolates state for tests. Test provider-origin overrides
 require that variable and a literal HTTP IPv4 loopback origin; production
@@ -190,7 +238,7 @@ Reproduce the native producer/consumer checks with [native acceptance](docs/NATI
 
 ## Credits
 
-The account implementation builds on codex-swap's behavior, Claude/Codex
+The account implementation builds on codex-swap and grok-swap's behavior, Claude/Codex
 protocol research from claude-swap, codex-multi-auth and OpenAI Codex, and the
 original Keeper usage subsystem. [Source credits and upstream license
 notices](THIRD_PARTY_NOTICES.md) record the authors, revisions and scope.

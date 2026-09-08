@@ -2,7 +2,9 @@
 
 Approved by the operator's 2026-09-07 instruction to build a confident sketch
 inside AgentUsage. This supersedes the Claude/Codex provider ownership and
-launcher sections of SKETCH.md. Grok's existing adapter is outside this change.
+launcher sections of SKETCH.md. Grok's adapter was outside that original scope;
+the operator's 2026-09-08 extension is recorded in
+[ADR 0001](adr/0001-own-grok-account-lifecycle.md).
 
 ## Goal
 

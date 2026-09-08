@@ -1,8 +1,8 @@
 # Glossary
 
-**Provider** — the account service `claude`, `codex`, or `grok`. AgentUsage owns Claude/Codex credentials and observations; Grok uses the grok-swap adapter. _Avoid_: backend, vendor.
+**Provider** — the account service `claude`, `codex`, or `grok`. AgentUsage owns each provider's credentials, observations and selection. _Avoid_: backend, vendor.
 
-**Managed account** — an AgentUsage-owned OAuth identity and credential generation. Its stable key is `claude-N` or `codex-N`; removal never reuses N. _Avoid_: profile, swap account.
+**Managed account** — an AgentUsage-owned OAuth identity and credentials. Its stable key is `claude-N`, `codex-N`, or `grok-N`; removal never reuses N. Claude/Codex proxy requests also track credential generations. _Avoid_: profile, swap account.
 
 **Ordinal** — the immutable positive number in a managed account key. Observation view indexes are zero-based presentation fields, not identities.
 
@@ -10,7 +10,9 @@
 
 **Slot** — the positive ordinal carried in a Claude route for selection bookkeeping. It no longer names a provider command.
 
-**Display name** — the stable managed key, or Grok's immutable `grok-N`. Account selectors can also use an unambiguous email, label, or ordinal.
+**Display name** — the stable managed key. Account selectors can also use an unambiguous provider identity, email, label, or ordinal.
+
+**Grok inventory** — the private `accounts/grok.json` leaf containing Grok identities, credentials, last-good billing, backoff, selection cursor and reservations. AgentUsage is its sole owner. _Avoid_: Grok subprocess, swap adapter.
 
 **Observation** — one normalized provider reading in a sidecar. Claude schema 8, Codex schema 2, and Grok schema 1 are independent envelopes.
 
@@ -38,7 +40,7 @@
 
 **Session lease** — a 90-second account assignment authenticated by an opaque bearer credential. The existing launcher parent renews and releases it. Explicit pins stay fixed; automatic Codex assignments can change after a confirmed, replayable quota rejection. Native history identity does not change.
 
-**Reservation** — a short-lived selection-pressure record. Claude balance keeps a local ledger; managed launches also hold session leases, and Grok retains its own reservations.
+**Reservation** — a short-lived selection-pressure record. Claude balance keeps a local ledger; managed launches also hold session leases. Grok's inventory records reservations for 1–300 seconds when a caller explicitly claims a selection.
 
 **Quota cooldown** — a lane-specific exclusion recorded from an explicit Codex usage-limit rejection. It is separate from transient request throttling and survives daemon restart.
 

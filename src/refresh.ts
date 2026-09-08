@@ -1,7 +1,7 @@
 import { lockFile } from './accounts/storage.ts';
 
 /**
- * Provider-safe refresh: at most one provider subprocess per sidecar at a
+ * Provider-safe refresh: at most one provider observation per sidecar at a
  * time. The lock is non-blocking — a contended caller re-reads the sidecar
  * for a bounded window instead of stacking a second provider call (keeper's
  * `runProviderSafeRefresh` contract).

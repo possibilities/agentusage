@@ -48,6 +48,7 @@ export interface GrokObservation {
   schema_version: number;
   observed_at_ms: number;
   health: ObservationHealth;
+  /** Historical sidecars can retain this metadata; owned observations use null. */
   dependency: { name: "grok-swap"; healthy: boolean } | null;
   accounts: GrokAccountView[];
   notes: string[];

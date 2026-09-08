@@ -77,6 +77,7 @@ export function readPrivate<T>(
     const st = fstatSync(fd);
     if (
       !st.isFile() ||
+      st.nlink !== 1 ||
       (st.mode & 0o077) !== 0 ||
       st.uid !== process.getuid?.() ||
       st.size > 4 * 1024 * 1024
@@ -114,7 +115,10 @@ export function writePrivate(path: string, value: unknown): void {
   );
   try {
     try {
-      writeFileSync(fd, JSON.stringify(value) + '\n');
+      const serialized = JSON.stringify(value) + '\n';
+      if (Buffer.byteLength(serialized) > 4 * 1024 * 1024)
+        throw new AccountError('state-too-large', 'Account state exceeded its size limit');
+      writeFileSync(fd, serialized);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -124,6 +128,7 @@ export function writePrivate(path: string, value: unknown): void {
       const st = lstatSync(path);
       if (
         !st.isFile() ||
+        st.nlink !== 1 ||
         st.isSymbolicLink() ||
         (st.mode & 0o077) !== 0 ||
         st.uid !== process.getuid?.()
@@ -162,6 +167,7 @@ function openLock(path: string): number {
   const st = fstatSync(fd);
   if (
     !st.isFile() ||
+    st.nlink !== 1 ||
     (st.mode & 0o077) !== 0 ||
     st.uid !== process.getuid?.()
   ) {

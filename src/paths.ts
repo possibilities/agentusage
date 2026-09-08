@@ -49,11 +49,3 @@ export function statePaths(env: Record<string, string | undefined> = process.env
     grokFullFocusLeaf: join(grokDir, "full-focus-policy.json"),
   };
 }
-
-export function grokSwapArgv(env: Record<string, string | undefined> = process.env): string[] {
-  const bin =
-    env.AGENTUSAGE_GROK_SWAP_BIN && env.AGENTUSAGE_GROK_SWAP_BIN !== ""
-      ? env.AGENTUSAGE_GROK_SWAP_BIN
-      : "grok-swap";
-  return [bin];
-}

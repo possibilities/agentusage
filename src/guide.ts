@@ -94,13 +94,13 @@ export const CONTRACT: Contract = {
     name: 'agentusage',
     version: VERSION,
     purpose:
-      'Claude, Codex, and Grok account usage observations, launch-account balancing, and focus policy. Owns Claude/Codex credentials and shared proxy leases; Grok uses its adapter. Native process ownership stays with the launcher.',
+      'Claude, Codex, and Grok account ownership, OAuth refresh, usage observations, balancing, and focus policy. Claude/Codex launches use shared proxy leases. Native process ownership stays with the launcher.',
     audience: 'operator',
   },
   commands: [
     {
       name: 'accounts',
-      summary: 'Manage owned Claude/Codex accounts',
+      summary: 'Manage owned Claude, Codex, and Grok accounts',
       audience: 'operator',
       subcommands: [
         'list',
@@ -109,6 +109,7 @@ export const CONTRACT: Contract = {
         'enable',
         'disable',
         'remove',
+        'label',
       ].map((action) => ({
         name: action,
         summary: `${action} managed accounts`,
@@ -121,7 +122,7 @@ export const CONTRACT: Contract = {
             type: 'string' as const,
             positional: true,
             required: true,
-            choices: ['claude', 'codex'],
+            choices: action === 'label' ? ['grok'] : ['claude', 'codex', 'grok'],
             description: 'Managed provider.',
           },
           {
@@ -129,7 +130,7 @@ export const CONTRACT: Contract = {
             type: 'string' as const,
             positional: true,
             description:
-              'Account key, native account ID, ordinal, email or label for enable/disable/remove.',
+              'Account key, provider account ID, ordinal, email or label for enable/disable/remove/label.',
           },
           {
             name: '--account',
@@ -140,22 +141,32 @@ export const CONTRACT: Contract = {
             name: '--file',
             type: 'string' as const,
             format: 'path' as const,
-            description: 'Explicit private native OAuth JSON file for import.',
+            description: 'Explicit private native OAuth JSON for Claude/Codex, or a complete Grok inventory snapshot.',
           },
           {
             name: '--label',
             type: 'string' as const,
-            description: 'Operator label for login/import.',
+            description: 'Operator label for login, Claude/Codex import, or the Grok label action.',
           },
           {
             name: '--device-auth',
             type: 'boolean' as const,
             description: 'Use native Codex device login.',
           },
+          {
+            name: '--no-open',
+            type: 'boolean' as const,
+            description: 'Grok login: print the device URL and code without opening a browser.',
+          },
+          {
+            name: '--clear-label',
+            type: 'boolean' as const,
+            description: 'Grok label action: clear the alias; conflicts with --label.',
+          },
           JSON_FLAG,
         ],
         guidance:
-          'Credentials are never printed. Native login uses a private temporary home; stop other refresh-token owners before importing.',
+          'Credentials are never printed. Claude/Codex login uses a private temporary native home; Grok uses xAI device authorization directly. Grok import requires --file and an empty Grok inventory, preserves the complete snapshot, and accepts no account or label override. Stop other refresh-token owners before importing. The label action is Grok-only and requires exactly one of --label TEXT or --clear-label.',
       })),
     },
     {
@@ -365,7 +376,7 @@ export const CONTRACT: Contract = {
           audience: 'operator',
           mutates: true,
           guidance:
-            'Delegates selection to grok-swap. Without --claim it is a dry-run preview; --claim creates a short provider-owned reservation. No Grok harness activation is performed.',
+            'Selects from the owned Grok inventory. Without --claim it is a dry-run preview; --claim creates a short reservation under the account lock. No Grok harness activation is performed.',
           arguments: [
             {
               name: '--strategy',
@@ -383,7 +394,7 @@ export const CONTRACT: Contract = {
             {
               name: '--claim',
               type: 'boolean',
-              description: 'Create a short grok-swap reservation.',
+              description: 'Create a short Grok reservation in AgentUsage.',
             },
             {
               name: '--dry-run',
@@ -557,7 +568,7 @@ export const CONTRACT: Contract = {
         {
           name: 'ref',
           type: 'string',
-          description: 'Managed account key, claude-N or codex-N.',
+          description: 'Managed account key: claude-N, codex-N, or grok-N.',
           positional: true,
           required: true,
           format: 'ref',
@@ -578,6 +589,12 @@ export const CONTRACT: Contract = {
           positional: true,
           choices: ['claude', 'codex', 'grok', 'all'],
           default: 'all',
+        },
+        {
+          name: '--account',
+          type: 'string',
+          description: 'Grok scope only: refresh one account while publishing the complete inventory.',
+          format: 'ref',
         },
         JSON_FLAG,
       ],

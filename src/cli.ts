@@ -35,6 +35,7 @@ import {
 } from './accounts/store.ts';
 import { importFile, loginAccount } from './accounts/login.ts';
 import { accessAccount } from './accounts/credentials.ts';
+import { changeGrokAccount, importGrokState, listGrokAccounts, loginGrokAccount, recoverGrokAccount } from './grok/accounts.ts';
 import { prepareLaunch } from './service/prepare.ts';
 import { linesToText, renderFrameLines } from './render.ts';
 import {
@@ -186,8 +187,8 @@ async function ensureFreshGrok(
   ) {
     return current;
   }
-  // A decision refresh reads grok-swap's durable observation; explicit
-  // network refresh remains `agentusage refresh grok`.
+  // Ordinary refresh respects the owned Grok billing backoff. Explicit
+  // `agentusage refresh grok` also retries accounts currently in backoff.
   const refreshed = await refreshGrokObservation(paths, {
     env,
     freshWithinMs: 0,
@@ -1160,20 +1161,27 @@ async function fullFocusAction(
 
 async function accountsCommand(args: string[]): Promise<number> {
   const [action, provider, ...rest] = args;
-  if (provider !== 'claude' && provider !== 'codex') {
+  if (provider !== 'claude' && provider !== 'codex' && provider !== 'grok') {
     console.error(
-      'agentusage accounts: expected list|import|login|enable|disable|remove claude|codex',
+      'agentusage accounts: expected list|import|login|enable|disable|remove|label claude|codex|grok',
     );
     return 2;
   }
   const flags = parseFlags(
     rest,
-    ['json', 'device-auth'],
+    ['json', 'device-auth', 'no-open', 'clear-label'],
     ['file', 'label', 'account'],
   );
   if (!flags) return 2;
   const paths = statePaths(process.env);
   try {
+    if (provider === 'grok') {
+      const result = await grokAccountsCommand(action, flags, paths);
+      emitJson({ schema_version: 1, ok: true, provider, ...result });
+      return 0;
+    }
+    if (flags.booleans.has('no-open') || flags.booleans.has('clear-label'))
+      throw new AccountError('invalid-option', '--no-open and --clear-label apply to Grok account commands');
     let result: unknown;
     if (action === 'list')
       result = {
@@ -1242,6 +1250,44 @@ async function accountsCommand(args: string[]): Promise<number> {
   }
 }
 
+async function grokAccountsCommand(action: string | undefined, flags: Flags, paths: StatePaths): Promise<object> {
+  const actions = ['list', 'import', 'login', 'enable', 'disable', 'remove', 'label'];
+  if (!action || !actions.includes(action)) throw new AccountError('invalid-action', 'Unknown Grok account action');
+  const allowedStrings = action === 'import' ? ['file']
+    : action === 'login' || action === 'label' ? ['account', 'label']
+    : action === 'list' ? [] : ['account'];
+  const allowedBooleans = ['json', ...(action === 'login' ? ['device-auth', 'no-open'] : action === 'label' ? ['clear-label'] : [])];
+  if ([...flags.strings.keys()].some((name) => !allowedStrings.includes(name)) ||
+      [...flags.booleans].some((name) => !allowedBooleans.includes(name)))
+    throw new AccountError('invalid-option', 'The option does not apply to this Grok account action');
+  const needsSelector = ['enable', 'disable', 'remove', 'label'].includes(action);
+  if (flags.positionals.length > (needsSelector ? 1 : 0) ||
+      (flags.positionals.length > 0 && flags.strings.has('account')))
+    throw new AccountError('invalid-argument', 'Supply exactly one account selector for an account action');
+  if (action === 'list') return { accounts: await listGrokAccounts(paths) };
+  if (action === 'import') {
+    const file = flags.strings.get('file');
+    if (!file) throw new AccountError('missing-file', 'accounts import grok requires --file PATH');
+    return importGrokState(paths, file);
+  }
+  if (action === 'login') return {
+    account: await loginGrokAccount(paths, {
+      label: flags.strings.get('label'), account: flags.strings.get('account'),
+      openBrowser: !flags.booleans.has('no-open'),
+      onPrompt: ({ verificationUri, userCode, expiresIn }) => {
+        console.error(`Open ${verificationUri}\nEnter code: ${userCode}\nWaiting for xAI authorization (expires in ${expiresIn}s)…`);
+      },
+    }),
+  };
+  const selector = flags.positionals[0] ?? flags.strings.get('account');
+  if (!selector) throw new AccountError('missing-account', 'Account action requires a selector');
+  const clearLabel = flags.booleans.has('clear-label');
+  const label = flags.strings.get('label');
+  if (action === 'label' && Number(clearLabel) + Number(label !== undefined) !== 1)
+    throw new AccountError('invalid-option', 'Use exactly one of --label TEXT or --clear-label');
+  return changeGrokAccount(paths, action as 'enable' | 'disable' | 'remove' | 'label', selector, clearLabel ? null : label);
+}
+
 function accountFailure(
   provider: string,
   error: unknown,
@@ -1288,13 +1334,18 @@ async function recoverCommand(args: string[]): Promise<number> {
   const flags = parseFlags(args, ['json'], []);
   if (!flags) return 2;
   const key = flags.positionals[0];
-  if (!key || !/^(claude|codex)-[1-9]\d*$/u.test(key)) {
+  if (!key || !/^(claude|codex|grok)-[1-9]\d*$/u.test(key)) {
     console.error(
-      'agentusage recover: expected claude-N|codex-N; use accounts login to reauthenticate',
+      'agentusage recover: expected claude-N|codex-N|grok-N; use accounts login to reauthenticate',
     );
     return 2;
   }
   try {
+    if (key.startsWith('grok-')) {
+      const account = await recoverGrokAccount(statePaths(process.env), key);
+      emitJson({ schema_version: 1, ok: true, account });
+      return 0;
+    }
     const account = await accessAccount(statePaths(process.env), key);
     emitJson({ schema_version: 1, ok: true, account: publicAccount(account) });
     return 0;
@@ -1308,7 +1359,7 @@ async function recoverCommand(args: string[]): Promise<number> {
 }
 
 async function refreshCommand(args: string[]): Promise<number> {
-  const flags = parseFlags(args, ['json'], []);
+  const flags = parseFlags(args, ['json'], ['account']);
   if (flags === null) return 2;
   const scope = flags.positionals[0] ?? 'all';
   if (
@@ -1318,6 +1369,10 @@ async function refreshCommand(args: string[]): Promise<number> {
     scope !== 'all'
   ) {
     console.error('agentusage refresh: expected claude|codex|grok|all');
+    return 2;
+  }
+  if (flags.positionals.length > 1 || (flags.strings.has('account') && scope !== 'grok')) {
+    console.error('agentusage refresh: --account requires the grok scope');
     return 2;
   }
   const paths = statePaths(process.env);
@@ -1340,6 +1395,7 @@ async function refreshCommand(args: string[]): Promise<number> {
     const result = await refreshGrokObservation(paths, {
       freshWithinMs: 0,
       providerRefresh: true,
+      account: flags.strings.get('account'),
     });
     outcomes.grok = {
       outcome: result.outcome,

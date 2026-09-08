@@ -161,8 +161,8 @@ async function grokLoop(
   while (!signal.aborted) {
     try {
       const started = Date.now();
-      // grok-swap owns network pacing/backoff and its durable last-good data;
-      // the daemon only mirrors `observe` into AgentUsage's sidecar.
+      // The owned Grok inventory retains its billing backoff and last-good data;
+      // this loop publishes the public view alongside the other providers.
       const result = await refreshGrokObservation(paths, {
         freshWithinMs: 60_000,
         env,
