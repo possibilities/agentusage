@@ -1,4 +1,4 @@
-> Claude/Codex ownership and launch contracts below are superseded by [ACCOUNT-OWNERSHIP.md](ACCOUNT-OWNERSHIP.md). Grok and the viewer/policy contracts remain applicable.
+> Claude/Codex ownership and launch contracts below are superseded by [ACCOUNT-OWNERSHIP.md](ACCOUNT-OWNERSHIP.md). Grok account ownership and subprocess contracts are superseded by [ADR 0001](adr/0001-own-grok-account-lifecycle.md). The viewer and focus-policy contracts remain applicable.
 
 # agentusage — build sketch
 
