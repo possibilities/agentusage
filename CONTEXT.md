@@ -24,6 +24,10 @@
 
 **Lane** — Codex windows sharing a quota pool: `main`, `codex-spark`, `code-review`, or another metered feature. _Avoid_: window (one lane contains several).
 
+**Reserve lane** — Opaque Codex additional-lane metadata such as
+`gpt-reserve`. AgentUsage may display its reported meters, but neither it nor
+`normal_model_slug` changes eligibility, routing, or the requested model.
+
 **Spark lane** — independent Codex Spark quota, identified by the provider's limit name or metered feature. Main quota exhaustion does not exhaust Spark.
 
 **Binding window** — a window that limits eligibility: Claude session and week, Codex main primary and secondary, or Grok's included allowance before paid fallback.

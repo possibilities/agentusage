@@ -374,6 +374,12 @@ describe('prepare and lease contract', () => {
     );
     expect(prepared.account_key).toBe('codex-1');
     expect(prepared.env['CODEX_HOME']).toBeUndefined();
+    expect(prepared.args).toEqual([
+      '-c',
+      'model_provider="agentusage"',
+      '-c',
+      expect.stringContaining('requires_openai_auth=false'),
+    ]);
     expect(
       authorizedLease(readLeases(f.paths), prepared.lease!.token).pinned,
     ).toBe(true);

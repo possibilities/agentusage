@@ -22,6 +22,11 @@ quota reassignment. No installer runs.
 Coverage includes Codex exec pinned by native account ID, with a native profile, managed skill/MCP resources
 and user `-c` settings; nested exec resume into the same thread; automatic quota
 rejection and reassignment; and Claude launch/resume in a shared native home.
+The temporary Codex home also contains a fake native ChatGPT login. A stock
+app-server control probe must see it, while the AgentUsage provider must report
+`account:null` and `requiresOpenaiAuth:false`; this proves managed sessions do
+not inherit native account-limit or model-fallback behavior. An explicit Astra
+launch must reach the proxy as Astra, and no managed request may switch to Luna.
 Transport overrides follow all native/resource options and precede literal
 `--`. Codex 0.153.4 requires named profiles as `<name>.config.toml` within the
 native home. The old `[profiles.name]` format is rejected by that release.

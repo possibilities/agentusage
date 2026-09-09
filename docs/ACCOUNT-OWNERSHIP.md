@@ -30,6 +30,11 @@ resources, account pins, and a common history/configuration per harness.
 - Keep native harness homes and AgentLaunch resource arguments. AgentLaunch's
   existing process renews/releases the session lease over HTTP; no additional
   per-session wrapper, app-server, or heartbeat process is introduced.
+- Declare AgentUsage's Codex model provider with
+  `requires_openai_auth=false`. Managed Codex sessions keep the shared native
+  home for history and configuration, but native OpenAI authentication and its
+  account-limit features cannot select or change their model. The opaque lease
+  bearer is the provider-specific authentication for the loopback proxy.
 - Provide account list, native login/import, disable/enable, remove, and
   recovery commands in the existing CLI. Preserve focus, quota lanes, reset
   credits, dry runs, and concurrency-aware selection.

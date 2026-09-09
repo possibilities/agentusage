@@ -157,7 +157,10 @@ Refusal is `{schema_version:1,ok:false,provider,refusal,detail}` with nonzero ex
 
 Apply `unset_env`, then `env`, without changing either native home. Claude gets
 its opaque OAuth bearer and loopback base URL. Codex gets a custom Responses
-provider. Insert its `args` after native/resource options and before the first
+provider that explicitly disables native OpenAI authentication; its opaque
+lease bearer is provider-specific authentication for the loopback proxy.
+Native account-limit metadata cannot change a managed session's model. Insert
+its `args` after native/resource options and before the first
 literal `--`: current stock Codex discards global `-c` overrides when a
 subcommand has local overrides. Resources also need the effective scope for
 nested `exec resume`. Reject explicit conflicting provider/auth options before

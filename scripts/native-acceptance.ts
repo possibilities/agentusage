@@ -12,7 +12,8 @@ import { strict as assert } from 'node:assert';
 import { statePaths } from '../src/paths.ts';
 import { importAccount, changePool } from '../src/accounts/store.ts';
 import { startProxy } from '../src/service/proxy.ts';
-import { readLeases } from '../src/service/leases.ts';
+import { readLeases, renewLease } from '../src/service/leases.ts';
+import { prepareLaunch } from '../src/service/prepare.ts';
 import { readCapped } from '../src/accounts/http.ts';
 // Opt-in acceptance against installed native CLIs, isolated fake credentials and
 // loopback mock upstreams. No production homes or installed commands are changed.
@@ -41,6 +42,104 @@ const calls: Array<{
   account: string | null;
   body: Record<string, unknown> | null;
 }> = [];
+
+function fakeNativeChatgptAuth() {
+  const encode = (value: unknown) =>
+    Buffer.from(JSON.stringify(value)).toString('base64url');
+  const idToken = [
+    encode({ alg: 'none', typ: 'JWT' }),
+    encode({
+      email: 'native@example.invalid',
+      email_verified: true,
+      'https://api.openai.com/auth': {
+        chatgpt_user_id: 'native-user',
+        user_id: 'native-user',
+        chatgpt_account_id: 'native-account',
+        chatgpt_plan_type: 'pro',
+      },
+    }),
+    encode('signature'),
+  ].join('.');
+  return {
+    OPENAI_API_KEY: null,
+    tokens: {
+      id_token: idToken,
+      access_token: 'native-access-token',
+      refresh_token: 'native-refresh-token',
+    },
+    last_refresh: new Date().toISOString(),
+  };
+}
+
+async function readNativeCodexAccount(
+  args: string[],
+  childEnv: Record<string, string | undefined>,
+) {
+  const child = Bun.spawn([binaries.codex!, ...args, 'app-server'], {
+    env: childEnv,
+    cwd: root,
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const stderr = readCapped(new Response(child.stderr), 1024 * 1024);
+  const reader = child.stdout.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  const received: Array<Record<string, unknown>> = [];
+  const send = async (message: Record<string, unknown>) => {
+    child.stdin.write(JSON.stringify(message) + '\n');
+    await child.stdin.flush();
+  };
+  const readResponse = async (id: number) => {
+    while (true) {
+      const newline = buffered.indexOf('\n');
+      if (newline >= 0) {
+        const line = buffered.slice(0, newline);
+        buffered = buffered.slice(newline + 1);
+        try {
+          const message = JSON.parse(line) as Record<string, unknown>;
+          received.push(message);
+          if (message.id === id) return message;
+        } catch {}
+        continue;
+      }
+      const chunk = await reader.read();
+      if (chunk.done)
+        throw new Error(`Codex account probe ended before response ${id}: ${JSON.stringify(received).slice(-2000)}`);
+      buffered += decoder.decode(chunk.value, { stream: true });
+    }
+  };
+  const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+  try {
+    await send({
+      method: 'initialize',
+      id: 1,
+      params: {
+        clientInfo: { name: 'agentusage_acceptance', version: '0.1.0' },
+        capabilities: { experimentalApi: true },
+      },
+    });
+    await readResponse(1);
+    await send({ method: 'initialized' });
+    await send({ method: 'account/read', id: 2, params: { refreshToken: false } });
+    const response = await readResponse(2);
+    assert.ok(response && typeof response.result === 'object' && response.result !== null,
+      `Codex account probe returned no account/read result: ${JSON.stringify(response)}`);
+    return response.result as {
+      account: { type?: string } | null;
+      requiresOpenaiAuth: boolean;
+    };
+  } finally {
+    clearTimeout(timer);
+    child.stdin.end();
+    await reader.cancel();
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await child.exited;
+    await stderr;
+  }
+}
+
 let quota = false;
 let number = 0;
 const upstream = Bun.serve({
@@ -182,6 +281,11 @@ try {
     'model_reasoning_effort="low"\n',
   );
   writeFileSync(
+    join(env.CODEX_HOME, 'auth.json'),
+    JSON.stringify(fakeNativeChatgptAuth()),
+    { mode: 0o600 },
+  );
+  writeFileSync(
     join(env.CLAUDE_CONFIG_DIR, '.claude.json'),
     JSON.stringify({ hasCompletedOnboarding: true }),
   );
@@ -226,6 +330,34 @@ try {
     }
   });
   proxy = await startProxy(paths, { env, port: 0 });
+  const nativeAccount = await readNativeCodexAccount([], env);
+  assert.equal(nativeAccount.requiresOpenaiAuth, true,
+    'native auth fixture must be visible to the built-in provider');
+  assert.equal(nativeAccount.account?.type, 'chatgpt',
+    'native auth fixture must identify as ChatGPT');
+  const preparedProbe = await prepareLaunch(
+    paths,
+    'codex',
+    { account: 'proof-codex-1' },
+    env,
+  );
+  const managedEnv: Record<string, string | undefined> = {
+    ...env,
+    ...preparedProbe.env,
+  };
+  for (const name of preparedProbe.unset_env) delete managedEnv[name];
+  try {
+    const managedAccount = await readNativeCodexAccount(
+      preparedProbe.args,
+      managedEnv,
+    );
+    assert.deepEqual(managedAccount, {
+      account: null,
+      requiresOpenaiAuth: false,
+    }, 'AgentUsage provider must hide ambient native OpenAI account features');
+  } finally {
+    await renewLease(paths, preparedProbe.lease!.token, true);
+  }
   async function run(label: string, args: string[]) {
     const child = Bun.spawn(
       [process.execPath, join(launchRoot!, 'src/main.ts'), ...args],
@@ -282,6 +414,8 @@ try {
     'proof-codex-1',
     '-p',
     'proof',
+    '--model',
+    'gpt-6-astra',
     'exec',
     '--skip-git-repo-check',
     '--json',
@@ -292,6 +426,11 @@ try {
     'Say proof ok',
   ]);
   assert.ok(out.includes('proof ok'), 'native Codex emitted assistant content');
+  assert.equal(
+    calls.filter((call) => call.path.endsWith('/responses')).at(-1)?.body?.model,
+    'gpt-6-astra',
+    'Explicit Astra launch changed model before reaching AgentUsage',
+  );
   const id = JSON.parse(
     out.split('\n').find((x) => x.includes('thread.started'))!,
   ).thread_id;
@@ -382,6 +521,11 @@ try {
   assert.ok(
     JSON.stringify(claudeRequests.at(-1)?.body).includes('Say proof ok'),
     'Claude resume kept native history',
+  );
+  assert.equal(
+    calls.some((call) => call.body?.model === 'gpt-5.6-luna'),
+    false,
+    'Managed Codex requests must not switch to Luna from native account metadata',
   );
   if (process.argv.includes('--interactive-window')) {
     const manifest = join(root, 'interactive.json');

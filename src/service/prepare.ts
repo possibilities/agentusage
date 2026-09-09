@@ -139,7 +139,7 @@ export async function prepareLaunch(
             '-c',
             'model_provider="agentusage"',
             '-c',
-            `model_providers.agentusage={name="AgentUsage",base_url="${url}/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",supports_websockets=false}`,
+            `model_providers.agentusage={name="AgentUsage",base_url="${url}/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",requires_openai_auth=false,supports_websockets=false}`,
           ]
         : [];
     return {

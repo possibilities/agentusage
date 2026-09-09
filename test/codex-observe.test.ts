@@ -64,6 +64,36 @@ describe("owned Codex observations", () => {
     expect(sparkLane(view)?.windows).toHaveLength(2);
     expect(selectCodexSpark(observation).ok).toBe(true);
   });
+  test("reserve metadata is display-only and never restores main eligibility", () => {
+    const a = managed();
+    a.usage!.value.rate_limit = {
+      allowed: false,
+      limit_reached: true,
+      primary_window: { used_percent: 100, limit_window_seconds: 18000 },
+      secondary_window: { used_percent: 100, limit_window_seconds: 604800 },
+    };
+    a.usage!.value.additional_rate_limits = [{
+      limit_name: "gpt-reserve",
+      metered_feature: "gpt-reserve",
+      normal_model_slug: "gpt-5.6-luna",
+      rate_limit: {
+        primary_window: { used_percent: 0, limit_window_seconds: 18000 },
+        secondary_window: { used_percent: 0, limit_window_seconds: 604800 },
+      },
+    }];
+
+    const view = buildCodexObservation([a], Date.now()).accounts[0]!;
+    expect(view).toMatchObject({
+      eligible: false,
+      headroomPercent: 0,
+      exclusions: ["quota_exhausted"],
+    });
+    expect(view.lanes.find((lane) => lane.id === "codex-gpt-reserve")).toMatchObject({
+      binding: false,
+      windows: [{ remainingPercent: 100 }, { remainingPercent: 100 }],
+    });
+    expect(JSON.stringify(view)).not.toContain("gpt-5.6-luna");
+  });
   test("failed usage preserves last-good display and refuses both lanes", () => {
     const a = managed("codex", 1, { usage_error: { code: "http-429", status: 429 } });
     const observation = buildCodexObservation([a], Date.now());
