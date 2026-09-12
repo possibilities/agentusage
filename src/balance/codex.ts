@@ -125,7 +125,6 @@ function choose(
   }> = [];
   for (const a of observation.accounts) {
     if (!codexAuthEligible(a)) continue;
-    if ((a.quotaBlockedUntilMs?.[lane] ?? 0) > now) continue;
     if (requestedKey !== undefined && a.accountKey !== requestedKey) continue;
     const windows = lane === 'main' ? mainLane(a) : sparkLane(a);
     const fresh =
@@ -139,6 +138,19 @@ function choose(
     if (headroom === 0) continue;
     if (headroom === null && !(lane === 'main' && options.allowUnknown))
       continue;
+    const quotaBlockedUntil = a.quotaBlockedUntilMs?.[lane] ?? 0;
+    if (quotaBlockedUntil > now) {
+      const quotaBlockedAt = a.quotaBlockedAtMs?.[lane];
+      // Fresh positive capacity is stronger evidence than a cooldown recorded
+      // by an older observer. Timestamp-less blocks predate this field and
+      // are reconciled by the first current measurement during upgrade.
+      const measurementConfirmsRecovery =
+        headroom !== null &&
+        headroom > 0 &&
+        (quotaBlockedAt === undefined ||
+          (a.measuredAtMs !== null && a.measuredAtMs > quotaBlockedAt));
+      if (!measurementConfirmsRecovery) continue;
+    }
     const leases = counts?.get(a.accountKey) ?? a.activeLeases;
     pool.push({
       account: a,

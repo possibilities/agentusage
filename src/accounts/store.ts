@@ -40,6 +40,8 @@ export interface ManagedAccount {
   refresh_after_ms: number;
   last_selected_at_ms: number;
   quota_blocks: Record<string, number>;
+  /** When each lane's most recent confirmed quota rejection was observed. */
+  quota_blocked_at_ms?: Record<string, number>;
 }
 export interface AccountPool {
   schema_version: 1;
@@ -137,6 +139,15 @@ function validatePool(value: unknown): AccountPool {
       )
     )
       throw new AccountError('invalid-state', 'Invalid quota cooldown');
+    if (
+      x.quota_blocked_at_ms !== undefined &&
+      (!record(x.quota_blocked_at_ms) ||
+        Object.entries(x.quota_blocked_at_ms as object).some(
+          ([lane, at]) =>
+            !['main', 'codex-spark'].includes(lane) || !time(at),
+        ))
+    )
+      throw new AccountError('invalid-state', 'Invalid quota cooldown timestamp');
   }
   return value as AccountPool;
 }

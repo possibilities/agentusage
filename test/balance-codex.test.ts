@@ -198,10 +198,49 @@ describe("owned selection and reservations", () => {
     expect((await selectCodexAccount({ env: state.env, observation, nowMs: NOW, allowUnknown: true })).ok).toBe(false);
   });
   test("main quota cooldown does not disable Spark, and expires on schedule", () => {
-    const observation = codexObservation([account("codex-1", { lanes: [...mainLanes(70, 70), sparkLanes(50, 50)[1]!], quotaBlockedUntilMs: { main: NOW + 60000 } })]);
+    const observation = codexObservation([account("codex-1", { lanes: [...mainLanes(70, 70), sparkLanes(50, 50)[1]!], quotaBlockedUntilMs: { main: NOW + 60000 }, quotaBlockedAtMs: { main: NOW - 30_000 } })]);
     const leases = { schema_version: 1 as const, leases: [], last_selected: {} };
     expect(chooseCodexWithLeases(observation, "main", { nowMs: NOW }, leases, null).ok).toBe(false);
     expect(chooseCodexWithLeases(observation, "codex-spark", { nowMs: NOW }, leases, null).ok).toBe(true);
     expect(chooseCodexWithLeases(observation, "main", { nowMs: NOW + 60001 }, leases, null).ok).toBe(true);
+  });
+  test("a fresh positive measurement supersedes legacy or older cooldowns, not newer ones", () => {
+    const leases = { schema_version: 1 as const, leases: [], last_selected: {} };
+    const blocked = account("codex-1", {
+      lanes: mainLanes(70, 70),
+      quotaBlockedUntilMs: { main: NOW + 60_000 },
+      quotaBlockedAtMs: { main: NOW - 120_000 },
+    });
+    expect(
+      chooseCodexWithLeases(
+        codexObservation([blocked]),
+        "main",
+        { nowMs: NOW },
+        leases,
+        null,
+      ).ok,
+    ).toBe(true);
+
+    blocked.quotaBlockedAtMs = { main: NOW - 30_000 };
+    expect(
+      chooseCodexWithLeases(
+        codexObservation([blocked]),
+        "main",
+        { nowMs: NOW },
+        leases,
+        null,
+      ).ok,
+    ).toBe(false);
+
+    blocked.quotaBlockedAtMs = undefined;
+    expect(
+      chooseCodexWithLeases(
+        codexObservation([blocked]),
+        "main",
+        { nowMs: NOW },
+        leases,
+        null,
+      ).ok,
+    ).toBe(true);
   });
 });

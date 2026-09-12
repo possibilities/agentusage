@@ -90,6 +90,8 @@ export async function recordQuotaExhaustion(
         account.quota_blocks[lane] ?? 0,
         until,
       );
+      account.quota_blocked_at_ms ??= {};
+      account.quota_blocked_at_ms[lane] = Date.now();
       account.next_poll_at_ms = Math.min(account.next_poll_at_ms, until);
     }
   });

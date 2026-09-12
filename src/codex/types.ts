@@ -63,6 +63,7 @@ export interface CodexAccountView {
   headroomPercent: number | null;
   activeLeases: number;
   quotaBlockedUntilMs?: Record<string, number>;
+  quotaBlockedAtMs?: Record<string, number>;
   nextPollAt: string | null;
   lastError: { code: string; httpStatus: number | null; summary: string | null } | null;
 }
@@ -150,6 +151,16 @@ export function validateCodexObservation(value: unknown): CodexObservation | nul
     }
     const resetCreditsAvailable = account.resetCreditsAvailable;
     if (account.quotaBlockedUntilMs !== undefined && (typeof account.quotaBlockedUntilMs !== 'object' || account.quotaBlockedUntilMs === null || Array.isArray(account.quotaBlockedUntilMs) || Object.values(account.quotaBlockedUntilMs).some(x => typeof x !== 'number' || !Number.isFinite(x) || x < 0))) return null;
+    if (
+      account.quotaBlockedAtMs !== undefined &&
+      (typeof account.quotaBlockedAtMs !== 'object' ||
+        account.quotaBlockedAtMs === null ||
+        Array.isArray(account.quotaBlockedAtMs) ||
+        Object.values(account.quotaBlockedAtMs).some(
+          (x) => typeof x !== 'number' || !Number.isSafeInteger(x) || x < 0,
+        ))
+    )
+      return null;
     if (
       resetCreditsAvailable !== undefined &&
       resetCreditsAvailable !== null &&

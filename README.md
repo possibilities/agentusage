@@ -185,6 +185,8 @@ prepares afresh. Its JSON `command` is the planned native argv;
 
 Every resume selects again. The proxy also records confirmed Codex
 `usage_limit_reached` HTTP 429 responses immediately as lane-specific cooldowns.
+A newer trusted usage measurement with positive capacity clears that lane's
+cooldown; an older measurement cannot override a later rejection.
 For an unpinned, self-contained Responses request, it can reassign the lease and
 retry against another eligible account, with at most three account attempts.
 It never retries across accounts for generic throttling, 5xx errors, disconnects,

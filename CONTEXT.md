@@ -46,6 +46,6 @@
 
 **Reservation** — a short-lived selection-pressure record. Claude balance keeps a local ledger; managed launches also hold session leases. Grok's inventory records reservations for 1–300 seconds when a caller explicitly claims a selection.
 
-**Quota cooldown** — a lane-specific exclusion recorded from an explicit Codex usage-limit rejection. It is separate from transient request throttling and survives daemon restart.
+**Quota cooldown** — a lane-specific exclusion recorded from an explicit Codex usage-limit rejection. It is separate from transient request throttling and survives daemon restart; a newer trusted positive measurement for that lane confirms recovery and clears it.
 
 **Launcher** — the process owner, such as AgentLaunch, that applies prepare arguments and environment, starts the native CLI, and maintains its lease. Native homes, trust, configuration and history remain native.

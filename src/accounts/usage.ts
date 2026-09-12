@@ -14,6 +14,11 @@ import {
 import { jsonBody, providerURL, retryDelay, type Env } from './http.ts';
 import { parseClaudeUsage } from '../claude/observe.ts';
 import { hasCodexBindingWindows, parseCodexUsage } from '../codex/observe.ts';
+import {
+  laneHeadroomPercent,
+  MAIN_LANE_ID,
+  SPARK_LANE_ID,
+} from '../codex/types.ts';
 
 export async function refreshUsage(
   paths: StatePaths,
@@ -116,12 +121,40 @@ export async function refreshUsage(
         }
       }
       // Parsers decide whether a successful payload contains decision-grade windows.
+      const measuredAtMs = Date.now();
+      const codexUsage =
+        provider === 'codex' ? parseCodexUsage(body, measuredAtMs) : null;
       await changePool(paths, (pool) => {
         const current = pool.accounts.find((x) => x.key === key);
         if (current) {
-          current.usage = { measured_at_ms: Date.now(), value: body };
+          current.usage = { measured_at_ms: measuredAtMs, value: body };
           current.usage_error = null;
           current.next_poll_at_ms = Date.now() + 180_000;
+          if (codexUsage !== null) {
+            for (const laneId of [MAIN_LANE_ID, SPARK_LANE_ID]) {
+              const lane = codexUsage.lanes.find(
+                (candidate) => candidate.id === laneId,
+              );
+              const headroom =
+                lane === undefined ? null : laneHeadroomPercent(lane);
+              const confirmsCapacity =
+                headroom !== null &&
+                headroom > 0 &&
+                (laneId !== MAIN_LANE_ID || codexUsage.limitReached !== true);
+              const blockedAt = current.quota_blocked_at_ms?.[laneId];
+              if (
+                confirmsCapacity &&
+                (blockedAt === undefined || measuredAtMs > blockedAt)
+              ) {
+                delete current.quota_blocks[laneId];
+                if (current.quota_blocked_at_ms !== undefined) {
+                  delete current.quota_blocked_at_ms[laneId];
+                  if (Object.keys(current.quota_blocked_at_ms).length === 0)
+                    delete current.quota_blocked_at_ms;
+                }
+              }
+            }
+          }
         }
       });
     } catch (e) {

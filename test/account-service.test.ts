@@ -473,8 +473,34 @@ describe('shared native proxy', () => {
     expect(readPool(f.paths).accounts[0]!.quota_blocks['main']).toBeGreaterThan(
       Date.now(),
     );
+    expect(
+      readPool(f.paths).accounts[0]!.quota_blocked_at_ms?.main,
+    ).toBeGreaterThan(0);
     const resumed = await prepareLaunch(f.paths, 'codex', {}, f.env);
     expect(resumed.account_key).toBe('codex-2');
+  });
+  test('fresh Codex usage clears recovered lanes but preserves exhausted lane cooldowns', async () => {
+    const f = fixtureState();
+    const now = Date.now();
+    const account = managed('codex', 1, {
+      next_poll_at_ms: 0,
+      quota_blocks: { main: now + 60_000, 'codex-spark': now + 60_000 },
+      quota_blocked_at_ms: { main: now - 60_000, 'codex-spark': now - 60_000 },
+    });
+    await seed(f, [account]);
+    const server = upstream(() => Response.json(codexUsage(20, 100)));
+    const env = {
+      ...f.env,
+      AGENTUSAGE_TEST_CODEX_ORIGIN: server.url.origin,
+    };
+
+    await refreshUsage(f.paths, 'codex', env);
+
+    const refreshed = readPool(f.paths).accounts[0]!;
+    expect(refreshed.quota_blocks).toEqual({ 'codex-spark': now + 60_000 });
+    expect(refreshed.quota_blocked_at_ms).toEqual({
+      'codex-spark': now - 60_000,
+    });
   });
   test.each([
     'pin',
