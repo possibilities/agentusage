@@ -1,3 +1,5 @@
+> *Slop Made With Sweat: Made with a lot of love by someone who loves code but read none of it.*
+
 # agentusage
 
 AgentUsage owns Claude, Codex, and Grok accounts, OAuth refresh, usage
