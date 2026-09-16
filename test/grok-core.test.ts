@@ -43,6 +43,48 @@ describe("billing normalization", () => {
     expect(result.included.resetsAt).toBe("2026-10-01T00:00:00.000Z");
   });
 
+  test("treats an omitted unified credits percentage as proto3 zero", () => {
+    const result = normalizeBilling({
+      config: {
+        currentPeriod: {
+          type: "USAGE_PERIOD_TYPE_WEEKLY",
+          start: "2026-09-14T17:06:39.757754+00:00",
+          end: "2026-09-21T17:06:39.757754+00:00",
+        },
+        isUnifiedBillingUser: true,
+        onDemandCap: {},
+        onDemandUsed: {},
+        prepaidBalance: {},
+      },
+    });
+    expect(result.included).toEqual({
+      usedPercent: 0,
+      remainingPercent: 100,
+      periodType: "USAGE_PERIOD_TYPE_WEEKLY",
+      periodStart: "2026-09-14T17:06:39.757Z",
+      resetsAt: "2026-09-21T17:06:39.757Z",
+    });
+  });
+
+  test("does not infer zero from an ambiguous missing percentage", () => {
+    const currentPeriod = {
+      type: "USAGE_PERIOD_TYPE_WEEKLY",
+      start: "2026-09-14T17:06:39.757754+00:00",
+      end: "2026-09-21T17:06:39.757754+00:00",
+    };
+    expect(normalizeBilling({ config: { currentPeriod } }).included.usedPercent).toBeNull();
+    expect(normalizeBilling({ config: { currentPeriod, isUnifiedBillingUser: false } }).included.usedPercent).toBeNull();
+    expect(normalizeBilling({
+      config: { currentPeriod, isUnifiedBillingUser: true, creditUsagePercent: null },
+    }).included.usedPercent).toBeNull();
+    expect(normalizeBilling({
+      config: {
+        currentPeriod: { ...currentPeriod, end: "not-a-date" },
+        isUnifiedBillingUser: true,
+      },
+    }).included.usedPercent).toBeNull();
+  });
+
   test("treats a malformed cent object as unknown while preserving proto empty-object zero", () => {
     expect(normalizeBilling({ config: { creditUsagePercent: 10, prepaidBalance: {} } }).prepaid.balanceUsd).toBe(0);
     expect(normalizeBilling({ config: { creditUsagePercent: 10, prepaidBalance: { unexpected: true } } }).prepaid.balanceUsd).toBeNull();
@@ -145,4 +187,3 @@ describe("selection", () => {
     }
   });
 });
-

@@ -95,19 +95,31 @@ export function normalizeBilling(value: unknown): NormalizedBilling {
   const config = nullableRecord(top.config);
   if (!config) throw new GrokError("billing_response_invalid", "xAI billing response omitted config");
 
+  const period = nullableRecord(config.currentPeriod);
+  const periodType = stringOrNull(period?.type);
+  const periodStart = isoOrNull(period?.start) || isoOrNull(config.billingPeriodStart);
+  const resetsAt = isoOrNull(period?.end) || isoOrNull(config.billingPeriodEnd);
+
   const monthlyLimit = cents(config.monthlyLimit);
   const legacyUsed = cents(config.used);
   let usedPercent = finite(config.creditUsagePercent);
   if (usedPercent === null && monthlyLimit !== null && monthlyLimit > 0 && legacyUsed !== null) {
     usedPercent = (legacyUsed / monthlyLimit) * 100;
   }
+  // GetGrokCreditsConfig is a proto3 response. Its zero-valued scalar is
+  // omitted from JSON, so a fresh unified-billing period with no percentage
+  // field means exactly 0% used. Keep this inference narrowly tied to the
+  // modern credits shape; malformed or legacy payloads remain unknown.
+  if (
+    usedPercent === null &&
+    !Object.hasOwn(config, "creditUsagePercent") &&
+    config.isUnifiedBillingUser === true &&
+    (periodType === "USAGE_PERIOD_TYPE_WEEKLY" || periodType === "USAGE_PERIOD_TYPE_MONTHLY") &&
+    isoOrNull(period?.start) !== null &&
+    isoOrNull(period?.end) !== null
+  ) usedPercent = 0;
   if (usedPercent !== null) usedPercent = clamp(usedPercent, 0, 100);
   const remainingPercent = usedPercent === null ? null : clamp(100 - usedPercent, 0, 100);
-
-  const period = nullableRecord(config.currentPeriod);
-  const periodType = stringOrNull(period?.type);
-  const periodStart = isoOrNull(period?.start) || isoOrNull(config.billingPeriodStart);
-  const resetsAt = isoOrNull(period?.end) || isoOrNull(config.billingPeriodEnd);
 
   const prepaidBalance = cents(config.prepaidBalance);
   const onDemandUsed = cents(config.onDemandUsed);

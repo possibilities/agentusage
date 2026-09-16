@@ -47,6 +47,10 @@ describe('Grok account ownership and explicit snapshot import', () => {
     const fixture = fixtureState();
     const file = join(fixture.root, 'input.json');
     writeFileSync(file, JSON.stringify(emptyState()), { mode: 0o644 });
+    // AgentUsage itself can run under a privacy-preserving 0077 umask. Force
+    // the unsafe fixture after creation so the assertion is independent of
+    // the test runner's process umask.
+    chmodSync(file, 0o644);
     await expect(importGrokState(fixture.paths, file)).rejects.toMatchObject({ code: 'unsafe-state' });
     chmodSync(file, 0o600);
     linkSync(file, join(fixture.root, 'linked.json'));

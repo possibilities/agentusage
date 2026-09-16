@@ -23,6 +23,10 @@
   joins the locked Codex sidecar and managed-account pool into the sanitized
   usage and generation input required by the composer. It performs no provider
   refresh, account mutation or selection.
+- [0007: Interpret an omitted Grok credits percentage as zero](0007-interpret-omitted-grok-credit-percent-as-zero.md)
+  makes a complete modern unified-billing period with an omitted proto3 usage
+  scalar decision-grade as 0% used, while ambiguous response shapes remain
+  unknown.
 - The sketch's viewer and focus-policy contracts remain applicable; its swap
   examples are historical wherever the documents above replace them.
 
