@@ -27,6 +27,9 @@
   makes a complete modern unified-billing period with an omitted proto3 usage
   scalar decision-grade as 0% used, while ambiguous response shapes remain
   unknown.
+- [0008: Project Grok in atomic routing evidence](0008-project-grok-in-atomic-routing-evidence.md)
+  upgrades the public projection to an atomic Codex-plus-Grok snapshot with
+  credential-correlated samples and lossless combined revisions.
 - The sketch's viewer and focus-policy contracts remain applicable; its swap
   examples are historical wherever the documents above replace them.
 

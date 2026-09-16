@@ -73,6 +73,8 @@ function assertObservation(value: unknown): void {
   }
   if (value.lastGood === null) return;
   if (!isRecord(value.lastGood) || !validIso(value.lastGood.observedAt) ||
+    !(value.lastGood.credentialFingerprint === undefined ||
+      (typeof value.lastGood.credentialFingerprint === "string" && /^[a-f0-9]{64}$/u.test(value.lastGood.credentialFingerprint))) ||
     !isRecord(value.lastGood.included) || !nullableNumber(value.lastGood.included.usedPercent) || !nullableNumber(value.lastGood.included.remainingPercent) ||
     !nullableString(value.lastGood.included.periodType) || !nullableString(value.lastGood.included.periodStart) || !nullableString(value.lastGood.included.resetsAt) ||
     !isRecord(value.lastGood.prepaid) || !nullableNumber(value.lastGood.prepaid.balanceUsd) ||

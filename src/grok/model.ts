@@ -36,7 +36,11 @@ export interface ObservationError {
 }
 
 export interface StoredObservation {
-  lastGood: (NormalizedBilling & { observedAt: string }) | null;
+  lastGood: (NormalizedBilling & {
+    observedAt: string;
+    /** Private correlation proof; never projected to public observations. */
+    credentialFingerprint?: string;
+  }) | null;
   lastAttemptAt: string | null;
   failureCount: number;
   nextAttemptAtMs: number | null;

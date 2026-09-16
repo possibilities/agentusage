@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { NormalizedBilling, StoreState, StoredAccount } from "../src/grok/model.ts";
 import type { StatePaths } from "../src/paths.ts";
 import { withState } from "../src/grok/store.ts";
+import { credentialFingerprint } from "../src/grok/billing.ts";
 export function billing(overrides: Partial<NormalizedBilling> = {}): NormalizedBilling {
   return {
     included: { usedPercent: 25, remainingPercent: 75, periodType: "USAGE_PERIOD_TYPE_WEEKLY", periodStart: "2026-09-01T00:00:00.000Z", resetsAt: "2026-09-08T00:00:00.000Z" },
@@ -30,7 +31,11 @@ export function account(ordinal: number, observed: NormalizedBilling | null = bi
       clientId: "b1a00492-073a-47ea-816f-4c329264a828",
     },
     observation: {
-      lastGood: observed ? { ...observed, observedAt: new Date(now).toISOString() } : null,
+      lastGood: observed ? {
+        ...observed,
+        observedAt: new Date(now).toISOString(),
+        credentialFingerprint: credentialFingerprint(`access-${ordinal}`),
+      } : null,
       lastAttemptAt: observed ? new Date(now).toISOString() : null,
       failureCount: 0,
       nextAttemptAtMs: null,

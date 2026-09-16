@@ -247,7 +247,7 @@ export const CONTRACT: Contract = {
       mutates: false,
       blocking: false,
       guidance:
-        'The evidence subcommand takes the Codex observation and account locks, validates an exact identity/generation join, and emits one sanitized snapshot. It refuses lock contention or inconsistent state and never contacts a provider.',
+        'The evidence subcommand locks Codex and Grok observations with their account state, validates exact identity, credential, and generation joins, and emits one sanitized snapshot. It refuses lock contention or inconsistent state and never contacts a provider.',
       subcommands: [
         {
           name: 'evidence',
@@ -260,7 +260,7 @@ export const CONTRACT: Contract = {
             {
               invocation: 'agentusage routing evidence --json',
               description:
-                'Return sanitized Codex quota evidence and opaque account/provider generations.',
+                'Return sanitized Codex and Grok quota evidence with opaque account/provider generations.',
             },
           ],
         },

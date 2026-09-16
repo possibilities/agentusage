@@ -3,13 +3,32 @@ import { existsSync } from 'node:fs';
 import { accountLock, readPool, changePool } from '../src/accounts/store.ts';
 import { lockFile } from '../src/accounts/storage.ts';
 import { buildCodexObservation } from '../src/codex/observe.ts';
-import { nextCodexSourceRevision } from '../src/observe.ts';
+import { buildGrokObservation } from '../src/grok/observe.ts';
+import { lockPath as grokAccountLock, readState as readGrokState } from '../src/grok/store.ts';
+import { nextCodexSourceRevision, nextGrokSourceRevision } from '../src/observe.ts';
 import {
   readRoutingEvidence,
   RoutingEvidenceError,
 } from '../src/routing-evidence/index.ts';
 import { writeSidecar } from '../src/sidecar.ts';
 import { fixtureState, managed, seed } from './managed-fixtures.ts';
+import { account as grokAccount, seedGrok } from './grok-fixtures.ts';
+
+async function seedObservedGrok(
+  state: ReturnType<typeof fixtureState>,
+  nowMs: number,
+) {
+  const account = grokAccount(2, undefined, nowMs);
+  account.alias = 'private-grok-label';
+  account.email = 'private-grok@example.test';
+  const observation = buildGrokObservation([account], nowMs);
+  observation.source_revision = nextGrokSourceRevision(null, nowMs);
+  observation.notes = ['private-grok-provider-note'];
+  await seedGrok(state.paths, [account]);
+  writeSidecar(state.paths.grokObservation, observation);
+  (await lockFile(state.paths.grokRefreshLock, 0))();
+  return { account, observation };
+}
 
 async function observedState() {
   const state = fixtureState();
@@ -35,31 +54,51 @@ async function observedState() {
   observation.notes = ['private-provider-note'];
   writeSidecar(state.paths.codexObservation, observation);
   (await lockFile(state.paths.codexRefreshLock, 0))();
-  return { state, observation };
+  const grok = await seedObservedGrok(state, observation.observed_at_ms + 1);
+  return { state, observation, grok };
 }
 
 describe('routing evidence projection', () => {
   test('emits one sanitized composer-ready quota snapshot', async () => {
-    const { state, observation } = await observedState();
+    const { state, observation, grok } = await observedState();
     const nowMs = observation.observed_at_ms + 100;
     const projection = await readRoutingEvidence(state.paths, nowMs);
 
     expect(projection).toMatchObject({
-      schema_version: 1,
-      source_revision: observation.source_revision,
-      generated_at: new Date(observation.observed_at_ms).toISOString(),
+      schema_version: 2,
+      provider_source_revisions: {
+        codex: observation.source_revision,
+        grok: grok.observation.source_revision,
+      },
+      generated_at: new Date(grok.observation.observed_at_ms).toISOString(),
       account_generations: [
         {
           account_key: 'codex-1',
           account_generation: 1,
           provider_generation: 1,
         },
+        {
+          account_key: 'grok-2',
+          account_generation: 2,
+          provider_generation: 1,
+        },
       ],
       usage: {
         schema_version: 1,
-        generated_at: new Date(observation.observed_at_ms).toISOString(),
+        generated_at: new Date(grok.observation.observed_at_ms).toISOString(),
         claude: null,
-        grok: null,
+        grok: {
+          health: 'ok',
+          observed_at_ms: grok.observation.observed_at_ms,
+          accounts: [{
+            accountKey: 'grok-2',
+            displayName: 'grok-2',
+            alias: null,
+            email: null,
+            subscriptionTier: null,
+          }],
+          notes: [],
+        },
         codex: {
           health: 'ok',
           observed_at_ms: observation.observed_at_ms,
@@ -79,7 +118,12 @@ describe('routing evidence projection', () => {
       'private-provider-note',
       'ARBITRARY_PRIVATE_STRING',
       'PRIVATE_FEATURE',
+      'private-grok@example.test',
+      'private-grok-label',
+      'private-grok-provider-note',
+      'SuperGrok',
     ]) expect(encoded).not.toContain(secret);
+    expect(projection.source_revision).toMatch(/^\d+$/u);
     expect(await readRoutingEvidence(state.paths, nowMs + 60_000)).toEqual(projection);
   });
 
@@ -105,6 +149,7 @@ describe('routing evidence projection', () => {
       buildCodexObservation(readPool(state.paths).accounts, Date.now()),
     );
     (await lockFile(state.paths.codexRefreshLock, 0))();
+    await seedObservedGrok(state, Date.now() + 1);
     const projection = await readRoutingEvidence(state.paths);
     expect(projection.usage.codex.accounts[0]).toMatchObject({
       authStatus: 'relogin-required',
@@ -137,6 +182,7 @@ describe('routing evidence projection', () => {
       buildCodexObservation(readPool(state.paths).accounts, Date.now()),
     );
     (await lockFile(state.paths.codexRefreshLock, 0))();
+    await seedObservedGrok(state, Date.now() + 1);
     expect((await readRoutingEvidence(state.paths)).account_generations[0])
       .toMatchObject({ provider_generation: 1 });
 
@@ -174,7 +220,37 @@ describe('routing evidence projection', () => {
     } finally {
       release();
     }
-    expect((await readRoutingEvidence(state.paths)).schema_version).toBe(1);
+    expect((await readRoutingEvidence(state.paths)).schema_version).toBe(2);
+  });
+
+  test('refuses Grok usage measured under a replaced access token', async () => {
+    const { state } = await observedState();
+    const grok = await readGrokState(state.paths);
+    grok.accounts[0]!.credentials.accessToken = 'rotated-without-refresh';
+    await seedGrok(state.paths, grok.accounts);
+    writeSidecar(
+      state.paths.grokObservation,
+      Object.assign(
+        buildGrokObservation(grok.accounts, Date.now()),
+        { source_revision: Date.now() },
+      ),
+    );
+    await expect(readRoutingEvidence(state.paths)).rejects.toMatchObject({
+      code: 'generation_unavailable',
+    });
+  });
+
+  test('refuses Grok account-state contention and releases provider locks', async () => {
+    const { state } = await observedState();
+    const release = await lockFile(grokAccountLock(state.paths), 0);
+    try {
+      await expect(readRoutingEvidence(state.paths)).rejects.toMatchObject({
+        code: 'snapshot_busy',
+      });
+    } finally {
+      release();
+    }
+    expect((await readRoutingEvidence(state.paths)).schema_version).toBe(2);
   });
 
   test('advances source revisions across equal or regressed wall-clock timestamps', () => {
@@ -182,6 +258,10 @@ describe('routing evidence projection', () => {
     observation.source_revision = 200;
     expect(nextCodexSourceRevision(observation, 100)).toBe(201);
     expect(nextCodexSourceRevision(observation, 300)).toBe(300);
+    const grok = buildGrokObservation([grokAccount(1)], 100);
+    grok.source_revision = 200;
+    expect(nextGrokSourceRevision(grok, 100)).toBe(201);
+    expect(nextGrokSourceRevision(grok, 300)).toBe(300);
   });
 
   test('CLI exposes the same one-shot JSON contract without provider access', async () => {
@@ -194,6 +274,7 @@ describe('routing evidence projection', () => {
     const projection = JSON.parse(result.stdout.toString());
     expect(projection.account_generations).toEqual([
       { account_key: 'codex-1', account_generation: 1, provider_generation: 1 },
+      { account_key: 'grok-2', account_generation: 2, provider_generation: 1 },
     ]);
     expect(result.stdout.toString()).not.toContain('provider-secret-id');
     expect(result.stderr.toString()).toBe('');

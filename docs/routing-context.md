@@ -3,9 +3,11 @@
 `src/routing-context/index.ts` exports a pure, fixture-friendly contract for
 joining public quota and identity evidence. It performs no I/O.
 
-`agentusage routing evidence --json` now supplies the quota input as
+`agentusage routing evidence --json` supplies the quota input as
 `revision: source_revision`, `usage` and `account_generations`; callers should
-pass those three fields through without reconstructing the join.
+pass those three fields through without reconstructing the join. The quota
+revision may be a positive safe integer from legacy evidence or a lossless
+decimal string from the multi-provider projection.
 
 `composeRoutingContext(input, previous, nowMs)` returns either a fail-closed error
 or a published/coalesced snapshot. The input supplies:

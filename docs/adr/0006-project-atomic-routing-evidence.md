@@ -2,6 +2,9 @@
 
 Status: Accepted
 
+The version-1 format and Codex-only limitation are superseded by ADR 0008.
+The Codex locking, sanitization and generation decisions below remain active.
+
 ## Context
 
 The routing-context composer requires public usage and exact account/provider

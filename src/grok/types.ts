@@ -46,6 +46,7 @@ export interface GrokAccountView {
 
 export interface GrokObservation {
   schema_version: number;
+  source_revision?: number;
   observed_at_ms: number;
   health: ObservationHealth;
   /** Historical sidecars can retain this metadata; owned observations use null. */
@@ -99,6 +100,8 @@ export function validateGrokObservation(value: unknown): GrokObservation | null 
   if (typeof value !== "object" || value === null) return null;
   const root = value as Record<string, unknown>;
   if (root.schema_version !== GROK_OBSERVATION_SCHEMA_VERSION) return null;
+  if (root.source_revision !== undefined &&
+    (!Number.isSafeInteger(root.source_revision) || Number(root.source_revision) < 1)) return null;
   if (typeof root.observed_at_ms !== "number" || !Number.isFinite(root.observed_at_ms)) return null;
   if (!HEALTHS.includes(root.health as ObservationHealth)) return null;
   if (!Array.isArray(root.accounts) || !Array.isArray(root.notes)) return null;

@@ -3,10 +3,16 @@ import { accountLock, readPool, type ManagedAccount } from '../accounts/store.ts
 import { AccountError, withLock } from '../accounts/storage.ts';
 import { buildCodexObservation } from '../codex/observe.ts';
 import type { CodexAccountView, CodexObservation } from '../codex/types.ts';
-import { readCodexObservation } from '../observe.ts';
+import { buildGrokObservation } from '../grok/observe.ts';
+import { credentialFingerprint } from '../grok/billing.ts';
+import type { StoredAccount as GrokStoredAccount } from '../grok/model.ts';
+import { lockPath as grokAccountLock, readState as readGrokState } from '../grok/store.ts';
+import type { GrokAccountView, GrokObservation } from '../grok/types.ts';
+import { readCodexObservation, readGrokObservation } from '../observe.ts';
 import type { StatePaths } from '../paths.ts';
 import {
   CODEX_PROVIDER_AUTHORITY_GENERATION,
+  GROK_PROVIDER_AUTHORITY_GENERATION,
   ROUTING_EVIDENCE_SCHEMA_VERSION,
   RoutingEvidenceError,
   type RoutingEvidenceProjection,
@@ -30,6 +36,12 @@ function withoutProvenance(observation: CodexObservation): unknown {
   return clone;
 }
 
+function withoutGrokProvenance(observation: GrokObservation): unknown {
+  const clone = structuredClone(observation) as GrokObservation;
+  delete clone.source_revision;
+  return clone;
+}
+
 function exactObservationJoin(
   accounts: ManagedAccount[],
   observation: CodexObservation,
@@ -43,6 +55,18 @@ function exactObservationJoin(
   rebuilt.recommendation = structuredClone(observation.recommendation);
   rebuilt.notes = structuredClone(observation.notes);
   return canonical(withoutProvenance(rebuilt)) === canonical(withoutProvenance(observation));
+}
+
+function exactGrokObservationJoin(
+  accounts: GrokStoredAccount[],
+  observation: GrokObservation,
+): boolean {
+  const rebuilt = buildGrokObservation(accounts, observation.observed_at_ms);
+  rebuilt.health = observation.health;
+  rebuilt.dependency = structuredClone(observation.dependency);
+  rebuilt.notes = structuredClone(observation.notes);
+  return canonical(withoutGrokProvenance(rebuilt)) ===
+    canonical(withoutGrokProvenance(observation));
 }
 
 function measurementGeneration(account: ManagedAccount): number | null {
@@ -115,14 +139,51 @@ function sanitizeAccount(account: CodexAccountView): CodexAccountView {
   };
 }
 
+function sanitizeGrokAccount(account: GrokAccountView): GrokAccountView {
+  return {
+    accountKey: account.accountKey,
+    displayName: account.accountKey,
+    ordinal: account.ordinal,
+    alias: null,
+    email: null,
+    enabled: account.enabled,
+    authStatus: account.authStatus,
+    expiresAt: null,
+    billingStatus: account.billingStatus,
+    included: structuredClone(account.included),
+    prepaid: structuredClone(account.prepaid),
+    payg: structuredClone(account.payg),
+    subscriptionTier: null,
+    observedAtMs: account.observedAtMs,
+    lastGoodAtMs: account.lastGoodAtMs,
+    stale: account.stale,
+    error: account.error === null ? null : {
+      code: account.error.code,
+      message: 'Grok usage is unavailable',
+    },
+  };
+}
+
+function aggregateSourceRevision(codex: number, grok: number): string {
+  const left = BigInt(codex);
+  const right = BigInt(grok);
+  const sum = left + right;
+  return ((sum * (sum + 1n)) / 2n + right + 1n).toString();
+}
+
 async function lockedProjection(
   paths: StatePaths,
 ): Promise<RoutingEvidenceProjection> {
   const pool = readPool(paths);
   const accounts = pool.accounts.filter((account) => account.provider === 'codex');
   const observation = readCodexObservation(paths);
-  if (observation === null) throw new RoutingEvidenceError('evidence_unavailable');
+  const grokState = await readGrokState(paths);
+  const grokObservation = readGrokObservation(paths);
+  if (observation === null || grokObservation === null)
+    throw new RoutingEvidenceError('evidence_unavailable');
   if (!exactObservationJoin(accounts, observation))
+    throw new RoutingEvidenceError('inconsistent_snapshot');
+  if (!exactGrokObservationJoin(grokState.accounts, grokObservation))
     throw new RoutingEvidenceError('inconsistent_snapshot');
 
   const byKey = new Map(accounts.map((account) => [account.key, account]));
@@ -150,16 +211,41 @@ async function lockedProjection(
       !keys.has(observation.recommendation.accountKey))
     throw new RoutingEvidenceError('inconsistent_snapshot');
 
-  const sourceRevision = observation.source_revision ?? observation.observed_at_ms;
-  if (!Number.isSafeInteger(sourceRevision) || sourceRevision < 1)
+  const grokByKey = new Map(grokState.accounts.map((account) => [account.accountKey, account]));
+  for (const view of grokObservation.accounts) {
+    const account = grokByKey.get(view.accountKey);
+    if (account === undefined || keys.has(view.accountKey))
+      throw new RoutingEvidenceError('inconsistent_snapshot');
+    keys.add(view.accountKey);
+    if (account.observation.lastGood !== null &&
+      account.observation.lastGood.credentialFingerprint !==
+        credentialFingerprint(account.credentials.accessToken)) {
+      throw new RoutingEvidenceError('generation_unavailable');
+    }
+    generations.push({
+      account_key: account.accountKey,
+      account_generation: account.ordinal,
+      provider_generation: GROK_PROVIDER_AUTHORITY_GENERATION,
+    });
+  }
+  if (grokObservation.accounts.length !== grokState.accounts.length)
+    throw new RoutingEvidenceError('inconsistent_snapshot');
+
+  const codexRevision = observation.source_revision ?? observation.observed_at_ms;
+  const grokRevision = grokObservation.source_revision ?? grokObservation.observed_at_ms;
+  if (!Number.isSafeInteger(codexRevision) || codexRevision < 1 ||
+      !Number.isSafeInteger(grokRevision) || grokRevision < 1)
     throw new RoutingEvidenceError('generation_unavailable');
   // The payload must be stable for one source revision. A wall-clock read time
   // would change the digest without advancing the revision and make consumers
   // correctly reject a same-revision conflict.
-  const generatedAt = new Date(observation.observed_at_ms).toISOString();
+  const generatedAt = new Date(Math.max(
+    observation.observed_at_ms,
+    grokObservation.observed_at_ms,
+  )).toISOString();
   const sanitized: CodexObservation = {
     schema_version: observation.schema_version,
-    source_revision: sourceRevision,
+    source_revision: codexRevision,
     observed_at_ms: observation.observed_at_ms,
     health: observation.health,
     dependency: null,
@@ -169,16 +255,26 @@ async function lockedProjection(
     accounts: observation.accounts.map(sanitizeAccount),
     notes: [],
   };
+  const sanitizedGrok: GrokObservation = {
+    schema_version: grokObservation.schema_version,
+    source_revision: grokRevision,
+    observed_at_ms: grokObservation.observed_at_ms,
+    health: grokObservation.health,
+    dependency: null,
+    accounts: grokObservation.accounts.map(sanitizeGrokAccount),
+    notes: [],
+  };
   return {
     schema_version: ROUTING_EVIDENCE_SCHEMA_VERSION,
-    source_revision: sourceRevision,
+    source_revision: aggregateSourceRevision(codexRevision, grokRevision),
+    provider_source_revisions: { codex: codexRevision, grok: grokRevision },
     generated_at: generatedAt,
     usage: {
       schema_version: 1,
       generated_at: generatedAt,
       claude: null,
       codex: sanitized,
-      grok: null,
+      grok: sanitizedGrok,
     },
     account_generations: generations.sort((left, right) =>
       left.account_key.localeCompare(right.account_key)),
@@ -196,12 +292,21 @@ export async function readRoutingEvidence(
 ): Promise<RoutingEvidenceProjection> {
   if (!Number.isSafeInteger(nowMs) || nowMs < 0)
     throw new RoutingEvidenceError('inconsistent_snapshot');
-  if (!existsSync(paths.codexRefreshLock) || !existsSync(accountLock(paths)))
+  if (!existsSync(paths.codexRefreshLock) || !existsSync(paths.grokRefreshLock) ||
+      !existsSync(accountLock(paths)) || !existsSync(grokAccountLock(paths)))
     throw new RoutingEvidenceError('evidence_unavailable');
   try {
     return await withLock(
       paths.codexRefreshLock,
-      () => withLock(accountLock(paths), () => lockedProjection(paths), 0),
+      () => withLock(
+        paths.grokRefreshLock,
+        () => withLock(
+          accountLock(paths),
+          () => withLock(grokAccountLock(paths), () => lockedProjection(paths), 0),
+          0,
+        ),
+        0,
+      ),
       0,
     );
   } catch (error) {

@@ -2,6 +2,7 @@ import type { AccountObservation, NormalizedBilling, ObservationError, StoredAcc
 import { GrokError } from "./model.ts";
 import { credentialsNeedRefresh, providerSignal, refreshCredentials, XAI_COMPAT_VERSION } from "./oauth.ts";
 import { jsonBody, providerURL, type Env } from "../accounts/http.ts";
+import { createHash } from "node:crypto";
 
 const FRESH_FOR_MS = 15 * 60_000;
 const BACKOFF_BASE_MS = 30_000;
@@ -33,7 +34,11 @@ export async function observeAccount(account: StoredAccount, options: ObserveOpt
     const billing = await fetchBilling(account, options.env, options.deadlineMs);
     const observedAt = new Date(now).toISOString();
     account.observation = {
-      lastGood: { ...billing, observedAt },
+      lastGood: {
+        ...billing,
+        observedAt,
+        credentialFingerprint: credentialFingerprint(account.credentials.accessToken),
+      },
       lastAttemptAt: observedAt,
       failureCount: 0,
       nextAttemptAtMs: null,
@@ -160,6 +165,11 @@ export function publicObservation(account: StoredAccount, now = Date.now()): Acc
     stale,
     error: safeObservationError(account.observation.error),
   };
+}
+
+/** Private proof that a billing sample belongs to the current credential. */
+export function credentialFingerprint(accessToken: string): string {
+  return createHash("sha256").update(accessToken).digest("hex");
 }
 
 export function publicAccount(account: StoredAccount, now = Date.now()) {

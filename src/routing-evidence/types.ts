@@ -1,18 +1,25 @@
 import type { CodexObservation } from '../codex/types.ts';
+import type { GrokObservation } from '../grok/types.ts';
 
-export const ROUTING_EVIDENCE_SCHEMA_VERSION = 1 as const;
+export const ROUTING_EVIDENCE_SCHEMA_VERSION = 2 as const;
 export const CODEX_PROVIDER_AUTHORITY_GENERATION = 1 as const;
+export const GROK_PROVIDER_AUTHORITY_GENERATION = 1 as const;
 
 export interface RoutingEvidenceProjection {
   schema_version: typeof ROUTING_EVIDENCE_SCHEMA_VERSION;
-  source_revision: number;
+  /** Monotonic Cantor pairing of both provider revisions, encoded losslessly. */
+  source_revision: string;
+  provider_source_revisions: {
+    codex: number;
+    grok: number;
+  };
   generated_at: string;
   usage: {
     schema_version: 1;
     generated_at: string;
     claude: null;
     codex: CodexObservation;
-    grok: null;
+    grok: GrokObservation;
   };
   account_generations: Array<{
     account_key: string;

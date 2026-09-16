@@ -3,6 +3,7 @@ import type { FxBrokerBindingReceipt } from '../fx-broker/types.ts';
 
 export const ROUTING_CONTEXT_SCHEMA_VERSION = 1 as const;
 export const ROUTING_CONTEXT_FRESHNESS_MS = 5 * 60_000;
+export type RoutingSourceRevision = number | string;
 
 export type RoutingContextProvider = 'codex';
 
@@ -76,7 +77,7 @@ export interface RoutingContextInput {
     catalog: CatalogAuditInput['native_catalog'];
   };
   quota: {
-    revision: number;
+    revision: RoutingSourceRevision;
     usage: Exclude<CatalogAuditInput['usage'], null>;
     account_generations: Array<{
       account_key: string;
@@ -138,7 +139,7 @@ export interface RoutingContextSnapshot {
   sources: {
     reviewed_revision: number;
     native_catalog_revision: number;
-    quota_revision: number;
+    quota_revision: RoutingSourceRevision;
     broker_incarnation: string;
     broker_revision_digest: string;
     broker_lease_revisions: Array<{ lease_id: string; lease_revision: number; receipt_digest: string }>;
@@ -191,7 +192,7 @@ export interface RoutingContextSnapshot {
     allowed_actions: Array<'start' | 'steer' | 'interrupt'>;
   };
   quota: {
-    source_revision: number;
+    source_revision: RoutingSourceRevision;
     generated_at: string;
     observed_at_ms: number;
     lane_id: string;

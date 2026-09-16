@@ -13,6 +13,7 @@ import {
   type RoutingContextErrorCode,
   type RoutingContextInput,
   type RoutingContextQuotaAccount,
+  type RoutingSourceRevision,
   type RoutingContextSnapshot,
 } from './types.ts';
 
@@ -98,6 +99,20 @@ function validRevision(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
+function validSourceRevision(value: unknown): value is RoutingSourceRevision {
+  return validRevision(value) ||
+    (typeof value === 'string' && /^[1-9]\d*$/u.test(value));
+}
+
+function compareSourceRevisions(
+  left: RoutingSourceRevision,
+  right: RoutingSourceRevision,
+): -1 | 0 | 1 {
+  const leftValue = BigInt(left);
+  const rightValue = BigInt(right);
+  return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+}
+
 function fresh(time: number, nowMs: number): boolean {
   return time <= nowMs + FUTURE_TOLERANCE_MS && nowMs - time < ROUTING_CONTEXT_FRESHNESS_MS;
 }
@@ -112,7 +127,7 @@ function inputShapeValid(input: RoutingContextInput): boolean {
     validId(current.execution_id) && validId(current.attempt_id) && validId(current.native?.process_instance_id) &&
     validId(current.native?.fx_build_revision) && validId(current.native?.session_id) &&
     input.reviewed?.schema_version === 1 && validRevision(input.reviewed.revision) &&
-    validRevision(input.native_catalog?.revision) && validRevision(input.quota?.revision) &&
+    validRevision(input.native_catalog?.revision) && validSourceRevision(input.quota?.revision) &&
     Array.isArray(input.quota?.account_generations) && input.quota.account_generations.length > 0 &&
     input.quota.account_generations.length <= MAX_INPUT_ITEMS &&
     Array.isArray(input.reviewed.guidance) && input.reviewed.guidance.length <= MAX_INPUT_ITEMS &&
@@ -267,12 +282,18 @@ function sourceRevisionProblem(previous: RoutingContextSnapshot, next: RoutingCo
   const pairs = [
     [previous.sources.reviewed_revision, next.sources.reviewed_revision, previous.source_digests.reviewed, next.source_digests.reviewed],
     [previous.sources.native_catalog_revision, next.sources.native_catalog_revision, previous.source_digests.native_catalog, next.source_digests.native_catalog],
-    [previous.sources.quota_revision, next.sources.quota_revision, previous.source_digests.quota, next.source_digests.quota],
   ] as const;
   for (const [oldRevision, newRevision, oldDigest, newDigest] of pairs) {
     if (newRevision < oldRevision) return 'source_revision_regressed';
     if (newRevision === oldRevision && oldDigest !== newDigest) return 'source_revision_conflict';
   }
+  const quotaOrder = compareSourceRevisions(
+    previous.sources.quota_revision,
+    next.sources.quota_revision,
+  );
+  if (quotaOrder > 0) return 'source_revision_regressed';
+  if (quotaOrder === 0 && previous.source_digests.quota !== next.source_digests.quota)
+    return 'source_revision_conflict';
   if (next.sources.hud_host_revision < previous.sources.hud_host_revision ||
     next.sources.hud_domain_revision < previous.sources.hud_domain_revision) return 'source_revision_regressed';
   if (next.sources.hud_host_revision === previous.sources.hud_host_revision &&
@@ -381,9 +402,21 @@ export function composeRoutingContext(
   }
   const accounts = [...observation.accounts].sort((left, right) => left.accountKey.localeCompare(right.accountKey));
   const accountKeys = new Set(accounts.map((account) => account.accountKey));
+  const grokValue = usage.grok;
+  if (grokValue !== null && (typeof grokValue !== 'object' ||
+    !Array.isArray((grokValue as Record<string, unknown>).accounts))) return fail('invalid_input');
+  const grokAccounts = grokValue === null ? [] : (grokValue as { accounts: unknown[] }).accounts;
+  const grokAccountKeys = new Set<string>();
+  for (const item of grokAccounts) {
+    if (typeof item !== 'object' || item === null ||
+      !/^grok-[1-9]\d*$/u.test((item as { accountKey?: unknown }).accountKey as string) ||
+      grokAccountKeys.has((item as { accountKey: string }).accountKey)) return fail('invalid_input');
+    grokAccountKeys.add((item as { accountKey: string }).accountKey);
+  }
+  const observedAccountKeys = new Set([...accountKeys, ...grokAccountKeys]);
   const generationByAccount = new Map<string, { account_generation: number; provider_generation: number }>();
   for (const item of input.quota.account_generations) {
-    if (!/^codex-[1-9]\d*$/u.test(item.account_key) || !validRevision(item.account_generation) ||
+    if (!/^(?:codex|grok)-[1-9]\d*$/u.test(item.account_key) || !validRevision(item.account_generation) ||
       !validRevision(item.provider_generation) || generationByAccount.has(item.account_key)) return fail('invalid_input');
     generationByAccount.set(item.account_key, {
       account_generation: item.account_generation,
@@ -391,7 +424,7 @@ export function composeRoutingContext(
     });
   }
   if (accountKeys.size !== accounts.length || !accountKeys.has(currentReceipt.account.account_key) ||
-    generationByAccount.size !== accountKeys.size || [...accountKeys].some((key) => !generationByAccount.has(key)) ||
+    generationByAccount.size !== observedAccountKeys.size || [...observedAccountKeys].some((key) => !generationByAccount.has(key)) ||
     usableReceipts.some((receipt) => {
       const generation = generationByAccount.get(receipt.account.account_key);
       return !accountKeys.has(receipt.account.account_key) || generation === undefined ||

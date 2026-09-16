@@ -307,7 +307,7 @@ describe('routing context composer', () => {
     expect(identical).toEqual({ ok: true, action: 'coalesced', snapshot: first });
 
     const heartbeatInput = fixture();
-    heartbeatInput.quota.revision += 1;
+    heartbeatInput.quota.revision = Number(heartbeatInput.quota.revision) + 1;
     heartbeatInput.quota.usage.generated_at = '2026-09-16T12:00:30Z';
     (heartbeatInput.quota.usage.codex as any).observed_at_ms = NOW + 30_000;
     for (const row of (heartbeatInput.quota.usage.codex as any).accounts) row.measuredAtMs = NOW + 30_000;
@@ -315,7 +315,7 @@ describe('routing context composer', () => {
     expect(heartbeat.ok && heartbeat.snapshot).toMatchObject({ context_revision: 2, trigger: 'heartbeat' });
 
     const withinBandInput = structuredClone(heartbeatInput);
-    withinBandInput.quota.revision += 1;
+    withinBandInput.quota.revision = Number(withinBandInput.quota.revision) + 1;
     withinBandInput.quota.usage.generated_at = '2026-09-16T12:00:45Z';
     (withinBandInput.quota.usage.codex as any).observed_at_ms = NOW + 45_000;
     const withinBandAccount = (withinBandInput.quota.usage.codex as any).accounts[1]!;
@@ -326,7 +326,7 @@ describe('routing context composer', () => {
     expect(withinBand.ok && withinBand.snapshot).toMatchObject({ context_revision: 3, trigger: 'heartbeat' });
 
     const changedInput = structuredClone(withinBandInput);
-    changedInput.quota.revision += 1;
+    changedInput.quota.revision = Number(changedInput.quota.revision) + 1;
     changedInput.quota.usage.generated_at = '2026-09-16T12:01:00Z';
     (changedInput.quota.usage.codex as any).observed_at_ms = NOW + 60_000;
     const changedAccount = (changedInput.quota.usage.codex as any).accounts[1]!;
@@ -365,7 +365,7 @@ describe('routing context composer', () => {
   test('refuses source revision rollback and same-revision evidence conflicts', () => {
     const first = composed();
     const regressed = fixture();
-    regressed.quota.revision -= 1;
+    regressed.quota.revision = Number(regressed.quota.revision) - 1;
     expect(composeRoutingContext(regressed, first, NOW)).toMatchObject({ ok: false, error: { code: 'source_revision_regressed' } });
     const conflict = fixture();
     (conflict.quota.usage.codex as any).accounts[1]!.activeLeases = 2;
@@ -380,6 +380,42 @@ describe('routing context composer', () => {
     brokerConflict.broker_receipts[0]!.authority_digest = 'c'.repeat(64);
     brokerConflict.broker_receipts[1]!.lease_revision += 1;
     expect(composeRoutingContext(brokerConflict, first, NOW)).toMatchObject({ ok: false, error: { code: 'source_revision_conflict' } });
+  });
+
+  test('accepts lossless multi-provider revisions and ignores Grok accounts for Codex routing', () => {
+    const input = fixture();
+    input.quota.revision = '6385791490841077170325537';
+    input.quota.usage.grok = {
+      schema_version: 1,
+      observed_at_ms: NOW - 20_000,
+      health: 'ok',
+      dependency: null,
+      notes: [],
+      accounts: [{ accountKey: 'grok-2' }],
+    };
+    input.quota.account_generations.push({
+      account_key: 'grok-2',
+      account_generation: 2,
+      provider_generation: 1,
+    });
+    const first = composed(input);
+    expect(first.sources.quota_revision).toBe('6385791490841077170325537');
+    expect(first.quota.accounts.map((account) => account.account_key)).toEqual([
+      'codex-1',
+      'codex-2',
+    ]);
+
+    const advanced = structuredClone(input);
+    advanced.quota.revision = '6385791490841077170325538';
+    const next = composeRoutingContext(advanced, first, NOW + 1);
+    expect(next.ok).toBe(true);
+
+    const regressed = structuredClone(input);
+    regressed.quota.revision = '6385791490841077170325536';
+    expect(composeRoutingContext(regressed, first, NOW + 1)).toMatchObject({
+      ok: false,
+      error: { code: 'source_revision_regressed' },
+    });
   });
 
   test('treats the five-minute boundary as expired and accepts monotonic HUD domain changes', () => {
@@ -414,7 +450,7 @@ describe('routing context composer', () => {
   test('coalesces latest wins and forces full snapshots after gaps, generation changes, and static changes', () => {
     const first = composed();
     const mutableInput = fixture();
-    mutableInput.quota.revision += 1;
+    mutableInput.quota.revision = Number(mutableInput.quota.revision) + 1;
     mutableInput.quota.usage.generated_at = '2026-09-16T12:00:10Z';
     (mutableInput.quota.usage.codex as any).observed_at_ms = NOW + 10_000;
     for (const row of (mutableInput.quota.usage.codex as any).accounts) row.measuredAtMs = NOW + 10_000;
@@ -424,7 +460,7 @@ describe('routing context composer', () => {
     expect(planRoutingContextDelivery(second, second)).toMatchObject({ mode: 'none', reason: 'already_current' });
 
     const thirdInput = structuredClone(mutableInput);
-    thirdInput.quota.revision += 1;
+    thirdInput.quota.revision = Number(thirdInput.quota.revision) + 1;
     thirdInput.quota.usage.generated_at = '2026-09-16T12:00:20Z';
     (thirdInput.quota.usage.codex as any).observed_at_ms = NOW + 20_000;
     for (const row of (thirdInput.quota.usage.codex as any).accounts) row.measuredAtMs = NOW + 20_000;
@@ -472,7 +508,7 @@ describe('routing context composer', () => {
     expect(() => consumeRoutingContext(delivery, 'agenthud-controller-1', Date.parse(first.expires_at))).toThrow('invalid_consumption');
 
     const nextInput = fixture();
-    nextInput.quota.revision += 1;
+    nextInput.quota.revision = Number(nextInput.quota.revision) + 1;
     nextInput.quota.usage.generated_at = '2026-09-16T12:00:10Z';
     (nextInput.quota.usage.codex as any).observed_at_ms = NOW + 10_000;
     for (const row of (nextInput.quota.usage.codex as any).accounts) row.measuredAtMs = NOW + 10_000;

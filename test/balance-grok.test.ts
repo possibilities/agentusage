@@ -60,6 +60,17 @@ describe("selectGrokAccount from owned state", () => {
     expect(await selectGrokAccount({ ...options, observation })).toMatchObject({ ok: false, refusal: "observation-stale" });
   });
 
+  test("refuses cached usage after an access-token rotation until billing refreshes", async () => {
+    const fixture = fixtureState();
+    const row = account(1, undefined, NOW);
+    row.credentials.accessToken = "rotated-without-billing-refresh";
+    await seedGrok(fixture.paths, [row]);
+    expect(await selectGrokAccount({ env: fixture.env, nowMs: NOW })).toMatchObject({
+      ok: false,
+      refusal: "no-eligible-account",
+    });
+  });
+
   test("concurrent CLI claims serialize across processes without duplicate assignments", async () => {
     const fixture = fixtureState();
     await seedGrok(fixture.paths, [account(1), account(2)]);

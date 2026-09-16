@@ -1,4 +1,4 @@
-import { publicAccount } from "./billing.ts";
+import { credentialFingerprint, publicAccount } from "./billing.ts";
 import type { Reservation, SelectionTier, StoreState, StoredAccount } from "./model.ts";
 import { GrokError } from "./model.ts";
 import { resolveAccount } from "./store.ts";
@@ -118,7 +118,9 @@ function candidateFor(account: StoredAccount, reservations: Set<string>, allowUn
   }
   const billing = account.observation.lastGood;
   const age = billing ? now - Date.parse(billing.observedAt) : Infinity;
-  if (!billing || !Number.isFinite(age) || age > MAX_DECISION_AGE_MS) {
+  const credentialCorrelated = billing?.credentialFingerprint ===
+    credentialFingerprint(account.credentials.accessToken);
+  if (!billing || !credentialCorrelated || !Number.isFinite(age) || age > MAX_DECISION_AGE_MS) {
     if (!allowUnknown) {
       throw new GrokError("usage_unknown", `Grok account ${account.accountKey} has no decision-grade usage observation`, detail);
     }
