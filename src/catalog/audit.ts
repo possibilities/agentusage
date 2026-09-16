@@ -161,7 +161,18 @@ export function auditCatalog(input: CatalogAuditInput, nowMs = Date.now()) {
     ok: diagnostics.length === 0,
     generated_at: new Date(nowMs).toISOString(),
     metadata: { version: input.metadata.version, reviewed_at: input.metadata.reviewed_at, review_after: input.metadata.review_after, sources: [...input.metadata.sources], model_count: authored.size },
-    native_catalog: { source: input.native_catalog.source, client_version: input.native_catalog.client_version, observed_at: input.native_catalog.observed_at, complete, page_count: input.native_catalog.pages.length, model_count: native.size, provenance: 'supplied capture; cursor request continuity cannot be proven offline' },
+    native_catalog: {
+      source: input.native_catalog.source,
+      client_version: input.native_catalog.client_version,
+      observed_at: input.native_catalog.observed_at,
+      complete,
+      page_count: input.native_catalog.pages.length,
+      model_count: native.size,
+      capture_receipt: input.native_catalog.capture_receipt ?? null,
+      provenance: input.native_catalog.capture_receipt === undefined
+        ? 'supplied capture; cursor request continuity cannot be proven offline'
+        : 'collector receipt validates supplied page continuity but is not cryptographic attestation',
+    },
     models,
     quota,
     identity_correlation: 'unavailable' as const,

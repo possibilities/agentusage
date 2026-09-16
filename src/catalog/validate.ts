@@ -1,5 +1,12 @@
 import { validateCodexObservation } from '../codex/types.ts';
-import { CatalogInputError, type CapabilitySet, type CatalogAuditInput } from './types.ts';
+import {
+  COLLECTOR_PROFILE,
+  SUPPORTED_COLLECTOR_VERSION,
+  CatalogInputError,
+  type CapabilitySet,
+  type CatalogAuditInput,
+  type CatalogCaptureReceipt,
+} from './types.ts';
 
 const MAX_STRING = 512;
 const MAX_SOURCE = 2048;
@@ -88,6 +95,84 @@ function validateNativeRow(value: unknown): Record<string, unknown> {
   return row;
 }
 
+function validateCaptureReceipt(
+  value: unknown,
+  pages: CatalogAuditInput['native_catalog']['pages'],
+  clientVersion: string,
+  observedAt: string,
+): CatalogCaptureReceipt {
+  const raw = record(value, 'invalid-capture-receipt');
+  if (raw.schema_version !== 1 || raw.profile !== COLLECTOR_PROFILE ||
+      raw.expected_version !== SUPPORTED_COLLECTOR_VERSION || raw.reported_version !== SUPPORTED_COLLECTOR_VERSION ||
+      raw.complete !== true || clientVersion !== raw.reported_version ||
+      typeof raw.capture_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(raw.capture_id)) {
+    throw new CatalogInputError('invalid-capture-receipt');
+  }
+  const startedAt = iso(raw.started_at, 'invalid-capture-receipt');
+  const completedAt = iso(raw.completed_at, 'invalid-capture-receipt');
+  if (Date.parse(startedAt) > Date.parse(completedAt) || completedAt !== observedAt) throw new CatalogInputError('invalid-capture-receipt');
+  const receiptPages = array(raw.pages, 'invalid-capture-receipt', MAX_PAGES);
+  if (receiptPages.length !== pages.length || pages.at(-1)?.nextCursor !== null) throw new CatalogInputError('invalid-capture-receipt');
+  for (const capturePage of pages) {
+    for (const row of capturePage.data) {
+      if (!Object.hasOwn(row, 'serviceTiers') || !Object.hasOwn(row, 'supportedReasoningEfforts') ||
+          !Object.hasOwn(row, 'inputModalities') || !Object.hasOwn(row, 'multiAgentVersion') ||
+          !Object.hasOwn(row, 'defaultServiceTier')) throw new CatalogInputError('invalid-capture-receipt');
+      string(row.id, 'invalid-capture-receipt');
+      if (row.multiAgentVersion !== null && row.multiAgentVersion !== 'disabled' && row.multiAgentVersion !== 'v1' && row.multiAgentVersion !== 'v2') {
+        throw new CatalogInputError('invalid-capture-receipt');
+      }
+      const modalities = row.inputModalities as string[];
+      if (modalities.some((modality) => modality !== 'text' && modality !== 'image' && modality !== 'audio')) {
+        throw new CatalogInputError('invalid-capture-receipt');
+      }
+    }
+  }
+  const normalized = receiptPages.map((entry, index) => {
+    const page = record(entry, 'invalid-capture-receipt');
+    const expectedCursor = index === 0 ? null : pages[index - 1]!.nextCursor;
+    if (page.request_id !== index + 2 || page.requested_cursor !== expectedCursor ||
+        page.returned_next_cursor !== pages[index]!.nextCursor || page.include_hidden !== true ||
+        page.limit !== 100 || !Number.isSafeInteger(page.model_count) || (page.model_count as number) < 0 ||
+        (page.model_count as number) > 100 || page.model_count !== pages[index]!.data.length) throw new CatalogInputError('invalid-capture-receipt');
+    return {
+      request_id: index + 2,
+      requested_cursor: expectedCursor,
+      returned_next_cursor: pages[index]!.nextCursor,
+      include_hidden: true as const,
+      limit: 100 as const,
+      model_count: pages[index]!.data.length,
+    };
+  });
+  return {
+    schema_version: 1,
+    profile: COLLECTOR_PROFILE,
+    capture_id: raw.capture_id,
+    expected_version: SUPPORTED_COLLECTOR_VERSION,
+    reported_version: SUPPORTED_COLLECTOR_VERSION,
+    started_at: startedAt,
+    completed_at: completedAt,
+    complete: true,
+    pages: normalized,
+  };
+}
+
+export function validateCatalogMetadataInput(value: unknown): CatalogAuditInput['metadata'] {
+  const raw = record(value, 'invalid-metadata-input');
+  if (raw.schema_version !== 1 || !('metadata' in raw)) throw new CatalogInputError('invalid-metadata-input');
+  return validateCatalogAuditInput({
+    schema_version: 1,
+    metadata: raw.metadata,
+    native_catalog: {
+      source: 'codex_app_server_model_list',
+      client_version: SUPPORTED_COLLECTOR_VERSION,
+      observed_at: new Date().toISOString(),
+      pages: [{ data: [], nextCursor: null }],
+    },
+    usage: null,
+  }).metadata;
+}
+
 export function validateCatalogAuditInput(value: unknown): CatalogAuditInput {
   const top = record(value);
   if (top.schema_version !== 1) throw new CatalogInputError('unsupported-schema-version');
@@ -130,6 +215,11 @@ export function validateCatalogAuditInput(value: unknown): CatalogAuditInput {
     }
     return { data, nextCursor };
   });
+  const clientVersion = string(nativeRaw.client_version, 'invalid-native-catalog');
+  const observedAt = iso(nativeRaw.observed_at, 'invalid-native-catalog');
+  const captureReceipt = nativeRaw.capture_receipt === undefined
+    ? undefined
+    : validateCaptureReceipt(nativeRaw.capture_receipt, pages, clientVersion, observedAt);
 
   let usage: Record<string, unknown> | null = null;
   if (top.usage !== null) {
@@ -193,9 +283,10 @@ export function validateCatalogAuditInput(value: unknown): CatalogAuditInput {
     },
     native_catalog: {
       source: 'codex_app_server_model_list',
-      client_version: string(nativeRaw.client_version, 'invalid-native-catalog'),
-      observed_at: iso(nativeRaw.observed_at, 'invalid-native-catalog'),
+      client_version: clientVersion,
+      observed_at: observedAt,
       pages,
+      ...(captureReceipt === undefined ? {} : { capture_receipt: captureReceipt }),
     },
     usage,
   };

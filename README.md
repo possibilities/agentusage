@@ -121,6 +121,12 @@ reviewed catalog, captured native `model/list` pages and public quota evidence:
 evidence without native/provider calls or account changes; it never selects a
 model or claims a runtime/account identity join.
 
+The explicit [native catalog collector](docs/catalog-collection.md) can prepare
+the native portion of that bundle through an owned stdio Codex child. It requires
+a stock executable path and expected version, includes hidden models and records
+pagination continuity. Its initial compatibility validation uses fake processes;
+it does not attach to AgentVoice or select an account.
+
 ```sh
 agentusage                         # interactive usage viewer
 agentusage usage --snapshot         # one frame

@@ -1,5 +1,7 @@
 export const CATALOG_AUDIT_SCHEMA_VERSION = 1 as const;
 export const CATALOG_AUDIT_MAX_BYTES = 1024 * 1024;
+export const SUPPORTED_COLLECTOR_VERSION = '0.154.0' as const;
+export const COLLECTOR_PROFILE = 'stock-codex-app-server-0.154.0' as const;
 
 export interface CapabilitySet {
   hidden: boolean;
@@ -29,8 +31,28 @@ export interface CatalogAuditInput {
       data: Array<Record<string, unknown>>;
       nextCursor: string | null;
     }>;
+    capture_receipt?: CatalogCaptureReceipt;
   };
   usage: Record<string, unknown> | null;
+}
+
+export interface CatalogCaptureReceipt {
+  schema_version: 1;
+  profile: typeof COLLECTOR_PROFILE;
+  capture_id: string;
+  expected_version: typeof SUPPORTED_COLLECTOR_VERSION;
+  reported_version: typeof SUPPORTED_COLLECTOR_VERSION;
+  started_at: string;
+  completed_at: string;
+  complete: true;
+  pages: Array<{
+    request_id: number;
+    requested_cursor: string | null;
+    returned_next_cursor: string | null;
+    include_hidden: true;
+    limit: 100;
+    model_count: number;
+  }>;
 }
 
 export interface AuditDiagnostic {

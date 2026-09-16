@@ -21,6 +21,12 @@ captured native Codex capabilities and optional public quota evidence. It does
 not establish a runtime's managed account or select a model/account. _Avoid_:
 live catalog, router, authenticated identity join.
 
+**Catalog collection** — an explicit, bounded native app-server session that
+records a complete model-list pagination chain for a reviewed protocol version.
+It preserves reported capabilities but does not establish a managed account,
+executed model or authenticated capture provenance. _Avoid_: offline audit,
+runtime attachment, account activation.
+
 **Sidecar** — the atomically replaced JSON file under `~/.local/state/agentusage/` read by the viewer, status and balance commands. The managed account pool remains authoritative for credentials and last-good usage. _Avoid_: cache.
 
 **Decision-grade** — provider-specific evidence sufficient for selection. Claude/Codex require fresh, successful usage with complete binding windows. Grok retains last-good billing for at most 24 hours, including after a non-authentication billing error; missing capacity needs explicit `--allow-unknown`, and invalid or rejected credentials always refuse.

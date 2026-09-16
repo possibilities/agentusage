@@ -71,7 +71,7 @@ import {
   renderAgentTeaser,
   renderHelp,
 } from './guide.ts';
-import { auditCatalog, CatalogInputError, readBoundedJson, validateCatalogAuditInput } from './catalog/index.ts';
+import { auditCatalog, CatalogInputError, collectCatalog, readBoundedJson, validateCatalogAuditInput, validateCatalogMetadataInput } from './catalog/index.ts';
 
 interface Flags {
   booleans: Set<string>;
@@ -1417,31 +1417,42 @@ async function refreshCommand(args: string[]): Promise<number> {
 
 // ---------------------------------------------------------------------------
 
-function catalogCommand(args: string[]): number {
+async function catalogCommand(args: string[]): Promise<number> {
   const [action, ...rest] = args;
-  if (action !== 'audit') {
+  if (action !== 'audit' && action !== 'collect') {
     emitJson({ schema_version: 1, ok: false, error: { code: 'invalid-command' } });
     return 2;
   }
-  let file: string | undefined;
+  const stringFlags = action === 'audit' ? new Set(['--file']) : new Set(['--metadata', '--codex', '--expected-version']);
+  const strings = new Map<string, string>();
   let json = false;
   for (let index = 0; index < rest.length; index += 1) {
     if (rest[index] === '--json' && !json) json = true;
-    else if (rest[index] === '--file' && file === undefined && rest[index + 1] !== undefined) file = rest[++index];
+    else if (stringFlags.has(rest[index]!) && !strings.has(rest[index]!) && rest[index + 1] !== undefined) strings.set(rest[index]!, rest[++index]!);
     else {
       emitJson({ schema_version: 1, ok: false, error: { code: 'invalid-arguments' } });
       return 2;
     }
   }
-  if (!json || file === undefined || file.length === 0) {
+  if (!json || [...stringFlags].some((flag) => !strings.has(flag) || strings.get(flag)!.length === 0)) {
     emitJson({ schema_version: 1, ok: false, error: { code: 'invalid-arguments' } });
     return 2;
   }
   try {
-    const input = validateCatalogAuditInput(readBoundedJson(file));
-    const report = auditCatalog(input);
-    emitJson(report);
-    return report.ok ? 0 : 1;
+    if (action === 'audit') {
+      const input = validateCatalogAuditInput(readBoundedJson(strings.get('--file')!));
+      const report = auditCatalog(input);
+      emitJson(report);
+      return report.ok ? 0 : 1;
+    }
+    const metadata = validateCatalogMetadataInput(readBoundedJson(strings.get('--metadata')!));
+    const bundle = await collectCatalog({
+      metadata,
+      executable: strings.get('--codex')!,
+      expectedVersion: strings.get('--expected-version')!,
+    });
+    console.log(JSON.stringify(bundle));
+    return 0;
   } catch (error) {
     const code = error instanceof CatalogInputError ? error.code : 'audit-failed';
     emitJson({ schema_version: 1, ok: false, error: { code } });
@@ -1472,7 +1483,7 @@ async function main(argv: string[]): Promise<number> {
     case 'refresh':
       return refreshCommand(rest);
     case 'catalog':
-      return catalogCommand(rest);
+      return await catalogCommand(rest);
     case 'daemon': {
       const mode = rest[0] ?? 'run';
       if (mode === 'status') return daemonStatus();

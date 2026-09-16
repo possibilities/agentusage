@@ -86,7 +86,9 @@ The last page must have `nextCursor: null` to establish capture completeness.
 An unfinished page chain stays partial and cannot establish that a reviewed
 model disappeared. Duplicate model IDs or repeated/impossible cursor chains
 are invalid input. These fields do not independently prove that every page was
-actually collected; a future collector must retain that evidence.
+actually collected. The explicit [collector](catalog-collection.md) additionally
+records request/cursor receipts; the audit checks their consistency when present.
+Neither supplied pages nor supplied receipts authenticate native execution.
 
 The native schema is version-dependent. Preserve the version used to capture
 it; source documentation and generated schemas describe that exact version.
@@ -134,8 +136,9 @@ account lease, cost prediction or proof of native execution.
 
 ## Follow-up boundary
 
-A future explicit collector can capture native capabilities without submitting a
-turn. A separate runtime/account correlation contract is still necessary before
+The explicit collector can capture native capabilities without submitting a
+turn; its initial validation uses fake processes only. A separate runtime/account
+correlation contract is still necessary before
 model/account recommendations become actionable. Paid execution, automatic
 account ranking, FX/Grok credential activation, drift notifications and HUD
 controller operations are separate stages. See

@@ -623,10 +623,24 @@ export const CONTRACT: Contract = {
     },
     {
       name: 'catalog',
-      summary: 'Audit one supplied offline Codex catalog and quota capture',
+      summary: 'Collect native Codex catalog evidence or audit a supplied capture',
       audience: 'operator',
       mutates: false,
       subcommands: [
+        {
+          name: 'collect',
+          summary: 'Collect a complete native Codex model catalog for later offline audit',
+          audience: 'operator',
+          mutates: true,
+          blocking: true,
+          guidance: 'Runs the explicitly supplied stock Codex executable after an exact version check. The native process may read its configuration and account context or perform native housekeeping; AgentUsage does not request account, authentication, thread, turn, control, or quota methods.',
+          arguments: [
+            { name: '--metadata', type: 'string', format: 'path', direction: 'in', required: true, description: 'Bounded authored catalog metadata envelope.' },
+            { name: '--codex', type: 'string', format: 'path', direction: 'in', required: true, description: 'Absolute path to the stock Codex executable.' },
+            { name: '--expected-version', type: 'string', required: true, description: 'Exact supported Codex version (currently 0.154.0).' },
+            { ...JSON_FLAG, required: true },
+          ],
+        },
         {
           name: 'audit',
           summary: 'Compare authored capabilities with a supplied native catalog and public quota capture',

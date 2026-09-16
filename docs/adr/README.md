@@ -9,6 +9,9 @@
 - [0002: Audit supplied Codex catalog and quota evidence](0002-audit-supplied-codex-catalog-evidence.md)
   keeps reviewed guidance, native capabilities and quota observations distinct
   in an offline diagnostic without changing selection or account activation.
+- [0003: Collect versioned native catalogs](0003-collect-versioned-native-catalogs.md)
+  adds an explicit owned stdio collector with fake-protocol validation and
+  checked pagination receipts; it does not change the offline audit or routing.
 - The sketch's viewer and focus-policy contracts remain applicable; its swap
   examples are historical wherever the documents above replace them.
 
