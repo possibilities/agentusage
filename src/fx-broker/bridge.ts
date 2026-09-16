@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 import { AccountError, lockFile, record } from '../accounts/storage.ts';
 import type { StatePaths } from '../paths.ts';
 import { FxCredentialBroker } from './broker.ts';
+import { GrokFxAuthority } from './grok-authority.ts';
 import { CodexFxAuthority } from './codex-authority.ts';
 import type { FxBrokerBindingReceipt, FxBrokerNativeBinding, FxBrokerOwner } from './types.ts';
 
@@ -38,17 +39,18 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
         !['host_id', 'host_incarnation', 'execution_id', 'attempt_id'].every(k => id(owner[k])) || owner.control_epoch !== 1 ||
         !Number.isSafeInteger(input.deadline_ms) || Number(input.deadline_ms) <= Date.now() || Number(input.deadline_ms) > Date.now() + 300_000 ||
         typeof selection.account_key !== 'string' || typeof selection.model !== 'string' || typeof selection.effort !== 'string' ||
-        !(selection.service_tier === null || selection.service_tier === 'priority') || !Number.isSafeInteger(selection.expected_source_revision)) invalid();
+        !(selection.service_tier === null || selection.service_tier === 'priority') || !(typeof selection.expected_source_revision === 'string' ? /^[1-9]\d{0,63}$/.test(selection.expected_source_revision) : Number.isSafeInteger(selection.expected_source_revision) && Number(selection.expected_source_revision) > 0)) invalid();
     // A second host cannot revoke the first host by opening a new broker incarnation.
     const releaseLock = await lockFile(join(paths.stateRoot, 'service', 'fx-bridge.lock'), 0);
     close = async () => { releaseLock(); };
-    const authority = await CodexFxAuthority.create(paths, selection as unknown as Parameters<typeof CodexFxAuthority.create>[1]);
+    const factory = selection.account_key.startsWith('grok-') ? GrokFxAuthority : CodexFxAuthority;
+    const authority = await factory.create(paths, selection as unknown as Parameters<typeof CodexFxAuthority.create>[1]);
     const broker = await FxCredentialBroker.open(paths, authority);
     const commandOwner = owner as unknown as FxBrokerOwner;
     const prefix = commandOwner.attempt_id;
     const fence = { schema_version: 1 as const, expected_broker_incarnation: broker.incarnation };
     const prepared = await broker.prepare({ ...fence, request_id: `${prefix}:prepare`, owner: commandOwner,
-      target: authority.target, account: { account_key: authority.accountKey, expected_account_generation: Number(authority.accountKey.slice(6)), expected_provider_generation: 1 },
+      target: authority.target, account: { account_key: authority.accountKey, expected_account_generation: Number(authority.accountKey.split('-')[1]), expected_provider_generation: 1 },
       consumer_nonce: randomBytes(32).toString('base64url'), requested_ttl_ms: Math.max(1000, Number(input.deadline_ms) - Date.now()),
       execution_deadline_ms: Number(input.deadline_ms) });
     if (!prepared.handoff) invalid();
@@ -65,6 +67,10 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
         const url = new URL(request.url);
         if (closed || request.headers.has('origin') || request.headers.has('authorization') ||
             request.headers.has('cookie') || !url.pathname.startsWith(`/${route}/`)) return new Response(null, { status: 403 });
+        if (url.pathname === `/${route}/modalities` && request.method === 'GET' && authority instanceof GrokFxAuthority) {
+          if (Date.now() >= receipt.expires_at_ms) return new Response(null, { status: 410 });
+          return new Response(authority.modalities, { headers: { 'content-type': 'application/json' } });
+        }
         if (url.pathname === `/${route}/models` && request.method === 'GET') {
           if (Date.now() >= receipt.expires_at_ms) return new Response(null, { status: 410 });
           return new Response(authority.catalog, { headers: { 'content-type': 'application/json' } });

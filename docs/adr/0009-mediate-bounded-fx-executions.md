@@ -1,4 +1,4 @@
-# 0007: Mediate bounded Fx Codex executions
+# 0009: Mediate bounded Fx Codex and Grok executions
 
 Status: Accepted
 
@@ -41,3 +41,5 @@ The Codex catalog request explicitly supplies the repository's reviewed collecto
 compatibility version (`SUPPORTED_COLLECTOR_VERSION`, currently 0.154.0).
 The provider rejects a catalog request without this version. This is protocol
 compatibility metadata; it does not claim the native manager executed that build.
+
+The Grok authority joins fresh included quota, current reset and credential fingerprint to a fixed subscription Responses endpoint. Exact account, source revision, model, reasoning effort and tier remain pinned for the lease. It fetches subscription capabilities and xAI modalities separately and contains both credentials and provider account identifiers. No numerical cross-provider economics are inferred. Both providers refuse changed aggregate evidence revisions; a new routing decision is required. Account inspection and provider admission take the observation/account locks together.

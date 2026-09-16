@@ -85,3 +85,5 @@ lane with unpassed resets and a current provider catalog. It pins all request
 settings and refuses other providers until their equivalent authority is wired.
 It uses existing AgentUsage-owned account refresh locking. It does not require a
 daemon restart. See ADR 0007 for bounds, secret containment and recovery limits.
+
+The production bridge supports Codex and Grok using the fixed owner-controlled Responses endpoints. A selected routing evidence revision (v1 integer or v2 lossless decimal string) stays pinned for every admission; changes require a fresh selection. Grok joins its current included reset and credential fingerprint, plus provider model/effort and modality catalogs. `agentfx run` and MCP consume this private bridge; neither receives credentials. See [ADR 0009](adr/0009-mediate-bounded-fx-executions.md).

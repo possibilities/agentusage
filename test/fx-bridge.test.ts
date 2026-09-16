@@ -1,3 +1,4 @@
+import { seedObservedGrok } from './fx-routing-fixtures.ts';
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -13,6 +14,7 @@ test('private bridge fences activation, refuses browser/auth input, bounds failu
   const state=fixtureState();await seed(state,[managed()]);
   writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
   (await lockFile(state.paths.codexRefreshLock,0))();
+  await seedObservedGrok(state.paths);
   const evidence=await readRoutingEvidence(state.paths);
   let forwards=0;
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {

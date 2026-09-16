@@ -290,11 +290,21 @@ export async function readRoutingEvidence(
   paths: StatePaths,
   nowMs = Date.now(),
 ): Promise<RoutingEvidenceProjection> {
+  return withRoutingEvidenceSnapshot(paths, evidence => evidence, nowMs);
+}
+
+/** Owner-internal callback runs while all observation/account locks are held. */
+export async function withRoutingEvidenceSnapshot<T>(
+  paths: StatePaths,
+  inspect: (evidence: RoutingEvidenceProjection) => T | Promise<T>,
+  nowMs = Date.now(),
+): Promise<T> {
   if (!Number.isSafeInteger(nowMs) || nowMs < 0)
     throw new RoutingEvidenceError('inconsistent_snapshot');
   if (!existsSync(paths.codexRefreshLock) || !existsSync(paths.grokRefreshLock) ||
       !existsSync(accountLock(paths)) || !existsSync(grokAccountLock(paths)))
     throw new RoutingEvidenceError('evidence_unavailable');
+  let callbackError: unknown;
   try {
     return await withLock(
       paths.codexRefreshLock,
@@ -302,7 +312,10 @@ export async function readRoutingEvidence(
         paths.grokRefreshLock,
         () => withLock(
           accountLock(paths),
-          () => withLock(grokAccountLock(paths), () => lockedProjection(paths), 0),
+          () => withLock(grokAccountLock(paths), async () => {
+            const evidence = await lockedProjection(paths);
+            try { return await inspect(evidence); } catch (error) { callbackError = error; throw error; }
+          }, 0),
           0,
         ),
         0,
@@ -310,6 +323,7 @@ export async function readRoutingEvidence(
       0,
     );
   } catch (error) {
+    if (error === callbackError) throw error;
     if (error instanceof RoutingEvidenceError) throw error;
     if (error instanceof AccountError && error.code === 'busy')
       throw new RoutingEvidenceError('snapshot_busy');

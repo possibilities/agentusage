@@ -37,3 +37,6 @@ Read [CONTEXT.md](../../CONTEXT.md) for provider observations, selection and
 lease terms, and [README.md](../../README.md) for the current operator/launcher
 contract. Add a new record when the choice changes rather than copying the
 accepted ownership rationale into another parallel specification.
+
+- [0009: Mediate bounded Fx Codex and Grok executions](0009-mediate-bounded-fx-executions.md)
+  supplies the owner-authenticated, source-fenced execution bridge.
