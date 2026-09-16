@@ -36,3 +36,8 @@ that an ACP-completed HTTP error is not accepted as a successful task result.
 A maximum four-minute AgentFX attempt avoids renewal and provides a small first
 production slice. Longer tasks and concurrent accounts require a later service
 transport using the same broker fences.
+
+The Codex catalog request explicitly supplies the repository's reviewed collector
+compatibility version (`SUPPORTED_COLLECTOR_VERSION`, currently 0.154.0).
+The provider rejects a catalog request without this version. This is protocol
+compatibility metadata; it does not claim the native manager executed that build.

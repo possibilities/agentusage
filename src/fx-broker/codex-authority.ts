@@ -3,6 +3,7 @@ import { accessAccount, providerHeaders } from '../accounts/credentials.ts';
 import { providerURL, readCapped, type Env } from '../accounts/http.ts';
 import { AccountError, record } from '../accounts/storage.ts';
 import { readPool, type ManagedAccount } from '../accounts/store.ts';
+import { SUPPORTED_COLLECTOR_VERSION } from '../catalog/types.ts';
 import type { StatePaths } from '../paths.ts';
 import { readRoutingEvidence } from '../routing-evidence/index.ts';
 import type { RoutingEvidenceProjection } from '../routing-evidence/types.ts';
@@ -65,10 +66,10 @@ export class CodexFxAuthority implements FxBrokerAuthority {
     // Refresh may invalidate measurement correlation. Require fresh evidence again.
     requireCodexCapacity(await readRoutingEvidence(paths), selection.account_key);
     const signal = AbortSignal.timeout(20_000);
-    const response = await fetch(providerURL('codex', '/backend-api/codex/models', env), {
+    const response = await fetch(providerURL('codex', `/backend-api/codex/models?client_version=${SUPPORTED_COLLECTOR_VERSION}`, env), {
       headers: providerHeaders(account, new Headers({ accept: 'application/json' })), redirect: 'manual', signal,
     });
-    if (response.status !== 200) { await response.body?.cancel(); fail('catalog_unavailable'); }
+    if (response.status !== 200) { await response.body?.cancel(); fail(`catalog_http_${response.status}`); }
     const catalog = redact(await readCapped(response, MAX_BYTES, signal), account);
     validateCodexCapability(catalog, selection.model, selection.effort, selection.service_tier);
     const capturedAt = Date.now();
