@@ -115,6 +115,12 @@ records the ownership and transfer decisions.
 
 ## Operator commands
 
+The [offline Codex catalog audit](docs/catalog-audit.md) compares a supplied
+reviewed catalog, captured native `model/list` pages and public quota evidence:
+`agentusage catalog audit --file bundle.json --json`. It reports drift and stale
+evidence without native/provider calls or account changes; it never selects a
+model or claims a runtime/account identity join.
+
 ```sh
 agentusage                         # interactive usage viewer
 agentusage usage --snapshot         # one frame

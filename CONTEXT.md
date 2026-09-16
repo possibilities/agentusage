@@ -16,6 +16,11 @@
 
 **Observation** — one normalized provider reading in a sidecar. Claude schema 8, Codex schema 2, and Grok schema 1 are independent envelopes.
 
+**Catalog audit** — an offline comparison of supplied reviewed model metadata,
+captured native Codex capabilities and optional public quota evidence. It does
+not establish a runtime's managed account or select a model/account. _Avoid_:
+live catalog, router, authenticated identity join.
+
 **Sidecar** — the atomically replaced JSON file under `~/.local/state/agentusage/` read by the viewer, status and balance commands. The managed account pool remains authoritative for credentials and last-good usage. _Avoid_: cache.
 
 **Decision-grade** — provider-specific evidence sufficient for selection. Claude/Codex require fresh, successful usage with complete binding windows. Grok retains last-good billing for at most 24 hours, including after a non-authentication billing error; missing capacity needs explicit `--allow-unknown`, and invalid or rejected credentials always refuse.

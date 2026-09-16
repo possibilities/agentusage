@@ -622,6 +622,26 @@ export const CONTRACT: Contract = {
       ],
     },
     {
+      name: 'catalog',
+      summary: 'Audit one supplied offline Codex catalog and quota capture',
+      audience: 'operator',
+      mutates: false,
+      subcommands: [
+        {
+          name: 'audit',
+          summary: 'Compare authored capabilities with a supplied native catalog and public quota capture',
+          audience: 'operator',
+          mutates: false,
+          guidance: 'Reads exactly one bounded JSON bundle. It does not read AgentUsage state, contact providers, refresh usage, select accounts, or launch Codex.',
+          arguments: [
+            { name: '--file', type: 'string', format: 'path', direction: 'in', required: true, description: "Bundle path, or '-' for standard input." },
+            { ...JSON_FLAG, required: true },
+          ],
+          stdin: { accepts: 'json', description: "Accepted only when --file is '-'." },
+        },
+      ],
+    },
+    {
       name: 'guide',
       summary: 'Print this fleet agent contract',
       audience: 'internal',

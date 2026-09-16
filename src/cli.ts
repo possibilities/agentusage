@@ -71,6 +71,7 @@ import {
   renderAgentTeaser,
   renderHelp,
 } from './guide.ts';
+import { auditCatalog, CatalogInputError, readBoundedJson, validateCatalogAuditInput } from './catalog/index.ts';
 
 interface Flags {
   booleans: Set<string>;
@@ -1416,6 +1417,40 @@ async function refreshCommand(args: string[]): Promise<number> {
 
 // ---------------------------------------------------------------------------
 
+function catalogCommand(args: string[]): number {
+  const [action, ...rest] = args;
+  if (action !== 'audit') {
+    emitJson({ schema_version: 1, ok: false, error: { code: 'invalid-command' } });
+    return 2;
+  }
+  let file: string | undefined;
+  let json = false;
+  for (let index = 0; index < rest.length; index += 1) {
+    if (rest[index] === '--json' && !json) json = true;
+    else if (rest[index] === '--file' && file === undefined && rest[index + 1] !== undefined) file = rest[++index];
+    else {
+      emitJson({ schema_version: 1, ok: false, error: { code: 'invalid-arguments' } });
+      return 2;
+    }
+  }
+  if (!json || file === undefined || file.length === 0) {
+    emitJson({ schema_version: 1, ok: false, error: { code: 'invalid-arguments' } });
+    return 2;
+  }
+  try {
+    const input = validateCatalogAuditInput(readBoundedJson(file));
+    const report = auditCatalog(input);
+    emitJson(report);
+    return report.ok ? 0 : 1;
+  } catch (error) {
+    const code = error instanceof CatalogInputError ? error.code : 'audit-failed';
+    emitJson({ schema_version: 1, ok: false, error: { code } });
+    return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
@@ -1436,6 +1471,8 @@ async function main(argv: string[]): Promise<number> {
       return recoverCommand(rest);
     case 'refresh':
       return refreshCommand(rest);
+    case 'catalog':
+      return catalogCommand(rest);
     case 'daemon': {
       const mode = rest[0] ?? 'run';
       if (mode === 'status') return daemonStatus();
