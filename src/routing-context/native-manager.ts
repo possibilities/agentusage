@@ -375,6 +375,13 @@ function parseInput(value: unknown): NativeManagerContextInput | null {
   return value as unknown as NativeManagerContextInput;
 }
 
+function normalizedCurrentServiceTier(serviceTier: string | null): string | null {
+  // Codex reports the ordinary, non-accelerated lane as the runtime sentinel
+  // "default". The public routing contract represents that lane as null so it
+  // is not mistaken for an explicit catalog tier such as "priority".
+  return serviceTier === 'default' ? null : serviceTier;
+}
+
 function nativeCatalog(input: NativeManagerContextInput): { models: NativeManagerContextSnapshot['native_catalog']['models']; capabilities: NativeManagerContextSnapshot['native_catalog']['capabilities']; drift: string[] } | null {
   const seen = new Set<string>();
   for (const row of input.native_catalog.models) {
@@ -400,7 +407,8 @@ function nativeCatalog(input: NativeManagerContextInput): { models: NativeManage
   if (selected !== undefined) {
     if (selected.hidden) drift.add(`current-model-hidden:${selected.model}`);
     if (input.current.effort === null || !selected.efforts.includes(input.current.effort)) drift.add(`current-effort-mismatch:${selected.model}`);
-    if (input.current.service_tier !== null && !selected.service_tiers.includes(input.current.service_tier)) drift.add(`current-tier-mismatch:${selected.model}`);
+    const serviceTier = normalizedCurrentServiceTier(input.current.service_tier);
+    if (serviceTier !== null && !selected.service_tiers.includes(serviceTier)) drift.add(`current-tier-mismatch:${selected.model}`);
   }
   return {
     models: rows.map(({ model, efforts, service_tiers, hidden }) => ({ model, efforts: sorted(efforts), service_tiers: sorted(service_tiers), hidden })),
@@ -534,7 +542,7 @@ export function composeNativeManagerRoutingContext(value: unknown, nowMs = Date.
     },
     source_digests: sourceDigests,
     current: {
-      provider: 'codex' as const, model: input.current.model, effort: input.current.effort, service_tier: input.current.service_tier,
+      provider: 'codex' as const, model: input.current.model, effort: input.current.effort, service_tier: normalizedCurrentServiceTier(input.current.service_tier),
       account_correlation: 'unavailable' as const, execution_id: null, attempt_id: null, broker_lease_id: null,
       native: structuredClone(input.current.native),
     },

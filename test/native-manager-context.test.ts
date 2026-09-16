@@ -175,6 +175,19 @@ describe('native manager routing context', () => {
     expect(composed(input).native_catalog.drift).toEqual([]);
   });
 
+  test('normalizes the native default tier sentinel to the ordinary lane', () => {
+    const input = fixture();
+    input.current.service_tier = 'default';
+    for (const row of input.native_catalog.models) {
+      row.service_tiers = ['priority'];
+      row.default_service_tier = null;
+    }
+    const context = composed(input);
+    expect(context.current.service_tier).toBeNull();
+    expect(context.native_catalog.drift).toEqual([]);
+    expect(context.quota.delegation_available).toBe(true);
+  });
+
   test('preserves unreviewed hidden native models without disabling reviewed targets', () => {
     const input = fixture();
     for (const model of ['gpt-reserve', 'codex-auto-review']) {
