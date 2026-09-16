@@ -1,9 +1,8 @@
 # Fx credential broker contract
 
 The Fx credential broker is AgentUsage's bounded consumer contract for an
-AgentFX execution. This phase is deliberately no-spend: the implementation has
-no production account adapter, command, daemon route or network transport. Tests
-use an in-memory authority with synthetic Codex/OpenAI and Grok accounts.
+AgentFX execution. The durable contract is tested with synthetic Codex and Grok authorities.
+A bounded Codex production authority and private bridge are described below.
 
 ## Boundary
 
@@ -66,8 +65,23 @@ are intentionally not durable.
 ## Current integration limit
 
 `src/fx-broker/` is an internal production contract and durable state machine.
-It is not wired to the AgentUsage daemon or CLI, and AgentFX does not call it
-yet. Codex and Grok production authorities must remain absent until a private
-transport and Fx-compatible mediated provider adapter are implemented and
-verified without credential export. This phase proves the control and evidence
-semantics with synthetic fixtures only.
+The daemon remains unchanged. The private CLI bridge now connects AgentFX to
+a bounded Codex production authority; the Grok production authority remains
+unavailable. Synthetic tests continue to cover both providers at the contract
+boundary.
+
+## Bounded production transport
+
+`agentusage fx-bridge` now supplies a private stdio transport to AgentFX for one
+bounded Codex execution. It takes a schema-1 selection (account key, model,
+effort, service tier and exact routing source revision), host/execution owner
+and deadline on stdin; returns a prepared receipt and **private** random loopback
+URLs; accepts exact native process/build/session activation; and releases on EOF,
+explicit release or deadline. This command is a host interface, not a manager
+JSON diagnostic: never display or persist its raw stdout.
+
+The managed authority requires fresh atomic quota evidence, a complete binding
+lane with unpassed resets and a current provider catalog. It pins all request
+settings and refuses other providers until their equivalent authority is wired.
+It uses existing AgentUsage-owned account refresh locking. It does not require a
+daemon restart. See ADR 0007 for bounds, secret containment and recovery limits.

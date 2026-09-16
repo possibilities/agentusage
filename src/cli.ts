@@ -1506,6 +1506,9 @@ async function main(argv: string[]): Promise<number> {
       return refreshCommand(rest);
     case 'catalog':
       return await catalogCommand(rest);
+    case 'fx-bridge':
+      if (rest.length !== 0) return 2;
+      return await (await import('./fx-broker/bridge.ts')).runFxBridge(statePaths());
     case 'routing':
       return await routingCommand(rest);
     case 'daemon': {

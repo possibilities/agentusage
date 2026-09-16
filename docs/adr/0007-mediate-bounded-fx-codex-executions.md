@@ -1,0 +1,38 @@
+# 0007: Mediate bounded Fx Codex executions
+
+Status: Accepted
+
+## Decision
+
+Extend ADR 0004's broker with `agentusage fx-bridge`, a private stdio consumer
+transport for one AgentFX execution. AgentUsage resolves the exact managed Codex
+account, rechecks atomic decision-grade routing evidence and the supplied source
+revision, obtains a fresh fixed-origin provider catalog and validates the exact
+model, effort and service tier. Provider credentials and refresh remain inside
+AgentUsage. No inference or refresh retry is introduced.
+
+A kernel lock permits one bridge globally. Opening a competing bridge cannot
+revoke the current broker incarnation. The parent receives only public binding
+receipts and one private, random loopback endpoint. Catalog reads may precede
+activation; Responses forwarding requires the exact native process/build/session
+activation fence. Origin/auth/cookie-bearing requests are refused. Parent EOF,
+explicit release or a maximum five-minute deadline closes the owned listener.
+Each execution permits at most eight admissions. Any failed or uncertain admission
+closes further admission. Provider bodies/responses are bounded to one MiB and
+buffered; a lost response retains the broker's existing unknown-outcome contract.
+
+This first authority supports Codex only. It does not change the current native
+manager's account, spend reset credits, expose Grok as eligible without evidence,
+or restart the observer daemon. AgentFX owns native child lifetime and semantic
+Work association. The broker proves settings/account admission, not task success.
+
+## Verification and limits
+
+Synthetic authority and transport tests cover stale/reset/exhausted evidence,
+source revision, catalog/effort/tier drift, exact request settings, credentials,
+activation, browser request refusal, failed-provider retry refusal and release.
+The live Fx integration must additionally prove its catalog compatibility and
+that an ACP-completed HTTP error is not accepted as a successful task result.
+A maximum four-minute AgentFX attempt avoids renewal and provides a small first
+production slice. Longer tasks and concurrent accounts require a later service
+transport using the same broker fences.
