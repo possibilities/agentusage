@@ -59,6 +59,10 @@ describe("owned Codex observations", () => {
     a.usage!.value.rate_limit_reset_credit_details = { available_count: 2, credits: [{ expires_at: "2026-10-08T12:00:00.000Z" }, { expires_at: null }] };
     const observation = buildCodexObservation([a], Date.now(), new Map([[a.key, 2]]));
     expect(validateCodexObservation(observation)).not.toBeNull();
+    expect(JSON.stringify(observation)).not.toContain('credential_generation');
+    expect(JSON.stringify(observation)).not.toContain('CredentialGeneration');
+    expect(JSON.stringify(observation)).not.toContain('providerGeneration');
+    expect(JSON.stringify(observation)).not.toContain('accountGeneration');
     const view = observation.accounts[0]!;
     expect(view).toMatchObject({ accountKey: "codex-1", activeLeases: 2, decisionGrade: true, planType: "plus", resetCreditsAvailable: 2, resetCreditExpirations: ["2026-10-08T12:00:00.000Z", null] });
     expect(sparkLane(view)?.windows).toHaveLength(2);

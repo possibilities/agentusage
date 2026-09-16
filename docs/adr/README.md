@@ -19,6 +19,10 @@
   joins reviewed guidance, captured Codex capabilities, public quota, opaque
   broker receipts and HUD host/control identity as a pure synthetic contract.
   Scheduling, persistence and manager delivery remain disabled.
+- [0006: Project atomic public routing evidence](0006-project-atomic-routing-evidence.md)
+  joins the locked Codex sidecar and managed-account pool into the sanitized
+  usage and generation input required by the composer. It performs no provider
+  refresh, account mutation or selection.
 - The sketch's viewer and focus-policy contracts remain applicable; its swap
   examples are historical wherever the documents above replace them.
 

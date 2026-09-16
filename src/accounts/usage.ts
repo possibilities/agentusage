@@ -127,7 +127,19 @@ export async function refreshUsage(
       await changePool(paths, (pool) => {
         const current = pool.accounts.find((x) => x.key === key);
         if (current) {
-          current.usage = { measured_at_ms: measuredAtMs, value: body };
+          if (current.credentials.generation !== a.credentials.generation) {
+            current.usage_error = {
+              code: 'provider-generation-changed',
+              status: null,
+            };
+            current.next_poll_at_ms = Date.now();
+            return;
+          }
+          current.usage = {
+            measured_at_ms: measuredAtMs,
+            credential_generation: a.credentials.generation,
+            value: body,
+          };
           current.usage_error = null;
           current.next_poll_at_ms = Date.now() + 180_000;
           if (codexUsage !== null) {

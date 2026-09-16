@@ -134,10 +134,16 @@ models five-minute freshness, monotonic revisions, latest-wins coalescing,
 full-snapshot recovery and consumed-revision receipts without timers, persistence,
 manager injection, account mutation or provider activity.
 
+The [routing-evidence projection](docs/routing-evidence.md) supplies that
+composer with one locked, sanitized Codex usage snapshot and opaque
+account/provider generations. It fails closed on identity or generation drift
+and makes no provider request.
+
 ```sh
 agentusage                         # interactive usage viewer
 agentusage usage --snapshot         # one frame
 agentusage usage --json             # sidecars only
+agentusage routing evidence --json  # atomic non-secret Codex routing evidence
 agentusage status --json
 agentusage refresh claude           # observe now, respecting provider backoff
 agentusage recover codex-1          # refresh an expired credential if recoverable

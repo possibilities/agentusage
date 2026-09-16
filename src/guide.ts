@@ -241,6 +241,32 @@ export const CONTRACT: Contract = {
       ],
     },
     {
+      name: 'routing',
+      summary: 'Read non-secret routing evidence without refreshing providers',
+      audience: 'operator',
+      mutates: false,
+      blocking: false,
+      guidance:
+        'The evidence subcommand takes the Codex observation and account locks, validates an exact identity/generation join, and emits one sanitized snapshot. It refuses lock contention or inconsistent state and never contacts a provider.',
+      subcommands: [
+        {
+          name: 'evidence',
+          summary: 'Emit one atomic quota and generation projection',
+          audience: 'operator',
+          mutates: false,
+          blocking: false,
+          arguments: [{ ...JSON_FLAG, required: true }],
+          examples: [
+            {
+              invocation: 'agentusage routing evidence --json',
+              description:
+                'Return sanitized Codex quota evidence and opaque account/provider generations.',
+            },
+          ],
+        },
+      ],
+    },
+    {
       name: 'status',
       summary:
         'Show observation health, active focuses, and what balance would choose right now',

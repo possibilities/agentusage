@@ -246,6 +246,7 @@ describe('owned credential lifecycle', () => {
     const env = { ...state.env, AGENTUSAGE_TEST_CODEX_ORIGIN: source.url.origin };
     const refreshed = await refreshUsage(state.paths, 'codex', env);
     expect(refreshed.map((account) => account.usage_error)).toEqual([null, null]);
+    expect(refreshed.map((account) => account.usage?.credential_generation)).toEqual([1, 1]);
     const observation = buildCodexObservation(refreshed, Date.now());
     expect(observation.accounts.map((account) => account.headroomPercent)).toEqual([86, 86]);
     writePrivate(state.paths.codexObservation, observation);
@@ -255,6 +256,26 @@ describe('owned credential lifecycle', () => {
       }, env)).toMatchObject({ account_key: account.key, lease: null });
     }
     expect(readLeases(state.paths).leases).toHaveLength(0);
+  });
+  test('usage publication refuses a credential generation changed during observation', async () => {
+    const state = fixtureState();
+    const account = managed('codex', 1, { usage: null, next_poll_at_ms: 0 });
+    await seed(state, [account]);
+    const source = upstream(async () => {
+      await changePool(state.paths, (pool) => {
+        pool.accounts[0]!.credentials.generation += 1;
+      });
+      return Response.json(codexUsage());
+    });
+    const refreshed = await refreshUsage(state.paths, 'codex', {
+      ...state.env,
+      AGENTUSAGE_TEST_CODEX_ORIGIN: source.url.origin,
+    });
+    expect(refreshed[0]!.usage).toBeNull();
+    expect(refreshed[0]!.usage_error).toEqual({
+      code: 'provider-generation-changed',
+      status: null,
+    });
   });
   test('Claude imports establish profile identity directly', async () => {
     const server = upstream((req) => {

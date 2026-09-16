@@ -84,6 +84,7 @@ export function managed(
     rate_limit_multiplier: provider === 'claude' ? 20 : null,
     usage: {
       measured_at_ms: Date.now(),
+      credential_generation: 1,
       value: provider === 'claude' ? claudeUsage() : codexUsage(),
     },
     usage_error: null,

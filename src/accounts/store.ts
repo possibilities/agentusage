@@ -20,6 +20,8 @@ export interface Credentials {
 }
 export interface UsageSample {
   measured_at_ms: number;
+  /** Credential generation that authenticated this provider measurement. */
+  credential_generation?: number;
   value: Record<string, unknown>;
 }
 export interface ManagedAccount {
@@ -118,7 +120,12 @@ function validatePool(value: unknown): AccountPool {
       Number(c.generation) < 1 ||
       !time(c.expires_at_ms) ||
       (x.usage !== null &&
-        (!usage || !time(usage.measured_at_ms) || !record(usage.value))) ||
+        (!usage ||
+          !time(usage.measured_at_ms) ||
+          (usage.credential_generation !== undefined &&
+            (!Number.isSafeInteger(usage.credential_generation) ||
+              Number(usage.credential_generation) < 1)) ||
+          !record(usage.value))) ||
       (x.usage_error !== null &&
         (!issue ||
           !nonempty(issue.code) ||

@@ -72,6 +72,7 @@ import {
   renderHelp,
 } from './guide.ts';
 import { auditCatalog, CatalogInputError, collectCatalog, readBoundedJson, validateCatalogAuditInput, validateCatalogMetadataInput } from './catalog/index.ts';
+import { readRoutingEvidence, RoutingEvidenceError } from './routing-evidence/index.ts';
 
 interface Flags {
   booleans: Set<string>;
@@ -1462,6 +1463,27 @@ async function catalogCommand(args: string[]): Promise<number> {
 
 // ---------------------------------------------------------------------------
 
+async function routingCommand(args: string[]): Promise<number> {
+  const [action, ...rest] = args;
+  const flags = parseFlags(rest, ['json'], []);
+  if (action !== 'evidence' || flags === null || !flags.booleans.has('json') || flags.positionals.length > 0) {
+    emitJson({ schema_version: 1, ok: false, error: { code: 'invalid-arguments' } });
+    return 2;
+  }
+  try {
+    emitJson(await readRoutingEvidence(statePaths(process.env)));
+    return 0;
+  } catch (error) {
+    const code = error instanceof RoutingEvidenceError
+      ? error.code
+      : 'evidence_unavailable';
+    emitJson({ schema_version: 1, ok: false, error: { code } });
+    return 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
@@ -1484,6 +1506,8 @@ async function main(argv: string[]): Promise<number> {
       return refreshCommand(rest);
     case 'catalog':
       return await catalogCommand(rest);
+    case 'routing':
+      return await routingCommand(rest);
     case 'daemon': {
       const mode = rest[0] ?? 'run';
       if (mode === 'status') return daemonStatus();

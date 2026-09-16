@@ -21,6 +21,17 @@ export function readGrokObservation(paths: StatePaths): GrokObservation | null {
   return readSidecar(paths.grokObservation, validateGrokObservation).value;
 }
 
+export function nextCodexSourceRevision(
+  previous: CodexObservation | null,
+  observedAtMs: number,
+): number {
+  const prior = previous?.source_revision ?? previous?.observed_at_ms ?? 0;
+  const revision = Math.max(observedAtMs, prior + 1);
+  if (!Number.isSafeInteger(revision) || revision < 1)
+    throw new Error('Codex observation source revision exhausted');
+  return revision;
+}
+
 export interface RefreshOverrides {
   /** Values fresher than this short-circuit; 0 forces a provider call. */
   freshWithinMs?: number;
@@ -52,7 +63,13 @@ export async function refreshCodexObservation(
     observedAtMs: (value) => value.observed_at_ms,
     freshWithinMs: overrides.freshWithinMs ?? OBSERVATION_FRESHNESS_CEILING_MS,
     produce: () => observeCodex({ env: { ...(overrides.env ?? process.env), AGENTUSAGE_STATE_ROOT: paths.stateRoot }, noFetch: overrides.noFetch }),
-    write: (value) => writeSidecar(paths.codexObservation, value),
+    write: (value) => {
+      value.source_revision = nextCodexSourceRevision(
+        readCodexObservation(paths),
+        value.observed_at_ms,
+      );
+      writeSidecar(paths.codexObservation, value);
+    },
     waitMs: 61_000,
   });
 }

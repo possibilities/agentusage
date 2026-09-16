@@ -70,6 +70,8 @@ export interface CodexAccountView {
 
 export interface CodexObservation {
   schema_version: number;
+  /** Strictly monotonic for sidecar publications from one state root. */
+  source_revision?: number;
   observed_at_ms: number;
   health: ObservationHealth;
   dependency: { name: string; version: string | null; healthy: boolean } | null;
@@ -128,8 +130,23 @@ export function validateCodexObservation(value: unknown): CodexObservation | nul
   if (typeof value !== "object" || value === null) return null;
   const raw = value as Record<string, unknown>;
   if (raw.schema_version !== CODEX_OBSERVATION_SCHEMA_VERSION) return null;
+  if (
+    raw.source_revision !== undefined &&
+    (!Number.isSafeInteger(raw.source_revision) || Number(raw.source_revision) < 1)
+  ) return null;
   if (typeof raw.observed_at_ms !== "number" || !Number.isFinite(raw.observed_at_ms)) return null;
-  if (typeof raw.health !== "string") return null;
+  if (!['ok', 'absent', 'stale', 'malformed', 'unsupported', 'error'].includes(raw.health as string)) return null;
+  if (raw.dependency !== null) {
+    if (typeof raw.dependency !== 'object' || Array.isArray(raw.dependency)) return null;
+    const dependency = raw.dependency as Record<string, unknown>;
+    if (typeof dependency.name !== 'string' || dependency.name.length === 0 ||
+        !(dependency.version === null || typeof dependency.version === 'string') ||
+        typeof dependency.healthy !== 'boolean') return null;
+  }
+  if (raw.recommendation !== null) {
+    if (typeof raw.recommendation !== 'object' || Array.isArray(raw.recommendation) ||
+        typeof (raw.recommendation as Record<string, unknown>).accountKey !== 'string') return null;
+  }
   if (!Array.isArray(raw.accounts)) return null;
   if (!Array.isArray(raw.notes) || !raw.notes.every((note) => typeof note === "string")) return null;
   for (const candidate of raw.accounts) {

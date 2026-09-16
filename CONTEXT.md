@@ -81,6 +81,27 @@ require a full snapshot. A consumed-revision receipt records observation by a
 consumer, not execution or Work acceptance. _Avoid_: provider revision, command
 receipt.
 
+**Routing evidence projection** — A read-only, sanitized AgentUsage snapshot
+that joins one locked Codex observation to the exact managed-account pool and
+supplies composer-ready usage plus opaque generations. It never refreshes a
+provider. Email, labels, provider account IDs, plan names, notes and credential
+material are absent. _Avoid_: account listing, credential snapshot, routing
+decision.
+
+**Routing source revision** — The strictly monotonic revision assigned when a
+Codex observation sidecar is published. A legacy sidecar without the explicit
+field uses its positive observation timestamp once; subsequent publishers
+advance past it even if the wall clock regresses. _Avoid_: context revision,
+credential generation.
+
+**Account generation** — The never-reused positive managed-account ordinal used
+as the opaque lifecycle fence for a managed key. **Provider generation** — The
+positive generation of AgentUsage's provider authority contract, currently one.
+Credential rotation is a separate private revision and does not replace that
+authority. Eligible routing evidence requires its quota measurement's private
+credential generation to match the current one. _Avoid_: credential generation,
+observation timestamp, lease revision.
+
 **Reservation** — a short-lived selection-pressure record. Claude balance keeps a local ledger; managed launches also hold session leases. Grok's inventory records reservations for 1–300 seconds when a caller explicitly claims a selection.
 
 **Quota cooldown** — a lane-specific exclusion recorded from an explicit Codex usage-limit rejection. It is separate from transient request throttling and survives daemon restart; a newer trusted positive measurement for that lane confirms recovery and clears it.
