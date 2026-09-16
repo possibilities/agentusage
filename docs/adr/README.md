@@ -15,6 +15,10 @@
 - [0004: Own Fx credential-broker authority](0004-own-fx-credential-broker-authority.md)
   defines the generation-pinned lease, private capability handoff and mediated
   provider-request boundary. Real account adapters remain disabled.
+- [0005: Compose versioned routing context](0005-compose-versioned-routing-context.md)
+  joins reviewed guidance, captured Codex capabilities, public quota, opaque
+  broker receipts and HUD host/control identity as a pure synthetic contract.
+  Scheduling, persistence and manager delivery remain disabled.
 - The sketch's viewer and focus-policy contracts remain applicable; its swap
   examples are historical wherever the documents above replace them.
 

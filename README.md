@@ -127,6 +127,13 @@ a stock executable path and expected version, includes hidden models and records
 pagination continuity. Its initial compatibility validation uses fake processes;
 it does not attach to AgentVoice or select an account.
 
+The [synthetic routing-context composer](docs/routing-context.md) is a pure
+TypeScript contract that joins reviewed guidance, captured Codex capabilities,
+public quota, opaque Fx broker receipts and AgentHUD host/control identity. It
+models five-minute freshness, monotonic revisions, latest-wins coalescing,
+full-snapshot recovery and consumed-revision receipts without timers, persistence,
+manager injection, account mutation or provider activity.
+
 ```sh
 agentusage                         # interactive usage viewer
 agentusage usage --snapshot         # one frame

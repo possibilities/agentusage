@@ -67,6 +67,20 @@ owner and native-process fences, expiry, state and digests. The separate private
 handoff capability is never manager or HUD evidence. _Avoid_: credential lease,
 provider token.
 
+**Routing context** — A monotonic, non-secret AgentUsage composition of explicit
+current model/effort/tier, reviewed task-fit and within-provider cost guidance,
+captured native capabilities, public quota, opaque Fx binding receipts and the
+exact AgentHUD host/control identity. Version 1 is a pure synthetic Codex/Fx
+contract; it never schedules a refresh, delivers a manager turn or reserves
+capacity. _Avoid_: prompt update, router, credential handoff.
+
+**Context revision** — The monotonic revision inside one numeric routing-context
+producer generation. The ordered generation/revision pair identifies newer
+state. Identical evidence coalesces; missed revisions or generation changes
+require a full snapshot. A consumed-revision receipt records observation by a
+consumer, not execution or Work acceptance. _Avoid_: provider revision, command
+receipt.
+
 **Reservation** — a short-lived selection-pressure record. Claude balance keeps a local ledger; managed launches also hold session leases. Grok's inventory records reservations for 1–300 seconds when a caller explicitly claims a selection.
 
 **Quota cooldown** — a lane-specific exclusion recorded from an explicit Codex usage-limit rejection. It is separate from transient request throttling and survives daemon restart; a newer trusted positive measurement for that lane confirms recovery and clears it.
