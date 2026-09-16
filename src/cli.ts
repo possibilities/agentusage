@@ -1465,6 +1465,17 @@ async function catalogCommand(args: string[]): Promise<number> {
 
 async function routingCommand(args: string[]): Promise<number> {
   const [action, ...rest] = args;
+  if (action === 'compose-native') {
+    if (rest.length !== 3 || rest[0] !== '--file' || rest[1] !== '-' || rest[2] !== '--json') {
+      emitJson({schema_version:1,ok:false,error:{code:'invalid-arguments'}}); return 2;
+    }
+    try {
+      const {composeNativeManagerRoutingContext} = await import('./routing-context/native-manager.ts');
+      const result=composeNativeManagerRoutingContext(readBoundedJson('-'));
+      if(!result.ok){emitJson(result);return 1;}
+      emitJson(result.context); return 0;
+    } catch { emitJson({schema_version:1,ok:false,error:{code:'context_unavailable'}}); return 1; }
+  }
   const flags = parseFlags(rest, ['json'], []);
   if (action !== 'evidence' || flags === null || !flags.booleans.has('json') || flags.positionals.length > 0) {
     emitJson({ schema_version: 1, ok: false, error: { code: 'invalid-arguments' } });

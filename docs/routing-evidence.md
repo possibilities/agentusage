@@ -68,3 +68,18 @@ raw provider account IDs, email, labels, plan names, arbitrary provider notes,
 and provider-authored lane names or feature identifiers. It preserves
 timestamps, observation health, recognized quota lanes and numeric windows,
 eligibility reasons, cooldowns and lease counts.
+
+## Native manager composition
+
+`agentusage routing compose-native --file - --json` reads a bounded JSON input
+from stdin and returns a schema-2 context, without provider calls or state writes.
+Inputs join the exact owned native catalog/current settings/runtime identity to
+public evidence v1/v2. The reviewed role catalog is
+`agentvoice-role-catalog-2026-09-14`; new visible models and effort drift disable
+recommendations. Native manager account correlation and numerical economics
+remain explicitly unavailable. Fresh positive Grok included capacity and Codex
+main-lane capacity are independently eligible. The context expires at the earliest
+relevant observation freshness/reset boundary. AgentHUD persists the emitted
+context and underlying evidence; its consumption receipt is separate from native
+transport acceptance. See `src/routing-context/native-manager.ts` for the exact
+input/output contract and `test/native-manager-context.test.ts` for examples.
