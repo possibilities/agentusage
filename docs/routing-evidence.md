@@ -75,10 +75,14 @@ eligibility reasons, cooldowns and lease counts.
 from stdin and returns a schema-2 context, without provider calls or state writes.
 Inputs join the exact owned native catalog/current settings/runtime identity to
 public evidence v1/v2. The reviewed role catalog is
-`agentvoice-role-catalog-2026-09-14`; new visible models and effort drift disable
-recommendations. Native manager account correlation and numerical economics
-remain explicitly unavailable. Fresh positive Grok included capacity and Codex
-main-lane capacity are independently eligible. The context expires at the earliest
+`agentvoice-role-catalog-and-economics-2026-09-16`; reviewed Codex models carry
+official OpenAI API text-token prices as a within-provider comparison proxy.
+Subscription quota equivalence and numeric Codex-to-Grok economics remain
+explicitly unavailable. When fresh evidence lists an eligible included-allowance
+Grok account, the policy prefers a compatible AgentFX Grok target to preserve
+finite Codex main quota; within Codex, it orders models by API price while still
+requiring adequate task fit and exact target support. Catalog drift disables the
+economics and routing recommendations. The context expires at the earliest
 relevant observation freshness/reset boundary. AgentHUD persists the emitted
 context and underlying evidence; its consumption receipt is separate from native
 transport acceptance. See `src/routing-context/native-manager.ts` for the exact
