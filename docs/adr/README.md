@@ -12,6 +12,9 @@
 - [0003: Collect versioned native catalogs](0003-collect-versioned-native-catalogs.md)
   adds an explicit owned stdio collector with fake-protocol validation and
   checked pagination receipts; it does not change the offline audit or routing.
+- [0004: Own Fx credential-broker authority](0004-own-fx-credential-broker-authority.md)
+  defines the generation-pinned lease, private capability handoff and mediated
+  provider-request boundary. Real account adapters remain disabled.
 - The sketch's viewer and focus-policy contracts remain applicable; its swap
   examples are historical wherever the documents above replace them.
 

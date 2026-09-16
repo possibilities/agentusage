@@ -55,6 +55,18 @@ runtime attachment, account activation.
 
 **Session lease** — a 90-second account assignment authenticated by an opaque bearer credential. The existing launcher parent renews and releases it. Explicit pins stay fixed; automatic Codex assignments can change after a confirmed, replayable quota rejection. Native history identity does not change.
 
+**Fx credential broker** — the AgentUsage-owned, fail-closed authority that
+pins an opaque `codex-N` or `grok-N` account and exact target capability to one
+AgentFX execution/attempt, then mediates provider requests without exporting
+credentials. Its synthetic authority proves the contract; no real Fx adapter is
+enabled yet. _Avoid_: credential export, writable identity copy, ambient auth.
+
+**Fx binding receipt** — non-secret lifecycle evidence for one broker lease. It
+includes broker/account/provider generations, the exact target capability,
+owner and native-process fences, expiry, state and digests. The separate private
+handoff capability is never manager or HUD evidence. _Avoid_: credential lease,
+provider token.
+
 **Reservation** — a short-lived selection-pressure record. Claude balance keeps a local ledger; managed launches also hold session leases. Grok's inventory records reservations for 1–300 seconds when a caller explicitly claims a selection.
 
 **Quota cooldown** — a lane-specific exclusion recorded from an explicit Codex usage-limit rejection. It is separate from transient request throttling and survives daemon restart; a newer trusted positive measurement for that lane confirms recovery and clears it.
