@@ -122,13 +122,43 @@ describe('native manager routing context', () => {
       schema_version: 2, producer_generation: 3, context_revision: 7, trigger: 'material_change',
       current: { provider: 'codex', model: 'gpt-5.6-sol', effort: 'medium', service_tier: 'priority', account_correlation: 'unavailable', execution_id: null, attempt_id: null, broker_lease_id: null },
       sources: { quota_revision: '6385791490841077170325537', broker_incarnation: 'unavailable', broker_lease_revisions: [] },
-      guidance: { reviewed_version: NATIVE_MANAGER_REVIEWED_VERSION, task_fit: ['implementation'], cost_guidance: null, economics_status: 'unavailable' },
+      guidance: {
+        reviewed_version: NATIVE_MANAGER_REVIEWED_VERSION,
+        task_fit: ['implementation'],
+        economics_status: 'within_provider_api_price_proxy',
+        cost_guidance: {
+          comparison_scope: 'within_provider',
+          basis: 'official_openai_api_text_pricing_2026_09_16',
+          source: 'https://developers.openai.com/api/docs/models/gpt-5.6-sol',
+          unit: 'usd_per_million_text_tokens',
+          input: 4,
+          output: 20,
+          rank: 3,
+          subscription_quota_equivalence: 'unavailable',
+        },
+        routing_policy: {
+          enabled: true,
+          provider_preference: 'eligible_included_grok_when_compatible',
+          provider_preference_basis: 'preserve_finite_codex_main_quota',
+          codex_selection: 'least_expensive_adequate_model',
+          codex_cost_order: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-6-astra'],
+          cross_provider_economics: 'unavailable',
+          require_target_capability_check: true,
+        },
+      },
       native_catalog: { source: 'codex_app_server_model_list', client_version: '0.154.0', drift: [] },
       host_control: { target: { kind: 'codex_root', id: 'voice-root-1' } },
       quota: { current_account_key: null, routing_available: false, delegation_available: true, eligible_account_keys: ['codex-1', 'grok-2'] },
     });
     expect(context.native_catalog.models.map((row) => row.model)).toEqual([...reviewed.map(([model]) => model)].sort());
     expect(context.guidance.models).toHaveLength(5);
+    expect(context.guidance.models.map((row) => [row.model, row.cost_guidance.input, row.cost_guidance.output, row.cost_guidance.rank])).toEqual([
+      ['gpt-6-astra', 10, 50, 5],
+      ['gpt-5.6-sol', 4, 20, 3],
+      ['gpt-5.6-terra', 2, 12, 2],
+      ['gpt-5.6-luna', 0.2, 1.2, 1],
+      ['gpt-5.5', 5, 30, 4],
+    ]);
     expect(context.quota.accounts[0]).toMatchObject({ account_key: 'codex-1', broker_lease_id: null, broker_state: null, eligible: true });
     expect(context.quota.grok[0]).toMatchObject({ accountKey: 'grok-2', alias: null, email: null, subscriptionTier: null });
     expect(context.digest).toBe(digest({ ...context, digest: '' }));
@@ -275,5 +305,18 @@ describe('native manager routing context', () => {
     const wrongReview = fixture() as unknown as Record<string, any>;
     wrongReview.reviewed.source_version = 'approximate-role-catalog';
     expect(composeNativeManagerRoutingContext(wrongReview, NOW)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+  });
+
+  test('disables price-based recommendations when the native catalog drifts', () => {
+    const input = fixture();
+    input.native_catalog.models.find((row) => row.model === 'gpt-5.6-luna')!.efforts.push('ultra');
+    const context = composed(input);
+    expect(context.native_catalog.drift.length).toBeGreaterThan(0);
+    expect(context.guidance).toMatchObject({
+      economics_status: 'unavailable',
+      cost_guidance: null,
+      models: [],
+      routing_policy: { enabled: false, codex_cost_order: [], cross_provider_economics: 'unavailable' },
+    });
   });
 });

@@ -4,7 +4,7 @@ import type { GrokAccountView, GrokObservation } from '../grok/types.ts';
 
 export const NATIVE_MANAGER_CONTEXT_SCHEMA_VERSION = 2 as const;
 export const NATIVE_MANAGER_INPUT_SCHEMA_VERSION = 1 as const;
-export const NATIVE_MANAGER_REVIEWED_VERSION = 'agentvoice-role-catalog-2026-09-14' as const;
+export const NATIVE_MANAGER_REVIEWED_VERSION = 'agentvoice-role-catalog-and-economics-2026-09-16' as const;
 export const NATIVE_MANAGER_FRESHNESS_MS = 5 * 60_000;
 
 const FUTURE_TOLERANCE_MS = 5_000;
@@ -21,12 +21,28 @@ const PUBLIC_EXCLUSIONS = new Set([
   'usage_unknown',
 ]);
 
+const ECONOMICS_BASIS = 'official_openai_api_text_pricing_2026_09_16' as const;
 const REVIEWED_MODELS = [
-  { model: 'gpt-6-astra', task_fit: ['architecture', 'design'], efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
-  { model: 'gpt-5.6-sol', task_fit: ['implementation'], efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
-  { model: 'gpt-5.6-terra', task_fit: ['bounded_implementation'], efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
-  { model: 'gpt-5.6-luna', task_fit: ['narrow_transformations'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-  { model: 'gpt-5.5', task_fit: ['explicit_preference'], efforts: ['low', 'medium', 'high', 'xhigh'] },
+  {
+    model: 'gpt-6-astra', task_fit: ['architecture', 'design'], efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    input: 10, output: 50, costRank: 5, source: 'https://developers.openai.com/api/docs/models/gpt-6-astra',
+  },
+  {
+    model: 'gpt-5.6-sol', task_fit: ['implementation'], efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    input: 4, output: 20, costRank: 3, source: 'https://developers.openai.com/api/docs/models/gpt-5.6-sol',
+  },
+  {
+    model: 'gpt-5.6-terra', task_fit: ['bounded_implementation'], efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    input: 2, output: 12, costRank: 2, source: 'https://developers.openai.com/api/docs/models/gpt-5.6-terra',
+  },
+  {
+    model: 'gpt-5.6-luna', task_fit: ['narrow_transformations'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    input: 0.2, output: 1.2, costRank: 1, source: 'https://developers.openai.com/api/docs/models/gpt-5.6-luna',
+  },
+  {
+    model: 'gpt-5.5', task_fit: ['explicit_preference'], efforts: ['low', 'medium', 'high', 'xhigh'],
+    input: 5, output: 30, costRank: 4, source: 'https://developers.openai.com/api/docs/models/gpt-5.5',
+  },
 ] as const;
 const CAPACITY_BANDS = [0, 25, 50, 75, 100] as const;
 
@@ -121,10 +137,19 @@ export interface NativeManagerContextSnapshot {
     task_fit: string[];
     quota_lane_id: 'main';
     remaining_capacity_bands: number[];
-    cost_guidance: null;
-    economics_status: 'unavailable';
+    cost_guidance: NativeManagerCostGuidance | null;
+    economics_status: 'within_provider_api_price_proxy' | 'unavailable';
     expected_capability_digest: string;
-    models: Array<{ model: string; task_fit: string[]; efforts: string[] }>;
+    models: Array<{ model: string; task_fit: string[]; efforts: string[]; cost_guidance: NativeManagerCostGuidance }>;
+    routing_policy: {
+      enabled: boolean;
+      provider_preference: 'eligible_included_grok_when_compatible';
+      provider_preference_basis: 'preserve_finite_codex_main_quota';
+      codex_selection: 'least_expensive_adequate_model';
+      codex_cost_order: string[];
+      cross_provider_economics: 'unavailable';
+      require_target_capability_check: true;
+    };
   };
   native_catalog: {
     source: 'codex_app_server_model_list';
@@ -148,6 +173,17 @@ export interface NativeManagerContextSnapshot {
     delegation_available: boolean;
     grok: GrokAccountView[];
   };
+}
+
+export interface NativeManagerCostGuidance {
+  comparison_scope: 'within_provider';
+  basis: typeof ECONOMICS_BASIS;
+  source: (typeof REVIEWED_MODELS)[number]['source'];
+  unit: 'usd_per_million_text_tokens';
+  input: number;
+  output: number;
+  rank: number;
+  subscription_quota_equivalence: 'unavailable';
 }
 
 interface RoutingQuotaAccount {
@@ -213,6 +249,19 @@ function digest(value: unknown): string {
 
 function sorted(values: Iterable<string>): string[] {
   return [...values].sort((left, right) => left.localeCompare(right));
+}
+
+function costGuidance(model: (typeof REVIEWED_MODELS)[number]): NativeManagerCostGuidance {
+  return {
+    comparison_scope: 'within_provider',
+    basis: ECONOMICS_BASIS,
+    source: model.source,
+    unit: 'usd_per_million_text_tokens',
+    input: model.input,
+    output: model.output,
+    rank: model.costRank,
+    subscription_quota_equivalence: 'unavailable',
+  };
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -531,9 +580,15 @@ export function composeNativeManagerRoutingContext(value: unknown, nowMs = Date.
     broker: digest(brokerSource), hud_host: digest(hudHostSource), hud_domain: digest(hudDomainSource),
   };
   const guidanceModels = catalog.drift.length === 0
-    ? REVIEWED_MODELS.map((model) => ({ model: model.model, task_fit: [...model.task_fit], efforts: [...model.efforts] }))
+    ? REVIEWED_MODELS.map((model) => ({
+      model: model.model, task_fit: [...model.task_fit], efforts: [...model.efforts], cost_guidance: costGuidance(model),
+    }))
     : [];
-  const currentTaskFit = input.current.model === null ? [] : [...(REVIEWED_MODELS.find((item) => item.model === input.current.model)?.task_fit ?? [])];
+  const currentReviewedModel = input.current.model === null
+    ? undefined
+    : REVIEWED_MODELS.find((item) => item.model === input.current.model);
+  const currentTaskFit = [...(currentReviewedModel?.task_fit ?? [])];
+  const recommendationsEnabled = catalog.drift.length === 0;
   const evidenceBody = {
     sources: {
       reviewed_revision: input.reviewed.revision, native_catalog_revision: input.native_catalog.revision, quota_revision: evidence.source_revision,
@@ -548,8 +603,21 @@ export function composeNativeManagerRoutingContext(value: unknown, nowMs = Date.
     },
     guidance: {
       reviewed_version: NATIVE_MANAGER_REVIEWED_VERSION, task_fit: currentTaskFit, quota_lane_id: 'main' as const,
-      remaining_capacity_bands: [...CAPACITY_BANDS], cost_guidance: null, economics_status: 'unavailable' as const,
+      remaining_capacity_bands: [...CAPACITY_BANDS],
+      cost_guidance: recommendationsEnabled && currentReviewedModel !== undefined ? costGuidance(currentReviewedModel) : null,
+      economics_status: recommendationsEnabled ? 'within_provider_api_price_proxy' as const : 'unavailable' as const,
       expected_capability_digest: digest(reviewedSource), models: guidanceModels,
+      routing_policy: {
+        enabled: recommendationsEnabled,
+        provider_preference: 'eligible_included_grok_when_compatible' as const,
+        provider_preference_basis: 'preserve_finite_codex_main_quota' as const,
+        codex_selection: 'least_expensive_adequate_model' as const,
+        codex_cost_order: recommendationsEnabled
+          ? [...REVIEWED_MODELS].sort((left, right) => left.costRank - right.costRank).map((model) => model.model)
+          : [],
+        cross_provider_economics: 'unavailable' as const,
+        require_target_capability_check: true as const,
+      },
     },
     native_catalog: {
       source: 'codex_app_server_model_list' as const, client_version: input.native_catalog.client_version, capture_id: input.native_catalog.capture_id,

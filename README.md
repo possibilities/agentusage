@@ -139,6 +139,12 @@ composer with one locked, sanitized Codex-and-Grok usage snapshot and opaque
 account/provider generations. It fails closed on identity, credential or
 generation drift and makes no provider request.
 
+The native manager context also carries reviewed Codex-only API text prices and
+an explicit least-expensive-adequate-model order. API pricing is a relative
+within-provider proxy, not subscription quota accounting. Its separate Grok
+preference applies only to a fresh eligible included-allowance account and a
+compatible AgentFX target; numeric cross-provider economics remain unavailable.
+
 ```sh
 agentusage                         # interactive usage viewer
 agentusage usage --snapshot         # one frame

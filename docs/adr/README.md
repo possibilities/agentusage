@@ -40,3 +40,6 @@ accepted ownership rationale into another parallel specification.
 
 - [0009: Mediate bounded Fx Codex and Grok executions](0009-mediate-bounded-fx-executions.md)
   supplies the owner-authenticated, source-fenced execution bridge.
+- [0010: Publish bounded manager economics](0010-publish-bounded-manager-economics.md)
+  adds official Codex API price guidance and a separate Grok quota-stewardship
+  preference without inventing cross-provider economics.

@@ -81,6 +81,12 @@ require a full snapshot. A consumed-revision receipt records observation by a
 consumer, not execution or Work acceptance. _Avoid_: provider revision, command
 receipt.
 
+**Manager economics** — Reviewed official API text-token prices used only to
+order Codex models within OpenAI. They do not measure subscription quota or
+compare Codex with Grok. The separate Grok preference preserves finite Codex
+main quota when an eligible included-allowance target is compatible. _Avoid_:
+cross-provider price, predicted task cost, quota multiplier.
+
 **Routing evidence projection** — A read-only, sanitized AgentUsage snapshot
 that joins one locked Codex observation to the exact managed-account pool and
 supplies composer-ready usage plus opaque generations. It never refreshes a
