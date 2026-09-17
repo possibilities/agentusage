@@ -94,6 +94,14 @@ provider. Email, labels, provider account IDs, plan names, notes and credential
 material are absent. _Avoid_: account listing, credential snapshot, routing
 decision.
 
+**Grok catalog routing evidence** — A revision-fenced, non-secret projection of
+the last-good authenticated `/v1/models` and `/v1/language-models` captures for
+every owned Grok account, joined to current included quota and reviewed model
+metadata. Complete visibility includes intentionally incompatible rows;
+routability requires a fresh current-credential capture, compatible Responses
+capability, positive included quota and reviewed guidance. _Avoid_: raw provider
+catalog, inferred capability, cross-provider price.
+
 **Routing source revision** — The strictly monotonic revision assigned when a
 Codex observation sidecar is published. A legacy sidecar without the explicit
 field uses its positive observation timestamp once; subsequent publishers

@@ -43,3 +43,6 @@ accepted ownership rationale into another parallel specification.
 - [0010: Publish bounded manager economics](0010-publish-bounded-manager-economics.md)
   adds official Codex API price guidance and a separate Grok quota-stewardship
   preference without inventing cross-provider economics.
+- [0011: Publish reviewed live Grok catalog evidence](0011-publish-reviewed-live-grok-catalog.md)
+  captures authenticated Grok catalogs as a sanitized last-good projection and
+  separates complete visibility, reviewed routability and structured drift.

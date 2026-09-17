@@ -12,6 +12,8 @@ import { fixtureState } from './managed-fixtures.ts';
 import { account, grokCli, seedGrok } from './grok-fixtures.ts';
 
 const billingReply = { config: { creditUsagePercent: 10, prepaidBalance: {}, onDemandCap: {}, currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-10-01T00:00:00Z' } } };
+const catalogReply = { data: [{ model: 'grok-4.6', api_backend: 'responses', supports_reasoning_effort: true, reasoning_efforts: [{ value: 'low' }, { value: 'medium' }], context_window: 256_000, max_completion_tokens: 16_384 }] };
+const modalitiesReply = { models: [{ id: 'grok-4.6', input_modalities: ['text'], output_modalities: ['text'] }] };
 function endpoint(fixture: ReturnType<typeof fixtureState>, fetch: (request: Request) => Response | Promise<Response>) {
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch });
   return { server, env: { ...fixture.env, AGENTUSAGE_TEST_GROK_ORIGIN: `http://127.0.0.1:${server.port}` } };
@@ -82,13 +84,14 @@ describe('owned Grok OAuth and billing', () => {
     await seedGrok(fixture.paths, rows);
     const requests: string[] = [];
     const { server, env } = endpoint(fixture, (request) => {
-      requests.push(request.headers.get('x-userid') ?? 'missing');
-      return Response.json(billingReply);
+      const path = new URL(request.url).pathname;
+      requests.push(`${path}:${request.headers.get('x-userid') ?? request.headers.get('x-grok-user-id') ?? 'catalog'}`);
+      return Response.json(path === '/v1/models' ? catalogReply : path === '/v1/language-models' ? modalitiesReply : billingReply);
     });
     try {
       const result = await refreshGrokObservation(fixture.paths, { env, providerRefresh: true, account: 'grok-2', freshWithinMs: 0 });
       expect(result.value?.accounts).toHaveLength(2);
-      expect(requests).toEqual(['acct_2']);
+      expect(requests).toEqual(['/v1/billing:acct_2', '/v1/models:acct_2', '/v1/language-models:catalog']);
       const stored = (await readState(fixture.paths)).accounts;
       expect(stored[0]).toEqual(rows[0]);
       expect(stored[1]!.observation.lastGood?.included.usedPercent).toBe(10);
@@ -134,17 +137,19 @@ describe('owned Grok OAuth and billing', () => {
   test('parallel refresh callers share one publication and one rotation', async () => {
     const fixture = fixtureState(); const row = account(1); row.credentials.expiresAtMs = 0;
     await seedGrok(fixture.paths, [row]);
-    let tokenCalls = 0; let billingCalls = 0;
+    let tokenCalls = 0; let billingCalls = 0; let catalogCalls = 0;
     const { server, env } = endpoint(fixture, async (request) => {
       const path = new URL(request.url).pathname;
       if (path === '/oauth2/token') { tokenCalls++; await Bun.sleep(100); return Response.json({ access_token: 'parallel-access', refresh_token: 'parallel-refresh', expires_in: 3600 }); }
       if (path === '/oauth2/userinfo') return Response.json({ sub: 'acct_1' });
+      if (path === '/v1/models') { catalogCalls++; return Response.json(catalogReply); }
+      if (path === '/v1/language-models') { catalogCalls++; return Response.json(modalitiesReply); }
       billingCalls++; return Response.json(billingReply);
     });
     try {
       const results = await Promise.all([1, 2].map(() => refreshGrokObservation(fixture.paths, { env, providerRefresh: true, freshWithinMs: 0 })));
       expect(results.map((r) => r.outcome).sort()).toEqual(['peer-published', 'refreshed']);
-      expect(tokenCalls).toBe(1); expect(billingCalls).toBe(1);
+      expect(tokenCalls).toBe(1); expect(billingCalls).toBe(1); expect(catalogCalls).toBe(2);
     } finally { server.stop(true); }
   });
 

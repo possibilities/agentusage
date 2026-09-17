@@ -247,7 +247,7 @@ export const CONTRACT: Contract = {
       mutates: false,
       blocking: false,
       guidance:
-        'The evidence subcommand locks Codex and Grok observations with their account state, validates exact identity, credential, and generation joins, and emits one sanitized snapshot. It refuses lock contention or inconsistent state and never contacts a provider.',
+        'The evidence subcommand locks Codex and Grok observations with their account state, validates exact identity, credential, and generation joins, and emits one sanitized snapshot. The Grok catalog subcommand joins separately captured live catalogs to reviewed guidance and that exact source revision. Both refuse lock contention or inconsistent state and never contact a provider.',
       subcommands: [
         {
           name: 'evidence',
@@ -261,6 +261,27 @@ export const CONTRACT: Contract = {
               invocation: 'agentusage routing evidence --json',
               description:
                 'Return sanitized Codex and Grok quota evidence with opaque account/provider generations.',
+            },
+          ],
+        },
+        {
+          name: 'grok-catalog',
+          summary: 'Emit complete visible and reviewed routable Grok model evidence',
+          audience: 'operator',
+          mutates: false,
+          blocking: false,
+          arguments: [
+            {
+              name: '--expected-source-revision',
+              type: 'string',
+              description: 'Require the exact atomic routing-evidence revision.',
+            },
+            { ...JSON_FLAG, required: true },
+          ],
+          examples: [
+            {
+              invocation: 'agentusage routing grok-catalog --expected-source-revision 123 --json',
+              description: 'Return sanitized complete visibility, reviewed advice, routability and structured drift.',
             },
           ],
         },

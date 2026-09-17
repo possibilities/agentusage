@@ -5,6 +5,15 @@ import type { StoredAccount } from "./model.ts";
 import { GrokError } from "./model.ts";
 import { readState, resolveAccount, withState } from "./store.ts";
 import { GROK_OBSERVATION_SCHEMA_VERSION, type GrokObservation } from "./types.ts";
+import {
+  GROK_CATALOG_FRESHNESS_MS,
+  errorCode as catalogErrorCode,
+  fetchGrokCatalog,
+  pruneGrokCatalogState,
+  readGrokCatalogState,
+  recordGrokCatalogAttempt,
+} from "./catalog.ts";
+import { credentialFingerprint } from "./billing.ts";
 
 const REFRESH_BUDGET_MS = 55_000;
 
@@ -62,14 +71,29 @@ export async function observeGrok(options: ObserveGrokOptions = {}): Promise<Gro
         const account = state.accounts.find((row) => row.accountKey === target.accountKey && row.userId === target.userId);
         // A concurrent removal must not resurrect an account from the initial read.
         if (!account || !account.enabled) return { result: null, changed: false };
+        const catalogState = readGrokCatalogState(paths).accounts.find((item) => item.account_key === account.accountKey);
+        const catalogObservedAt = catalogState?.last_good ? Date.parse(catalogState.last_good.observed_at) : NaN;
+        const catalogDue = catalogState?.last_good === null || catalogState === undefined || catalogState.error_code !== null ||
+          catalogState.last_good.credential_fingerprint !== credentialFingerprint(account.credentials.accessToken) ||
+          !Number.isFinite(catalogObservedAt) || Date.now() - catalogObservedAt >= GROK_CATALOG_FRESHNESS_MS;
         const changed = await observeAccount(account, {
           force: options.refresh === true, env, deadlineMs, persistCredentials: persist,
         });
+        if ((changed || catalogDue) && account.observation.error === null && Date.now() < deadlineMs) {
+          try {
+            const capture = await fetchGrokCatalog(account, env, deadlineMs);
+            recordGrokCatalogAttempt(paths, account.accountKey, capture, null);
+          } catch (error) {
+            recordGrokCatalogAttempt(paths, account.accountKey, null, catalogErrorCode(error));
+          }
+        }
         return { result: null, changed };
       }, Math.max(0, Math.min(30_000, deadlineMs - Date.now())));
     }
+    const finalState = await readState(paths);
+    pruneGrokCatalogState(paths, new Set(finalState.accounts.map((account) => account.accountKey)));
     // A targeted refresh still publishes the complete inventory to the sidecar.
-    return buildGrokObservation((await readState(paths)).accounts, Date.now(), notes);
+    return buildGrokObservation(finalState.accounts, Date.now(), notes);
   } catch (error) {
     const code = error instanceof AccountError ? error.code : "observation_failed";
     return {

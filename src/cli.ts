@@ -72,7 +72,7 @@ import {
   renderHelp,
 } from './guide.ts';
 import { auditCatalog, CatalogInputError, collectCatalog, readBoundedJson, validateCatalogAuditInput, validateCatalogMetadataInput } from './catalog/index.ts';
-import { readRoutingEvidence, RoutingEvidenceError } from './routing-evidence/index.ts';
+import { readGrokCatalogRoutingEvidence, readRoutingEvidence, RoutingEvidenceError } from './routing-evidence/index.ts';
 
 interface Flags {
   booleans: Set<string>;
@@ -1475,6 +1475,25 @@ async function routingCommand(args: string[]): Promise<number> {
       if(!result.ok){emitJson(result);return 1;}
       emitJson(result.context); return 0;
     } catch { emitJson({schema_version:1,ok:false,error:{code:'context_unavailable'}}); return 1; }
+  }
+  if (action === 'grok-catalog') {
+    const flags = parseFlags(rest, ['json'], ['expected-source-revision']);
+    const expected = flags?.strings.get('expected-source-revision');
+    if (flags === null || !flags.booleans.has('json') || flags.positionals.length > 0 ||
+        (expected !== undefined && !/^[1-9]\d{0,63}$/u.test(expected))) {
+      emitJson({ schema_version: 1, ok: false, error: { code: 'invalid-arguments' } });
+      return 2;
+    }
+    try {
+      emitJson(await readGrokCatalogRoutingEvidence(statePaths(process.env), expected));
+      return 0;
+    } catch (error) {
+      const code = error instanceof Error && error.message === 'source_revision_conflict'
+        ? 'source_revision_conflict'
+        : error instanceof RoutingEvidenceError ? error.code : 'catalog_unavailable';
+      emitJson({ schema_version: 1, ok: false, error: { code } });
+      return 1;
+    }
   }
   const flags = parseFlags(rest, ['json'], []);
   if (action !== 'evidence' || flags === null || !flags.booleans.has('json') || flags.positionals.length > 0) {

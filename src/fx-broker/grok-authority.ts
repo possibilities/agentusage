@@ -4,6 +4,7 @@ import { readState } from '../grok/store.ts';
 import { credentialFingerprint } from '../grok/billing.ts';
 import { XAI_COMPAT_VERSION } from '../grok/oauth.ts';
 import type { StoredAccount } from '../grok/model.ts';
+import { normalizeGrokCatalog } from '../grok/catalog.ts';
 import type { StatePaths } from '../paths.ts';
 import { withRoutingEvidenceSnapshot } from '../routing-evidence/projection.ts';
 import type { RoutingEvidenceProjection } from '../routing-evidence/types.ts';
@@ -35,16 +36,15 @@ export function requireGrokCapacity(evidence: RoutingEvidenceProjection, key: st
     !Number.isFinite(reset) || reset <= now) fail('capacity_unavailable');
 }
 export function validateGrokCapability(catalog: Uint8Array, modalities: Uint8Array, model: string, effort: string): void {
-  const value=record(JSON.parse(new TextDecoder().decode(catalog)));
-  const modality=record(JSON.parse(new TextDecoder().decode(modalities)));
-  if(!Array.isArray(value?.data) || value.data.length>128 || !Array.isArray(modality?.models) || modality.models.length>128) fail('catalog_unavailable');
-  const rows=value.data.map(record).filter(row=>row?.model===model);
-  const matches=modality.models.map(record).filter(row=>row?.id===model);
-  if(rows.length!==1 || matches.length!==1) fail('catalog_drift');
-  const row=rows[0]!, shape=matches[0]!;
-  if(row.api_backend!=='responses' || row.supports_reasoning_effort!==true ||
-    !Array.isArray(row.reasoning_efforts) || !row.reasoning_efforts.some(item=>record(item)?.value===effort) ||
-    !Array.isArray(shape.output_modalities) || !shape.output_modalities.includes('text')) fail('catalog_drift');
+  let models;
+  try {
+    models=normalizeGrokCatalog(
+      JSON.parse(new TextDecoder().decode(catalog)),
+      JSON.parse(new TextDecoder().decode(modalities)),
+    );
+  } catch { fail('catalog_unavailable'); }
+  const row=models.find(item=>item.model===model);
+  if(!row || !row.capability_complete || !row.efforts.includes(effort)) fail('catalog_drift');
 }
 /** A bridge pins one fresh credential fingerprint. Refresh requires a new routing decision. */
 export class GrokFxAuthority implements FxBrokerAuthority {
