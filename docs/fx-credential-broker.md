@@ -74,7 +74,8 @@ boundary.
 
 `agentusage fx-bridge` now supplies a private stdio transport to AgentFX for one
 bounded Codex execution. It takes a schema-1 selection (account key, model,
-effort, service tier and exact routing source revision), host/execution owner
+effort, service tier and either an exact routing source revision or the explicit
+`broker_prepare` mode), host/execution owner
 and deadline on stdin; returns a prepared receipt and **private** random loopback
 URLs; accepts exact native process/build/session activation; and releases on EOF,
 explicit release or deadline. This command is a host interface, not a manager
@@ -90,3 +91,11 @@ require a daemon restart. See ADR 0007 for bounds, secret containment and
 recovery limits.
 
 The production bridge supports Codex and Grok using the fixed owner-controlled Responses endpoints. A selected routing evidence revision (v1 integer or v2 lossless decimal string) stays pinned for every admission; changes require a fresh selection. Grok joins its current included reset and credential fingerprint, plus provider model/effort and modality catalogs. `agentfx run` and MCP consume this private bridge; neither receives credentials. See [ADR 0009](adr/0009-mediate-bounded-fx-executions.md).
+
+`broker_prepare` resolves to the current exact revision while the bridge holds
+the atomic observation/account snapshot through catalog validation and durable
+lease preparation. The prepared response carries that resolved revision. This
+mode is for callers whose explicit account/model/effort/tier choice is already
+fixed but whose earlier read-only orientation can age before process startup.
+It does not reuse the earlier revision, retry a refusal, or relax quota,
+credential, target, generation, freshness, or broker idempotency checks.

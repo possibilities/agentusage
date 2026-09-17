@@ -91,3 +91,39 @@ test('prepares a lease before a queued routing-revision publication can advance'
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}
 },30_000);
+
+test('resolves the current exact revision inside broker preparation after caller preflight ages', async () => {
+  const state=fixtureState();await seed(state,[managed()]);
+  writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
+  (await lockFile(state.paths.codexRefreshLock,0))();
+  await seedObservedGrok(state.paths);
+  const preflight=await readRoutingEvidence(state.paths);
+  const current=readCodexObservation(state.paths)!;
+  current.source_revision=nextCodexSourceRevision(current,Date.now()+1);
+  writeSidecar(state.paths.codexObservation,current);
+  const preparedRevision=(await readRoutingEvidence(state.paths)).source_revision;
+  expect(preparedRevision).not.toBe(preflight.source_revision);
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request) {
+    if(new URL(request.url).pathname.endsWith('/models')) return Response.json({models:[{slug:'gpt-test',visibility:'list',supported_in_api:true,supported_reasoning_levels:[{effort:'low'}]}]});
+    return new Response(null,{status:500});
+  }});
+  const start=()=>spawn(process.execPath,['src/cli.ts','fx-bridge'],{cwd:join(import.meta.dir,'..'),env:{...process.env,...state.env,AGENTUSAGE_TEST_CODEX_ORIGIN:`http://127.0.0.1:${server.port}`},stdio:['pipe','pipe','pipe']});
+  const run=async(expected_source_revision:number|string,attempt_id:string)=>{
+    const child=start();child.stderr.resume();
+    const lines=createInterface({input:child.stdout})[Symbol.asyncIterator]();
+    const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:`test-${attempt_id}`,attempt_id,control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision}})+'\n');
+    const line=await lines.next();expect(line.done).toBe(false);
+    const result=JSON.parse(line.value!);
+    if(result.type==='prepared') child.stdin.end(JSON.stringify({action:'release'})+'\n');
+    else child.stdin.end();
+    await exit;
+    return result;
+  };
+  try {
+    expect(await run(preflight.source_revision,'stale-exact')).toMatchObject({type:'error',code:'source_revision_conflict'});
+    const prepared=await run('broker_prepare','atomic-current');
+    expect(prepared).toMatchObject({type:'prepared',routing_source_revision:preparedRevision});
+    expect(prepared.evidence.source_revision).toBe(preparedRevision);
+  } finally {server.stop(true);}
+},30_000);

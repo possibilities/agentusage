@@ -43,3 +43,12 @@ The provider rejects a catalog request without this version. This is protocol
 compatibility metadata; it does not claim the native manager executed that build.
 
 The Grok authority joins fresh included quota, current reset and credential fingerprint to a fixed subscription Responses endpoint. Exact account, source revision, model, reasoning effort and tier remain pinned for the lease. It fetches subscription capabilities and xAI modalities separately and contains both credentials and provider account identifiers. No numerical cross-provider economics are inferred. Both providers refuse changed aggregate evidence revisions; a new routing decision is required. The bridge holds the atomic observation/account snapshot through catalog validation and durable broker preparation, so a normal observation publication cannot age a selected exact revision between the gate and its lease. A credential that would expire during the bounded execution refuses instead of refreshing inside that revision fence.
+
+For a manager decision that already fixes account, model, effort and tier, the
+bridge also accepts the explicit `broker_prepare` revision mode. It resolves
+that mode to the current exact routing revision inside the same locked broker
+preparation transaction and returns the resolved revision to AgentFX for
+durable evidence. This closes the otherwise unavoidable gap between a
+read-only manager orientation and child startup without accepting the older
+evidence or retrying a failed attempt. Exact-revision input retains its existing
+strict conflict behavior.

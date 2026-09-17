@@ -11,6 +11,7 @@ import type { FxBrokerBindingReceipt, FxBrokerNativeBinding, FxBrokerOwner } fro
 
 const MAX_LINE = 16 * 1024;
 const MAX_BODY = 1024 * 1024;
+const BROKER_PREPARE_REVISION = 'broker_prepare';
 function invalid(): never { throw new AccountError('invalid_request', 'Invalid broker bridge request', 400); }
 const id = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(v);
 
@@ -40,7 +41,8 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
         !['host_id', 'host_incarnation', 'execution_id', 'attempt_id'].every(k => id(owner[k])) || owner.control_epoch !== 1 ||
         !Number.isSafeInteger(input.deadline_ms) || Number(input.deadline_ms) <= Date.now() || Number(input.deadline_ms) > Date.now() + 300_000 ||
         typeof selection.account_key !== 'string' || typeof selection.model !== 'string' || typeof selection.effort !== 'string' ||
-        !(selection.service_tier === null || selection.service_tier === 'priority') || !(typeof selection.expected_source_revision === 'string' ? /^[1-9]\d{0,63}$/.test(selection.expected_source_revision) : Number.isSafeInteger(selection.expected_source_revision) && Number(selection.expected_source_revision) > 0)) invalid();
+        !(selection.service_tier === null || selection.service_tier === 'priority') || !(selection.expected_source_revision === BROKER_PREPARE_REVISION ||
+          (typeof selection.expected_source_revision === 'string' ? /^[1-9]\d{0,63}$/.test(selection.expected_source_revision) : Number.isSafeInteger(selection.expected_source_revision) && Number(selection.expected_source_revision) > 0))) invalid();
     // A second host cannot revoke the first host by opening a new broker incarnation.
     const releaseLock = await lockFile(join(paths.stateRoot, 'service', 'fx-bridge.lock'), 0);
     close = async () => { releaseLock(); };
@@ -49,16 +51,19 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     const factory = selection.account_key.startsWith('grok-') ? GrokFxAuthority : CodexFxAuthority;
     // No publication can advance the exact routing revision after this gate
     // validates it and before the broker durably records the lease.
-    const { authority, broker, prepared } = await withRoutingEvidenceSnapshot(paths, async evidence => {
+    const { authority, broker, prepared, routingSourceRevision } = await withRoutingEvidenceSnapshot(paths, async evidence => {
+      const expectedSourceRevision = selection.expected_source_revision === BROKER_PREPARE_REVISION
+        ? evidence.source_revision
+        : selection.expected_source_revision;
       const authority = await factory.createWithinSnapshot(paths,
-        selection as unknown as Parameters<typeof CodexFxAuthority.create>[1], evidence);
+        { ...selection, expected_source_revision: expectedSourceRevision } as unknown as Parameters<typeof CodexFxAuthority.create>[1], evidence);
       const broker = await FxCredentialBroker.open(paths, authority);
       const fence = { schema_version: 1 as const, expected_broker_incarnation: broker.incarnation };
       const prepared = await broker.prepare({ ...fence, request_id: `${prefix}:prepare`, owner: commandOwner,
         target: authority.target, account: { account_key: authority.accountKey, expected_account_generation: Number(authority.accountKey.split('-')[1]), expected_provider_generation: 1 },
         consumer_nonce: randomBytes(32).toString('base64url'), requested_ttl_ms: Math.max(1000, Number(input.deadline_ms) - Date.now()),
         execution_deadline_ms: Number(input.deadline_ms) }, authority.inspectionWithinSnapshot());
-      return { authority, broker, prepared };
+      return { authority, broker, prepared, routingSourceRevision: evidence.source_revision };
     });
     const fence = { schema_version: 1 as const, expected_broker_incarnation: broker.incarnation };
     if (!prepared.handoff) invalid();
@@ -115,7 +120,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     };
     const expire = () => { void close?.().finally(() => { close = undefined; lines.close(); process.stdin.destroy(); }); };
     timer = setTimeout(expire, Math.max(1, Number(input.deadline_ms) - Date.now()));
-    write({ type: 'prepared', receipt, evidence: authority.evidence,
+    write({ type: 'prepared', receipt, evidence: authority.evidence, routing_source_revision: routingSourceRevision,
       private_transport: { catalog_url: `http://127.0.0.1:${server.port}/${route}/models`, chat_url: `http://127.0.0.1:${server.port}/${route}/responses` } });
     for (;;) {
       const next = await iterator.next();
