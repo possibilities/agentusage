@@ -351,7 +351,14 @@ export class FxCredentialBroker {
     return new FxCredentialBroker(paths, authority, incarnation, clock);
   }
 
-  async prepare(command: FxBrokerPrepareCommand): Promise<FxBrokerPrepareResult> {
+  /**
+   * `inspection` is supplied only by the bridge while its exact routing
+   * snapshot is locked. Ordinary callers keep the broker's own inspection.
+   */
+  async prepare(
+    command: FxBrokerPrepareCommand,
+    inspection?: FxBrokerAuthorityAccount,
+  ): Promise<FxBrokerPrepareResult> {
     assertBoundedCommand(command);
     exactKeys(
       command,
@@ -454,7 +461,7 @@ export class FxCredentialBroker {
         throw refusal(command.request_id, 'capacity_unavailable', 'Broker state capacity reached');
       if (command.execution_deadline_ms <= now)
         throw refusal(command.request_id, 'expired', 'Execution deadline has passed');
-      const account = await this.inspectAuthority(
+      const account = inspection ?? await this.inspectAuthority(
         command.request_id,
         target.provider,
         command.account.account_key,

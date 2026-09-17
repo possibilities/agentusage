@@ -6,6 +6,7 @@ import type { StatePaths } from '../paths.ts';
 import { FxCredentialBroker } from './broker.ts';
 import { GrokFxAuthority } from './grok-authority.ts';
 import { CodexFxAuthority } from './codex-authority.ts';
+import { withRoutingEvidenceSnapshot } from '../routing-evidence/projection.ts';
 import type { FxBrokerBindingReceipt, FxBrokerNativeBinding, FxBrokerOwner } from './types.ts';
 
 const MAX_LINE = 16 * 1024;
@@ -43,16 +44,23 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     // A second host cannot revoke the first host by opening a new broker incarnation.
     const releaseLock = await lockFile(join(paths.stateRoot, 'service', 'fx-bridge.lock'), 0);
     close = async () => { releaseLock(); };
-    const factory = selection.account_key.startsWith('grok-') ? GrokFxAuthority : CodexFxAuthority;
-    const authority = await factory.create(paths, selection as unknown as Parameters<typeof CodexFxAuthority.create>[1]);
-    const broker = await FxCredentialBroker.open(paths, authority);
     const commandOwner = owner as unknown as FxBrokerOwner;
     const prefix = commandOwner.attempt_id;
+    const factory = selection.account_key.startsWith('grok-') ? GrokFxAuthority : CodexFxAuthority;
+    // No publication can advance the exact routing revision after this gate
+    // validates it and before the broker durably records the lease.
+    const { authority, broker, prepared } = await withRoutingEvidenceSnapshot(paths, async evidence => {
+      const authority = await factory.createWithinSnapshot(paths,
+        selection as unknown as Parameters<typeof CodexFxAuthority.create>[1], evidence);
+      const broker = await FxCredentialBroker.open(paths, authority);
+      const fence = { schema_version: 1 as const, expected_broker_incarnation: broker.incarnation };
+      const prepared = await broker.prepare({ ...fence, request_id: `${prefix}:prepare`, owner: commandOwner,
+        target: authority.target, account: { account_key: authority.accountKey, expected_account_generation: Number(authority.accountKey.split('-')[1]), expected_provider_generation: 1 },
+        consumer_nonce: randomBytes(32).toString('base64url'), requested_ttl_ms: Math.max(1000, Number(input.deadline_ms) - Date.now()),
+        execution_deadline_ms: Number(input.deadline_ms) }, authority.inspectionWithinSnapshot());
+      return { authority, broker, prepared };
+    });
     const fence = { schema_version: 1 as const, expected_broker_incarnation: broker.incarnation };
-    const prepared = await broker.prepare({ ...fence, request_id: `${prefix}:prepare`, owner: commandOwner,
-      target: authority.target, account: { account_key: authority.accountKey, expected_account_generation: Number(authority.accountKey.split('-')[1]), expected_provider_generation: 1 },
-      consumer_nonce: randomBytes(32).toString('base64url'), requested_ttl_ms: Math.max(1000, Number(input.deadline_ms) - Date.now()),
-      execution_deadline_ms: Number(input.deadline_ms) });
     if (!prepared.handoff) invalid();
     let receipt: FxBrokerBindingReceipt = prepared.receipt;
     let native: FxBrokerNativeBinding | null = null;

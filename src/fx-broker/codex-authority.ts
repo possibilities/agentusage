@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto';
-import { accessAccount, providerHeaders } from '../accounts/credentials.ts';
+import { providerHeaders } from '../accounts/credentials.ts';
 import { providerURL, readCapped, type Env } from '../accounts/http.ts';
 import { AccountError, record } from '../accounts/storage.ts';
 import { readPool, type ManagedAccount } from '../accounts/store.ts';
 import { SUPPORTED_COLLECTOR_VERSION } from '../catalog/types.ts';
 import type { StatePaths } from '../paths.ts';
-import { readRoutingEvidence } from '../routing-evidence/index.ts';
 import { withRoutingEvidenceSnapshot } from '../routing-evidence/projection.ts';
 import type { RoutingEvidenceProjection } from '../routing-evidence/types.ts';
 import type { FxBrokerAuthority, FxBrokerAuthorityAccount, FxBrokerTarget } from './types.ts';
@@ -51,23 +50,37 @@ export function validateCodexCapability(bytes: Uint8Array, model: string, effort
 export class CodexFxAuthority implements FxBrokerAuthority {
   private constructor(readonly paths: StatePaths, readonly target: FxBrokerTarget,
     readonly accountKey: string, readonly catalog: Uint8Array, readonly capturedAt: number,
-    readonly evidence: RoutingEvidenceProjection, private readonly env: Env) {}
+    readonly evidence: RoutingEvidenceProjection, private readonly account: ManagedAccount,
+    private readonly env: Env) {}
 
   static async create(paths: StatePaths, selection: {
     account_key: string; model: string; effort: string; service_tier: string | null;
     expected_source_revision: number | string;
   }, env: Env = process.env): Promise<CodexFxAuthority> {
+    return withRoutingEvidenceSnapshot(paths, evidence =>
+      CodexFxAuthority.createWithinSnapshot(paths, selection, evidence, env));
+  }
+
+  /**
+   * Creates an authority while the routing evidence's observation and account
+   * locks are held. The bridge uses this to carry one exact revision through
+   * durable broker preparation; callers must not retain the snapshot lock over
+   * provider inference.
+   */
+  static async createWithinSnapshot(paths: StatePaths, selection: {
+    account_key: string; model: string; effort: string; service_tier: string | null;
+    expected_source_revision: number | string;
+  }, evidence: RoutingEvidenceProjection, env: Env = process.env): Promise<CodexFxAuthority> {
     if (!/^codex-[1-9]\d*$/.test(selection.account_key) || !/^[a-zA-Z0-9._-]{1,100}$/.test(selection.model) ||
         !['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(selection.effort) ||
         ![null, 'priority'].includes(selection.service_tier)) fail('invalid_selection');
-    const evidence = await readRoutingEvidence(paths);
     if (String(evidence.source_revision) !== String(selection.expected_source_revision)) fail('source_revision_conflict');
     requireCodexCapacity(evidence, selection.account_key);
-    const account = await accessAccount(paths, selection.account_key, env);
-    // Refresh may invalidate measurement correlation. Require fresh evidence again.
-    const refreshedEvidence = await readRoutingEvidence(paths);
-    if (refreshedEvidence.source_revision !== evidence.source_revision) fail('source_revision_conflict');
-    requireCodexCapacity(refreshedEvidence, selection.account_key);
+    const account = readPool(paths).accounts.find(row => row.key === selection.account_key);
+    // Refresh changes the credential/evidence join, so a bridge refuses a
+    // credential that cannot remain valid through its bounded first attempt.
+    if (!account || account.provider !== 'codex' || !account.enabled || account.auth_error ||
+        account.credentials.expires_at_ms <= Date.now() + 240_000) fail('auth_unavailable');
     const signal = AbortSignal.timeout(20_000);
     const response = await fetch(providerURL('codex', `/backend-api/codex/models?client_version=${SUPPORTED_COLLECTOR_VERSION}`, env), {
       headers: providerHeaders(account, new Headers({ accept: 'application/json' })), redirect: 'manual', signal,
@@ -82,7 +95,15 @@ export class CodexFxAuthority implements FxBrokerAuthority {
       effort: selection.effort, service_tier: selection.service_tier, protocol: 'openai-responses',
       capability_capture_id: `codex-${capturedAt}`, capability_digest: digest,
     };
-    return new CodexFxAuthority(paths, target, selection.account_key, catalog, capturedAt, evidence, env);
+    return new CodexFxAuthority(paths, target, selection.account_key, catalog, capturedAt, evidence, structuredClone(account), env);
+  }
+
+  /** Exact account facts from the still-held admission snapshot. */
+  inspectionWithinSnapshot(): FxBrokerAuthorityAccount {
+    return { provider: 'codex', account_key: this.accountKey, account_generation: this.account.ordinal,
+      provider_generation: 1, credential_revision: this.account.credentials.generation,
+      enabled: this.account.enabled, auth_available: !this.account.auth_error,
+      target: this.target, activation_supported: true };
   }
 
   async inspect(provider: 'codex' | 'grok', key: string): Promise<FxBrokerAuthorityAccount> {

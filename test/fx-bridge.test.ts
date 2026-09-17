@@ -7,6 +7,7 @@ import { lockFile } from '../src/accounts/storage.ts';
 import { readPool } from '../src/accounts/store.ts';
 import { buildCodexObservation } from '../src/codex/observe.ts';
 import { readRoutingEvidence } from '../src/routing-evidence/index.ts';
+import { nextCodexSourceRevision, readCodexObservation } from '../src/observe.ts';
 import { writeSidecar } from '../src/sidecar.ts';
 import { fixtureState, managed, seed } from './managed-fixtures.ts';
 
@@ -42,6 +43,50 @@ test('private bridge fences activation, refuses browser/auth input, bounds failu
     const result=await fetch(url,request);expect(result.status).toBe(429);expect(await result.text()).not.toContain('access-codex-1');
     expect((await next()).type).toBe('forward');
     expect((await fetch(url,request)).status).toBe(403);expect(forwards).toBe(1);
+    child.stdin.end(JSON.stringify({action:'release'})+'\n');
+    expect((await next()).type).toBe('released');expect(await exit).toBe(0);
+  } finally {child.kill('SIGKILL');await exit;server.stop(true);}
+},30_000);
+
+test('prepares a lease before a queued routing-revision publication can advance', async () => {
+  const state=fixtureState();await seed(state,[managed()]);
+  writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
+  (await lockFile(state.paths.codexRefreshLock,0))();
+  await seedObservedGrok(state.paths);
+  const evidence=await readRoutingEvidence(state.paths);
+  let startPublisher!:()=>void, published!:()=>void;
+  const publisherStarted=new Promise<void>(resolve=>{startPublisher=resolve;});
+  const publication=new Promise<void>(resolve=>{published=resolve;});
+  const publish=async()=>{
+    startPublisher();
+    const release=await lockFile(state.paths.codexRefreshLock,5_000);
+    try {
+      const current=readCodexObservation(state.paths)!;
+      current.source_revision=nextCodexSourceRevision(current,Date.now());
+      writeSidecar(state.paths.codexObservation,current);
+      published();
+    } finally {release();}
+  };
+  let publishPromise:Promise<void>|undefined;
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
+    if (new URL(request.url).pathname.endsWith('/models')) {
+      publishPromise ??= publish();
+      await publisherStarted;
+      return Response.json({models:[{slug:'gpt-test',visibility:'list',supported_in_api:true,supported_reasoning_levels:[{effort:'low'}]}]});
+    }
+    return new Response(null,{status:500});
+  }});
+  const child=spawn(process.execPath,['src/cli.ts','fx-bridge'],{cwd:join(import.meta.dir,'..'),env:{...process.env,...state.env,AGENTUSAGE_TEST_CODEX_ORIGIN:`http://127.0.0.1:${server.port}`},stdio:['pipe','pipe','pipe']});
+  child.stderr.resume();
+  const lines=createInterface({input:child.stdout})[Symbol.asyncIterator]();
+  const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
+  const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
+  try {
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-exec',attempt_id:'revision-gate',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    const prepared=await next();
+    expect(prepared.type).toBe('prepared');
+    await publication;await publishPromise;
+    expect((await readRoutingEvidence(state.paths)).source_revision).not.toBe(evidence.source_revision);
     child.stdin.end(JSON.stringify({action:'release'})+'\n');
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}

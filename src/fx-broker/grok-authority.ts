@@ -52,15 +52,17 @@ export class GrokFxAuthority implements FxBrokerAuthority {
     readonly catalog:Uint8Array, readonly modalities:Uint8Array, readonly capturedAt:number,
     readonly evidence:RoutingEvidenceProjection, private readonly fingerprint:string, private readonly env:Env) {}
   static async create(paths:StatePaths, selection:{account_key:string;model:string;effort:string;service_tier:string|null;expected_source_revision:number|string},env:Env=process.env):Promise<GrokFxAuthority> {
+    return withRoutingEvidenceSnapshot(paths,evidence =>
+      GrokFxAuthority.createWithinSnapshot(paths,selection,evidence,env));
+  }
+  /** Keeps an exact routing revision through broker preparation. */
+  static async createWithinSnapshot(paths:StatePaths, selection:{account_key:string;model:string;effort:string;service_tier:string|null;expected_source_revision:number|string},evidence:RoutingEvidenceProjection,env:Env=process.env):Promise<GrokFxAuthority> {
     if(!/^grok-[1-9]\d*$/.test(selection.account_key) || !/^[a-zA-Z0-9._-]{1,100}$/.test(selection.model) ||
       !['low','medium','high','xhigh','max','ultra'].includes(selection.effort) || ![null,'priority'].includes(selection.service_tier)) fail('invalid_selection');
-    const {evidence,account}=await withRoutingEvidenceSnapshot(paths,async evidence=>{
-      if(String(evidence.source_revision)!==String(selection.expected_source_revision)) fail('source_revision_conflict');
-      requireGrokCapacity(evidence,selection.account_key);
-      const account=(await readState(paths)).accounts.find(row=>row.accountKey===selection.account_key);
-      if(!account || account.credentials.expiresAtMs<=Date.now()+240_000) fail('auth_unavailable');
-      return {evidence,account};
-    });
+    if(String(evidence.source_revision)!==String(selection.expected_source_revision)) fail('source_revision_conflict');
+    requireGrokCapacity(evidence,selection.account_key);
+    const account=(await readState(paths)).accounts.find(row=>row.accountKey===selection.account_key);
+    if(!account || account.credentials.expiresAtMs<=Date.now()+240_000) fail('auth_unavailable');
     const signal=AbortSignal.timeout(20_000);
     const response=await fetch(providerURL('grok','/v1/models',env),{headers:headers(account),redirect:'manual',signal});
     if(response.status!==200){await response.body?.cancel();fail(`catalog_http_${response.status}`);}
@@ -75,8 +77,12 @@ export class GrokFxAuthority implements FxBrokerAuthority {
     const target:FxBrokerTarget={target_id:`grok-${selection.model}`,target_revision:digest,provider:'grok',model:selection.model,effort:selection.effort,
       service_tier:selection.service_tier,protocol:'grok-responses',capability_capture_id:`grok-${capturedAt}`,capability_digest:digest};
     const authority=new GrokFxAuthority(paths,target,selection.account_key,catalog,modalities,capturedAt,evidence,credentialFingerprint(account.credentials.accessToken),env);
-    await authority.inspect('grok',selection.account_key);
     return authority;
+  }
+  /** Exact account facts from the still-held admission snapshot. */
+  inspectionWithinSnapshot():FxBrokerAuthorityAccount {
+    return {provider:'grok',account_key:this.accountKey,account_generation:Number(this.accountKey.split('-')[1]),provider_generation:1,credential_revision:1,
+      enabled:true,auth_available:true,target:this.target,activation_supported:true};
   }
   private async account(evidence:RoutingEvidenceProjection):Promise<StoredAccount> {
     if(evidence.source_revision!==this.evidence.source_revision) fail('source_revision_conflict');
