@@ -166,3 +166,37 @@ test('keeps a prepared Grok lease usable across an unrelated Codex publication',
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}
 },30_000);
+
+test('normalizes Fx Grok permission review inference to the pinned task target', async () => {
+  const state=fixtureState();await seed(state,[managed()]);
+  writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
+  (await lockFile(state.paths.codexRefreshLock,0))();
+  await seedObservedGrok(state.paths);
+  const evidence=await readRoutingEvidence(state.paths);
+  const forwarded:Record<string,unknown>[]=[];
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
+    const path=new URL(request.url).pathname;
+    if(path==='/v1/models')return Response.json({data:[{model:'grok-test',api_backend:'responses',supports_reasoning_effort:true,reasoning_efforts:[{value:'low'}],context_window:100000,max_completion_tokens:8192}]});
+    if(path==='/v1/language-models')return Response.json({models:[{id:'grok-test',input_modalities:['text'],output_modalities:['text']}]});
+    forwarded.push(JSON.parse(await request.text()));
+    return Response.json({id:'permission-review'});
+  }});
+  const child=spawn(process.execPath,['src/cli.ts','fx-bridge'],{cwd:join(import.meta.dir,'..'),env:{...process.env,...state.env,AGENTUSAGE_TEST_GROK_ORIGIN:`http://127.0.0.1:${server.port}`},stdio:['pipe','pipe','pipe']});
+  child.stderr.resume();
+  const lines=createInterface({input:child.stdout})[Symbol.asyncIterator]();
+  const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
+  const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
+  try {
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-grok-review',attempt_id:'permission-review',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    const prepared=await next();expect(prepared.type).toBe('prepared');
+    child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
+    expect((await next()).type).toBe('active');
+    const permissionReview={model:'grok-4.5',store:false,stream:true,instructions:'Review the pending action.',input:[],tools:[{type:'function',name:'permission_decision',description:'Decide.',parameters:{type:'object'}}],tool_choice:'required',parallel_tool_calls:true,include:['reasoning.encrypted_content'],text:{verbosity:'low'},max_output_tokens:2048};
+    const response=await fetch(prepared.private_transport.chat_url,{method:'POST',body:JSON.stringify(permissionReview)});
+    expect(response.status).toBe(200);expect((await next()).type).toBe('forward');
+    expect(forwarded[0]).toMatchObject({model:'grok-test',store:false,tool_choice:'required',reasoning:{effort:'low',summary:'auto'}});
+    expect((forwarded[0]?.tools as Array<Record<string,unknown>>)[0]?.name).toBe('permission_decision');
+    child.stdin.end(JSON.stringify({action:'release'})+'\n');
+    expect((await next()).type).toBe('released');expect(await exit).toBe(0);
+  } finally {child.kill('SIGKILL');await exit;server.stop(true);}
+},30_000);

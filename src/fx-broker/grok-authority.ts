@@ -12,6 +12,7 @@ import { sha256 } from './codex-authority.ts';
 import type { FxBrokerAuthority, FxBrokerAuthorityAccount, FxBrokerTarget } from './types.ts';
 const FRESH_MS = 300_000;
 const MAX_BYTES = 1024 * 1024;
+const FX_PERMISSION_REVIEW_MODEL = 'grok-4.5';
 function fail(code: string): never { throw new AccountError(code, code, 409); }
 function headers(account: StoredAccount): Headers {
   return new Headers({authorization: `Bearer ${account.credentials.accessToken}`, 'x-grok-user-id':account.userId,
@@ -23,6 +24,26 @@ function redact(bytes: Uint8Array, account: StoredAccount): Uint8Array {
   for(const secret of [account.credentials.accessToken,account.credentials.refreshToken,account.userId,account.email])
     if(secret) text=text.split(secret).join('[redacted]');
   return new TextEncoder().encode(text);
+}
+function normalizeInferenceBody(body: Record<string, unknown>, target: FxBrokerTarget): Uint8Array|null {
+  const tools=body.tools;
+  const tool=Array.isArray(tools) && tools.length===1 ? record(tools[0]) : null;
+  // Fx's automatic reviewer is a separate fixed-model request. Admit only its
+  // exact envelope, then keep the provider call inside the lease's target.
+  const permissionReview=body.model===FX_PERMISSION_REVIEW_MODEL && body.store===false && body.stream===true &&
+    typeof body.instructions==='string' && Array.isArray(body.input) && body.tool_choice==='required' &&
+    body.parallel_tool_calls===true && body.max_output_tokens===2048 && body.reasoning===undefined &&
+    body.service_tier===undefined && tool?.type==='function' && tool.name==='permission_decision';
+  if(!permissionReview) {
+    const reasoning=record(body.reasoning);
+    if(body.model!==target.model || reasoning?.effort!==target.effort ||
+      (body.service_tier??null)!==target.service_tier || body.store!==false) fail('target_mismatch');
+    return null;
+  }
+  const normalized:Record<string,unknown>={...body,model:target.model,reasoning:{effort:target.effort,summary:'auto'}};
+  if(target.service_tier==='priority') normalized.service_tier='priority';
+  else delete normalized.service_tier;
+  return new TextEncoder().encode(JSON.stringify(normalized));
 }
 export function requireGrokCapacity(evidence: RoutingEvidenceProjection, key: string, now = Date.now()): void {
   const observation = evidence.usage.grok;
@@ -103,13 +124,13 @@ export class GrokFxAuthority implements FxBrokerAuthority {
   async forward(binding:FxBrokerAuthorityAccount,request:Parameters<FxBrokerAuthority['forward']>[1]) {
     if(binding.provider!=='grok' || binding.account_key!==this.accountKey || JSON.stringify(request.target)!==JSON.stringify(this.target)) fail('target_mismatch');
     const body=record(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(request.body)));
-    if(request.operation!=='inference' || !body || body.model!==this.target.model || record(body.reasoning)?.effort!==this.target.effort ||
-      (body.service_tier??null)!==this.target.service_tier || body.store!==false) fail('target_mismatch');
+    if(request.operation!=='inference' || !body) fail('target_mismatch');
+    const forwardBody=normalizeInferenceBody(body,this.target)??request.body;
     const signal=AbortSignal.timeout(120_000);
     const {account,response}=await withRoutingEvidenceSnapshot(this.paths,async evidence=>{
       const account=await this.account(evidence);
       const outgoing=headers(account);outgoing.set('content-type','application/json');outgoing.set('accept','text/event-stream');outgoing.set('x-grok-model-override',this.target.model);
-      const response=await fetch(providerURL('grok','/v1/responses',this.env),{method:'POST',headers:outgoing,body:request.body,redirect:'manual',signal});
+      const response=await fetch(providerURL('grok','/v1/responses',this.env),{method:'POST',headers:outgoing,body:forwardBody,redirect:'manual',signal});
       return {account,response};
     });
     const bytes=redact(await readCapped(response,MAX_BYTES,signal),account);

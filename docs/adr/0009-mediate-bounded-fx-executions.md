@@ -44,6 +44,14 @@ compatibility metadata; it does not claim the native manager executed that build
 
 The Grok authority joins fresh included quota, current reset and credential fingerprint to a fixed subscription Responses endpoint. Exact account, source revision, model, reasoning effort and tier remain pinned for the lease. It fetches subscription capabilities and xAI modalities separately and contains both credentials and provider account identifiers. No numerical cross-provider economics are inferred. Broker preparation validates the exact aggregate evidence revision. Active inference then pins the selected provider's component revision and revalidates its current quota, credential and account facts; an unrelated provider publication cannot revoke an already-prepared lease. A selected-provider publication still refuses and requires a new routing decision. The bridge holds the atomic observation/account snapshot through catalog validation and durable broker preparation, so a normal observation publication cannot age a selected exact revision between the gate and its lease. A credential that would expire during the bounded execution refuses instead of refreshing inside that revision fence.
 
+Fx's automatic Grok permission reviewer emits a distinct Responses request with
+its built-in reviewer model and no task reasoning or tier settings. The private
+Grok authority recognizes only that bounded `permission_decision` request shape
+and normalizes its model, effort and tier to the lease's exact task target before
+provider admission. This keeps code-profile shell review inside the already
+pinned capability instead of either rejecting the review or admitting a second,
+unfenced model.
+
 For a manager decision that already fixes account, model, effort and tier, the
 bridge also accepts the explicit `broker_prepare` revision mode. It resolves
 that mode to the current exact routing revision inside the same locked broker
