@@ -110,7 +110,7 @@ export class CodexFxAuthority implements FxBrokerAuthority {
     if (provider !== 'codex' || key !== this.accountKey) fail('adapter_unsupported');
     if (Date.now() - this.capturedAt >= FRESH_MS) fail('capability_stale');
     return withRoutingEvidenceSnapshot(this.paths, evidence => {
-      if (evidence.source_revision !== this.evidence.source_revision) fail('source_revision_conflict');
+      if (evidence.provider_source_revisions.codex !== this.evidence.provider_source_revisions.codex) fail('source_revision_conflict');
       requireCodexCapacity(evidence, key);
       const account = readPool(this.paths).accounts.find(a => a.key === key);
       if (!account || account.provider !== 'codex' || account.auth_error || !account.enabled) fail('auth_unavailable');
@@ -132,7 +132,7 @@ export class CodexFxAuthority implements FxBrokerAuthority {
         (body.service_tier ?? null) !== this.target.service_tier || body.store !== false) fail('target_mismatch');
     const signal = AbortSignal.timeout(120_000);
     const {account,response} = await withRoutingEvidenceSnapshot(this.paths, async evidence => {
-      if(evidence.source_revision !== this.evidence.source_revision) fail('source_revision_conflict');
+      if(evidence.provider_source_revisions.codex !== this.evidence.provider_source_revisions.codex) fail('source_revision_conflict');
       requireCodexCapacity(evidence, binding.account_key);
       const account=readPool(this.paths).accounts.find(row=>row.key===binding.account_key);
       if(!account || !account.enabled || account.auth_error || account.credentials.generation !== binding.credential_revision) fail('credential_revision_conflict');

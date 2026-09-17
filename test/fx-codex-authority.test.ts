@@ -5,6 +5,7 @@ import { readPool } from '../src/accounts/store.ts';
 import { buildCodexObservation } from '../src/codex/observe.ts';
 import { CodexFxAuthority, requireCodexCapacity, validateCodexCapability } from '../src/fx-broker/codex-authority.ts';
 import { readRoutingEvidence } from '../src/routing-evidence/index.ts';
+import { nextGrokSourceRevision, readGrokObservation } from '../src/observe.ts';
 import { writeSidecar } from '../src/sidecar.ts';
 import { fixtureState, managed, seed } from './managed-fixtures.ts';
 
@@ -62,12 +63,18 @@ describe('managed Codex Fx authority', () => {
       expect(forwards).toBe(1);
       const text=new TextDecoder().decode(result.response.body);
       for(const secret of ['access-codex-1','refresh-codex-1','identity-codex-1','codex1@example.test']) expect(text).not.toContain(secret);
+      const grok=readGrokObservation(state.paths)!;
+      grok.source_revision=nextGrokSourceRevision(grok,Date.now());
+      writeSidecar(state.paths.grokObservation,grok);
+      expect((await readRoutingEvidence(state.paths)).source_revision).not.toBe(evidence.source_revision);
+      expect((await authority.forward(binding,{...request,body:bytes({model:'gpt-test',store:false,reasoning:{effort:'low'}})})).response.status).toBe(401);
+      expect(forwards).toBe(2);
       const changed = buildCodexObservation(readPool(state.paths).accounts, Date.now());
       changed.source_revision = evidence.provider_source_revisions.codex + 1;
       writeSidecar(state.paths.codexObservation, changed);
       await expect(authority.inspect('codex', 'codex-1')).rejects.toMatchObject({code:'source_revision_conflict'});
       await expect(authority.forward(binding,{...request,body:bytes({model:'gpt-test',store:false,reasoning:{effort:'low'}})})).rejects.toMatchObject({code:'source_revision_conflict'});
-      expect(forwards).toBe(1);
+      expect(forwards).toBe(2);
     } finally {server.stop(true);}
   });
 });

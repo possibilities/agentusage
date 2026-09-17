@@ -33,7 +33,10 @@ test('Grok owner fences included quota, source/credential changes and exact requ
     await expect(authority.forward(binding,{...request,body:bytes({model:'grok-other',store:false,reasoning:{effort:'low'}})})).rejects.toMatchObject({code:'target_mismatch'});
     const result=await authority.forward(binding,request);expect(result.response.status).toBe(429);expect(forwards).toBe(1);
     for(const secret of ['access-2','refresh-2','acct_2','user2@example.test'])expect(new TextDecoder().decode(result.response.body)).not.toContain(secret);
+    const codex=buildCodexObservation(readPool(state.paths).accounts,Date.now());codex.source_revision=evidence.provider_source_revisions.codex+1;writeSidecar(state.paths.codexObservation,codex);
+    expect((await readRoutingEvidence(state.paths)).source_revision).not.toBe(evidence.source_revision);
+    expect((await authority.forward(binding,request)).response.status).toBe(429);expect(forwards).toBe(2);
     observed.source_revision++;writeSidecar(state.paths.grokObservation,observed);
-    await expect(authority.forward(binding,request)).rejects.toMatchObject({code:'source_revision_conflict'});expect(forwards).toBe(1);
+    await expect(authority.forward(binding,request)).rejects.toMatchObject({code:'source_revision_conflict'});expect(forwards).toBe(2);
   }finally{server.stop(true);}
 });

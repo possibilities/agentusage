@@ -90,7 +90,7 @@ attempt refuse rather than refreshing inside the revision fence. It does not
 require a daemon restart. See ADR 0007 for bounds, secret containment and
 recovery limits.
 
-The production bridge supports Codex and Grok using the fixed owner-controlled Responses endpoints. A selected routing evidence revision (v1 integer or v2 lossless decimal string) stays pinned for every admission; changes require a fresh selection. Grok joins its current included reset and credential fingerprint, plus provider model/effort and modality catalogs. `agentfx run` and MCP consume this private bridge; neither receives credentials. See [ADR 0009](adr/0009-mediate-bounded-fx-executions.md).
+The production bridge supports Codex and Grok using the fixed owner-controlled Responses endpoints. Broker preparation pins the selected aggregate routing evidence revision (v1 integer or v2 lossless decimal string). Each inference revalidates the selected provider's component revision, quota, account and credential facts; an unrelated provider publication does not revoke the lease, while a selected-provider publication requires a fresh selection. Grok joins its current included reset and credential fingerprint, plus provider model/effort and modality catalogs. `agentfx run` and MCP consume this private bridge; neither receives credentials. See [ADR 0009](adr/0009-mediate-bounded-fx-executions.md).
 
 `broker_prepare` resolves to the current exact revision while the bridge holds
 the atomic observation/account snapshot through catalog validation and durable
