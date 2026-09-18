@@ -15,6 +15,7 @@ import type { RoutingEvidenceProjection } from '../routing-evidence/types.ts';
 import { sha256 } from './codex-authority.ts';
 import type { FxBrokerAuthority, FxBrokerAuthorityAccount, FxBrokerTarget } from './types.ts';
 import { preAdmissionError } from './authority-error.ts';
+import { FX_PROVIDER_REQUEST_BUDGET_MS, fxProviderRequestBudgetMs } from './runtime-bounds.ts';
 const FRESH_MS = 300_000;
 const MAX_BYTES = 1024 * 1024;
 const FX_PERMISSION_REVIEW_MODEL = 'grok-4.5';
@@ -146,7 +147,7 @@ export class GrokFxAuthority implements FxBrokerAuthority {
   }
   async forward(binding:FxBrokerAuthorityAccount,request:Parameters<FxBrokerAuthority['forward']>[1]) {
     let providerStarted=false;
-    const deadline=request.execution_deadline_ms??Date.now()+120_000;
+    const deadline=request.execution_deadline_ms??Date.now()+FX_PROVIDER_REQUEST_BUDGET_MS;
     let result:{account:StoredAccount;response:Response;signal:AbortSignal};
     try {
       if(binding.provider!=='grok' || binding.account_key!==this.accountKey || JSON.stringify(request.target)!==JSON.stringify(this.target)) fail('target_mismatch');
@@ -155,7 +156,7 @@ export class GrokFxAuthority implements FxBrokerAuthority {
       const forwardBody=normalizeInferenceBody(body,this.target)??request.body;
       result=await withRoutingEvidenceSnapshotForAdmission(this.paths,async evidence=>{
         const account=await this.account(evidence,deadline,request.signal);
-        const remaining=Math.min(120_000,deadline-Date.now());
+        const remaining=fxProviderRequestBudgetMs(deadline);
         if(remaining<=0) fail('expired');
         if(request.signal?.aborted) fail('cancelled');
         const signal=request.signal?AbortSignal.any([request.signal,AbortSignal.timeout(remaining)]):AbortSignal.timeout(remaining);

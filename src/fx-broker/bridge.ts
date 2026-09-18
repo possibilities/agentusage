@@ -9,14 +9,16 @@ import { CodexFxAuthority } from './codex-authority.ts';
 import { withRoutingEvidenceSnapshotForAdmission } from '../routing-evidence/projection.ts';
 import type { FxBrokerBindingReceipt, FxBrokerNativeBinding, FxBrokerOwner } from './types.ts';
 import { preAdmissionError } from './authority-error.ts';
+import {
+  FX_MIN_FORWARD_AUTHORITY_MS,
+  FX_RENEW_BEFORE_EXPIRY_MS,
+  FX_ROLLING_LEASE_MS,
+} from './runtime-bounds.ts';
 
 const MAX_LINE = 16 * 1024;
 const MAX_BODY = 1024 * 1024;
 const MAX_CODEX_ADMISSIONS = 32;
 const MAX_GROK_ADMISSIONS = 256;
-const ROLLING_LEASE_MS = 5 * 60_000;
-const RENEW_BEFORE_EXPIRY_MS = 60_000;
-const MIN_FORWARD_BUDGET_MS = 125_000;
 const BROKER_PREPARE_REVISION = 'broker_prepare';
 function invalid(): never { throw new AccountError('invalid_request', 'Invalid broker bridge request', 400); }
 const id = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(v);
@@ -93,7 +95,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     const scheduleRenewal = () => {
       if (timer) clearTimeout(timer);
       const remaining = receipt.expires_at_ms - Date.now();
-      const delay = Math.max(1_000, remaining - Math.min(RENEW_BEFORE_EXPIRY_MS, Math.floor(remaining / 2)));
+      const delay = Math.max(1_000, remaining - Math.min(FX_RENEW_BEFORE_EXPIRY_MS, Math.floor(remaining / 2)));
       timer = setTimeout(() => {
         void renewLease(true).catch(error => {
           const refusal = error instanceof FxBrokerError
@@ -109,15 +111,15 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
       }, delay);
     };
     const renewLease = (force = false): Promise<void> => {
-      if (!force && receipt.expires_at_ms - Date.now() >= MIN_FORWARD_BUDGET_MS)
+      if (!force && receipt.expires_at_ms - Date.now() >= FX_MIN_FORWARD_AUTHORITY_MS)
         return Promise.resolve();
       if (renewal) return renewal;
       renewal = (async () => {
         if (executionAbort.signal.aborted) throw new AccountError('cancelled', 'Execution cancelled', 409);
-        const deadline = Date.now() + ROLLING_LEASE_MS;
+        const deadline = Date.now() + FX_ROLLING_LEASE_MS;
         receipt = await broker.renew({ ...fence, request_id: `${prefix}:renew:${++renewalCount}`,
           lease_id: receipt.lease_id, capability_token: token, expected_lease_revision: receipt.lease_revision,
-          owner: commandOwner, requested_ttl_ms: ROLLING_LEASE_MS, execution_deadline_ms: deadline },
+          owner: commandOwner, requested_ttl_ms: FX_ROLLING_LEASE_MS, execution_deadline_ms: deadline },
         { signal: executionAbort.signal });
         write({ type: 'renewed', receipt });
         scheduleRenewal();

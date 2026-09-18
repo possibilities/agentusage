@@ -13,9 +13,10 @@ the limit made an otherwise healthy persisted Fx session unusable.
 ## Decision
 
 Keep five minutes as a rolling authorization horizon instead of a total-session
-ceiling. The bridge renews before a provider submission unless a full two-minute
-request budget plus a safety margin remains, and also renews idle active
-sessions before expiry. Each renewal
+ceiling. The provider-response budget is superseded by
+[ADR 0013](0013-align-fx-provider-response-budget.md). The bridge renews before
+a provider submission unless the current response budget plus its safety margin
+remains, and also renews idle active sessions before expiry. Each renewal
 uses a unique idempotent broker command and may extend the execution deadline by
 at most five minutes from the current time.
 

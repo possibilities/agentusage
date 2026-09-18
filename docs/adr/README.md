@@ -49,3 +49,6 @@ accepted ownership rationale into another parallel specification.
 - [0012: Renew active Fx execution leases](0012-renew-active-fx-execution-leases.md)
   replaces the fixed total-session deadline with a rolling five-minute
   authorization horizon while preserving every provider-admission fence.
+- [0013: Align the Fx provider response budget](0013-align-fx-provider-response-budget.md)
+  removes the hidden two-minute response ceiling while keeping each admission
+  inside one rolling five-minute authorization window.

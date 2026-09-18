@@ -13,6 +13,7 @@ import {
 import type { RoutingEvidenceProjection } from '../routing-evidence/types.ts';
 import type { FxBrokerAuthority, FxBrokerAuthorityAccount, FxBrokerTarget } from './types.ts';
 import { preAdmissionError } from './authority-error.ts';
+import { FX_PROVIDER_REQUEST_BUDGET_MS, fxProviderRequestBudgetMs } from './runtime-bounds.ts';
 
 const MAX_BYTES = 1024 * 1024;
 const FRESH_MS = 300_000;
@@ -146,7 +147,7 @@ export class CodexFxAuthority implements FxBrokerAuthority {
 
   async forward(binding: FxBrokerAuthorityAccount, request: Parameters<FxBrokerAuthority['forward']>[1]) {
     let providerStarted = false;
-    const deadline = request.execution_deadline_ms ?? Date.now() + 120_000;
+    const deadline = request.execution_deadline_ms ?? Date.now() + FX_PROVIDER_REQUEST_BUDGET_MS;
     let result: { account: ManagedAccount; response: Response; signal: AbortSignal };
     try {
       if (binding.provider !== 'codex' || binding.account_key !== this.accountKey ||
@@ -163,7 +164,7 @@ export class CodexFxAuthority implements FxBrokerAuthority {
         requireCodexCapacity(evidence, binding.account_key);
         const account=readPool(this.paths).accounts.find(row=>row.key===binding.account_key);
         if(!account || !account.enabled || account.auth_error || account.credentials.generation !== binding.credential_revision) fail('credential_revision_conflict');
-        const remaining = Math.min(120_000, deadline - Date.now());
+        const remaining = fxProviderRequestBudgetMs(deadline);
         if (remaining <= 0) fail('expired');
         if (request.signal?.aborted) fail('cancelled');
         const signal = request.signal
