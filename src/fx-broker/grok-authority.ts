@@ -106,7 +106,7 @@ export class GrokFxAuthority implements FxBrokerAuthority {
       enabled:true,auth_available:true,target:this.target,activation_supported:true};
   }
   private async account(evidence:RoutingEvidenceProjection):Promise<StoredAccount> {
-    if(evidence.provider_source_revisions.grok!==this.evidence.provider_source_revisions.grok) fail('source_revision_conflict');
+    if(evidence.provider_source_revisions.grok<this.evidence.provider_source_revisions.grok) fail('source_revision_conflict');
     if(Date.now()-this.capturedAt>=FRESH_MS) fail('capability_stale');
     requireGrokCapacity(evidence,this.accountKey);
     const account=(await readState(this.paths)).accounts.find(row=>row.accountKey===this.accountKey);

@@ -7,7 +7,7 @@ import { lockFile } from '../src/accounts/storage.ts';
 import { readPool } from '../src/accounts/store.ts';
 import { buildCodexObservation } from '../src/codex/observe.ts';
 import { readRoutingEvidence } from '../src/routing-evidence/index.ts';
-import { nextCodexSourceRevision, readCodexObservation } from '../src/observe.ts';
+import { nextCodexSourceRevision, nextGrokSourceRevision, readCodexObservation, readGrokObservation } from '../src/observe.ts';
 import { writeSidecar } from '../src/sidecar.ts';
 import { fixtureState, managed, seed } from './managed-fixtures.ts';
 
@@ -128,7 +128,7 @@ test('resolves the current exact revision inside broker preparation after caller
   } finally {server.stop(true);}
 },30_000);
 
-test('keeps a prepared Grok lease usable across an unrelated Codex publication', async () => {
+test('keeps a prepared Grok lease usable across safe newer provider observations', async () => {
   const state=fixtureState();await seed(state,[managed()]);
   writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
   (await lockFile(state.paths.codexRefreshLock,0))();
@@ -162,6 +162,13 @@ test('keeps a prepared Grok lease usable across an unrelated Codex publication',
     expect(advanced.provider_source_revisions.grok).toBe(evidence.provider_source_revisions.grok);
     expect((await fetch(prepared.private_transport.chat_url,request)).status).toBe(200);
     expect((await next()).type).toBe('forward');expect(forwards).toBe(2);
+    const grok=readGrokObservation(state.paths)!;
+    grok.source_revision=nextGrokSourceRevision(grok,Date.now());
+    writeSidecar(state.paths.grokObservation,grok);
+    const refreshed=await readRoutingEvidence(state.paths);
+    expect(refreshed.provider_source_revisions.grok).toBeGreaterThan(evidence.provider_source_revisions.grok);
+    expect((await fetch(prepared.private_transport.chat_url,request)).status).toBe(200);
+    expect((await next()).type).toBe('forward');expect(forwards).toBe(3);
     child.stdin.end(JSON.stringify({action:'release'})+'\n');
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}

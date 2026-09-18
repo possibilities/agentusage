@@ -62,14 +62,6 @@ fence. Historical prepare recovery never returns a private handoff for the old
 incarnation. Forward recovery returns lifecycle evidence only; response bodies
 are intentionally not durable.
 
-## Current integration limit
-
-`src/fx-broker/` is an internal production contract and durable state machine.
-The daemon remains unchanged. The private CLI bridge now connects AgentFX to
-a bounded Codex production authority; the Grok production authority remains
-unavailable. Synthetic tests continue to cover both providers at the contract
-boundary.
-
 ## Bounded production transport
 
 `agentusage fx-bridge` now supplies a private stdio transport to AgentFX for one
@@ -90,7 +82,7 @@ attempt refuse rather than refreshing inside the revision fence. It does not
 require a daemon restart. See ADR 0007 for bounds, secret containment and
 recovery limits.
 
-The production bridge supports Codex and Grok using the fixed owner-controlled Responses endpoints. Broker preparation pins the selected aggregate routing evidence revision (v1 integer or v2 lossless decimal string). Each inference revalidates the selected provider's component revision, quota, account and credential facts; an unrelated provider publication does not revoke the lease, while a selected-provider publication requires a fresh selection. Grok joins its current included reset and credential fingerprint, plus provider model/effort and modality catalogs. `agentfx run` and MCP consume this private bridge; neither receives credentials. See [ADR 0009](adr/0009-mediate-bounded-fx-executions.md).
+The production bridge supports Codex and Grok using the fixed owner-controlled Responses endpoints. Broker preparation pins the selected aggregate routing evidence revision (v1 integer or v2 lossless decimal string). Each inference accepts the same or a newer selected-provider component revision only after revalidating fresh positive quota, reset, account and credential facts; a regressed revision or unsafe current fact refuses before the provider call. This lets normal observation publication coexist with one bounded execution without weakening the initial exact-revision admission gate. An unrelated provider publication also does not revoke the lease. Grok joins its current included reset and credential fingerprint, plus provider model/effort and modality catalogs. `agentfx run` and MCP consume this private bridge; neither receives credentials. See [ADR 0009](adr/0009-mediate-bounded-fx-executions.md).
 
 `broker_prepare` resolves to the current exact revision while the bridge holds
 the atomic observation/account snapshot through catalog validation and durable

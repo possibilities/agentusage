@@ -37,6 +37,13 @@ test('Grok owner fences included quota, source/credential changes and exact requ
     expect((await readRoutingEvidence(state.paths)).source_revision).not.toBe(evidence.source_revision);
     expect((await authority.forward(binding,request)).response.status).toBe(429);expect(forwards).toBe(2);
     observed.source_revision++;writeSidecar(state.paths.grokObservation,observed);
-    await expect(authority.forward(binding,request)).rejects.toMatchObject({code:'source_revision_conflict'});expect(forwards).toBe(2);
+    expect((await authority.forward(binding,request)).response.status).toBe(429);expect(forwards).toBe(3);
+    const exhausted=account(2,billing({included:{usedPercent:100,remainingPercent:0,periodType:'USAGE_PERIOD_TYPE_WEEKLY',periodStart:new Date(now-1000).toISOString(),resetsAt:new Date(now+86400_000).toISOString()}}),Date.now());
+    await seedGrok(state.paths,[exhausted]);
+    const exhaustedObservation=buildGrokObservation([exhausted],Date.now());
+    exhaustedObservation.source_revision=evidence.provider_source_revisions.grok+2;writeSidecar(state.paths.grokObservation,exhaustedObservation);
+    await expect(authority.forward(binding,request)).rejects.toMatchObject({code:'capacity_unavailable'});expect(forwards).toBe(3);
+    exhaustedObservation.source_revision=evidence.provider_source_revisions.grok-1;writeSidecar(state.paths.grokObservation,exhaustedObservation);
+    await expect(authority.forward(binding,request)).rejects.toMatchObject({code:'source_revision_conflict'});expect(forwards).toBe(3);
   }finally{server.stop(true);}
 });

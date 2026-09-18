@@ -1,13 +1,13 @@
 import { seedObservedGrok } from './fx-routing-fixtures.ts';
 import { describe, expect, test } from 'bun:test';
 import { lockFile } from '../src/accounts/storage.ts';
-import { readPool } from '../src/accounts/store.ts';
+import { changePool, readPool } from '../src/accounts/store.ts';
 import { buildCodexObservation } from '../src/codex/observe.ts';
 import { CodexFxAuthority, requireCodexCapacity, validateCodexCapability } from '../src/fx-broker/codex-authority.ts';
 import { readRoutingEvidence } from '../src/routing-evidence/index.ts';
 import { nextGrokSourceRevision, readGrokObservation } from '../src/observe.ts';
 import { writeSidecar } from '../src/sidecar.ts';
-import { fixtureState, managed, seed } from './managed-fixtures.ts';
+import { codexUsage, fixtureState, managed, seed } from './managed-fixtures.ts';
 
 const catalog = {models:[{slug:'gpt-test',visibility:'list',supported_in_api:true,supported_reasoning_levels:[{effort:'low'}],additional_speed_tiers:['fast']}]};
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
@@ -72,9 +72,18 @@ describe('managed Codex Fx authority', () => {
       const changed = buildCodexObservation(readPool(state.paths).accounts, Date.now());
       changed.source_revision = evidence.provider_source_revisions.codex + 1;
       writeSidecar(state.paths.codexObservation, changed);
+      expect(await authority.inspect('codex', 'codex-1')).toMatchObject({account_key:'codex-1'});
+      expect((await authority.forward(binding,{...request,body:bytes({model:'gpt-test',store:false,reasoning:{effort:'low'}})})).response.status).toBe(401);
+      expect(forwards).toBe(3);
+      await changePool(state.paths,pool=>{pool.accounts[0]!.usage!.value=codexUsage(100);pool.accounts[0]!.usage!.measured_at_ms=Date.now();});
+      const exhausted=buildCodexObservation(readPool(state.paths).accounts,Date.now());
+      exhausted.source_revision=evidence.provider_source_revisions.codex+2;
+      writeSidecar(state.paths.codexObservation,exhausted);
+      await expect(authority.forward(binding,{...request,body:bytes({model:'gpt-test',store:false,reasoning:{effort:'low'}})})).rejects.toMatchObject({code:'capacity_unavailable'});
+      exhausted.source_revision = evidence.provider_source_revisions.codex - 1;
+      writeSidecar(state.paths.codexObservation, exhausted);
       await expect(authority.inspect('codex', 'codex-1')).rejects.toMatchObject({code:'source_revision_conflict'});
-      await expect(authority.forward(binding,{...request,body:bytes({model:'gpt-test',store:false,reasoning:{effort:'low'}})})).rejects.toMatchObject({code:'source_revision_conflict'});
-      expect(forwards).toBe(2);
+      expect(forwards).toBe(3);
     } finally {server.stop(true);}
   });
 });
