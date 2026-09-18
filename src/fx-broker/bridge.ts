@@ -11,7 +11,8 @@ import type { FxBrokerBindingReceipt, FxBrokerNativeBinding, FxBrokerOwner } fro
 
 const MAX_LINE = 16 * 1024;
 const MAX_BODY = 1024 * 1024;
-const MAX_ADMISSIONS = 32;
+const MAX_CODEX_ADMISSIONS = 32;
+const MAX_GROK_ADMISSIONS = 256;
 const BROKER_PREPARE_REVISION = 'broker_prepare';
 function invalid(): never { throw new AccountError('invalid_request', 'Invalid broker bridge request', 400); }
 const id = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(v);
@@ -73,6 +74,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     const token = prepared.handoff.capability_token;
     const route = randomBytes(32).toString('hex');
     let count = 0;
+    const maxAdmissions = authority instanceof GrokFxAuthority ? MAX_GROK_ADMISSIONS : MAX_CODEX_ADMISSIONS;
     let busy = false;
     let closed = false;
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, maxRequestBodySize: MAX_BODY,
@@ -90,7 +92,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
           return new Response(authority.catalog, { headers: { 'content-type': 'application/json' } });
         }
         if (url.pathname !== `/${route}/responses` || request.method !== 'POST' || !native || busy) return new Response(null, { status: 409 });
-        if (count >= MAX_ADMISSIONS) {
+        if (count >= maxAdmissions) {
           const requestId = `${prefix}:forward:${count + 1}`;
           write({ type: 'forward', receipt: { request_id: requestId }, http_status: 429 });
           closed = true;
