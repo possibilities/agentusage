@@ -28,6 +28,21 @@ uncertain admission closes further admission. Provider bodies/responses are
 bounded to one MiB and buffered; a lost response retains the broker's existing
 unknown-outcome contract.
 
+Managed preparation and inference may wait up to five seconds for the atomic
+routing snapshot, further bounded by the execution deadline and cancellation.
+Only acquisition of the fixed Codex-refresh, Grok-refresh, Codex-account and
+Grok-account lock sequence is retried. A partial sequence is released before
+each attempt; projection and authority callbacks run once after all locks are
+held. The public routing-evidence command remains non-blocking.
+
+The broker and bridge preserve a fixed, sanitized pre-admission refusal
+receipt: stage, allowlisted code, disposition, retry policy and provider
+delivery certainty. Snapshot contention, capacity, authorization, target and
+storage refusals therefore remain `not_forwarded`; arbitrary messages, paths,
+endpoints, request/response bodies and account-private fields are discarded.
+Once a provider call starts, any lost or invalid result remains
+`post_admission` with `may_have_forwarded`, and is never retried.
+
 This first authority supports Codex only. It does not change the current native
 manager's account, spend reset credits, expose Grok as eligible without evidence,
 or restart the observer daemon. AgentFX owns native child lifetime and semantic

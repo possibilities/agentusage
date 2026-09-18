@@ -6,10 +6,15 @@ import { XAI_COMPAT_VERSION } from '../grok/oauth.ts';
 import type { StoredAccount } from '../grok/model.ts';
 import { normalizeGrokCatalog } from '../grok/catalog.ts';
 import type { StatePaths } from '../paths.ts';
-import { withRoutingEvidenceSnapshot } from '../routing-evidence/projection.ts';
+import {
+  FX_ADMISSION_SNAPSHOT_WAIT_MS,
+  withRoutingEvidenceSnapshot,
+  withRoutingEvidenceSnapshotForAdmission,
+} from '../routing-evidence/projection.ts';
 import type { RoutingEvidenceProjection } from '../routing-evidence/types.ts';
 import { sha256 } from './codex-authority.ts';
 import type { FxBrokerAuthority, FxBrokerAuthorityAccount, FxBrokerTarget } from './types.ts';
+import { preAdmissionError } from './authority-error.ts';
 const FRESH_MS = 300_000;
 const MAX_BYTES = 1024 * 1024;
 const FX_PERMISSION_REVIEW_MODEL = 'grok-4.5';
@@ -113,26 +118,43 @@ export class GrokFxAuthority implements FxBrokerAuthority {
     if(!account || !account.enabled || account.credentials.expiresAtMs<=Date.now() || credentialFingerprint(account.credentials.accessToken)!==this.fingerprint) fail('auth_unavailable');
     return account;
   }
-  async inspect(provider:'codex'|'grok',key:string):Promise<FxBrokerAuthorityAccount> {
-    if(provider!=='grok' || key!==this.accountKey) fail('adapter_unsupported');
-    return withRoutingEvidenceSnapshot(this.paths,async evidence=>{
-      const account=await this.account(evidence);
-      return {provider:'grok',account_key:key,account_generation:account.ordinal,provider_generation:1,credential_revision:1,
-        enabled:true,auth_available:true,target:this.target,activation_supported:true};
-    });
+  async inspect(provider:'codex'|'grok',key:string,admission?:{deadline_ms:number;signal?:AbortSignal}):Promise<FxBrokerAuthorityAccount> {
+    try {
+      if(provider!=='grok' || key!==this.accountKey) fail('adapter_unsupported');
+      return await withRoutingEvidenceSnapshotForAdmission(this.paths,async evidence=>{
+        const account=await this.account(evidence);
+        return {provider:'grok',account_key:key,account_generation:account.ordinal,provider_generation:1,credential_revision:1,
+          enabled:true,auth_available:true,target:this.target,activation_supported:true};
+      },admission??{deadline_ms:Date.now()+FX_ADMISSION_SNAPSHOT_WAIT_MS});
+    } catch(error) {
+      throw preAdmissionError(error);
+    }
   }
   async forward(binding:FxBrokerAuthorityAccount,request:Parameters<FxBrokerAuthority['forward']>[1]) {
-    if(binding.provider!=='grok' || binding.account_key!==this.accountKey || JSON.stringify(request.target)!==JSON.stringify(this.target)) fail('target_mismatch');
-    const body=record(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(request.body)));
-    if(request.operation!=='inference' || !body) fail('target_mismatch');
-    const forwardBody=normalizeInferenceBody(body,this.target)??request.body;
-    const signal=AbortSignal.timeout(120_000);
-    const {account,response}=await withRoutingEvidenceSnapshot(this.paths,async evidence=>{
-      const account=await this.account(evidence);
-      const outgoing=headers(account);outgoing.set('content-type','application/json');outgoing.set('accept','text/event-stream');outgoing.set('x-grok-model-override',this.target.model);
-      const response=await fetch(providerURL('grok','/v1/responses',this.env),{method:'POST',headers:outgoing,body:forwardBody,redirect:'manual',signal});
-      return {account,response};
-    });
+    let providerStarted=false;
+    const deadline=request.execution_deadline_ms??Date.now()+120_000;
+    let result:{account:StoredAccount;response:Response;signal:AbortSignal};
+    try {
+      if(binding.provider!=='grok' || binding.account_key!==this.accountKey || JSON.stringify(request.target)!==JSON.stringify(this.target)) fail('target_mismatch');
+      const body=record(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(request.body)));
+      if(request.operation!=='inference' || !body) fail('target_mismatch');
+      const forwardBody=normalizeInferenceBody(body,this.target)??request.body;
+      result=await withRoutingEvidenceSnapshotForAdmission(this.paths,async evidence=>{
+        const account=await this.account(evidence);
+        const remaining=Math.min(120_000,deadline-Date.now());
+        if(remaining<=0) fail('expired');
+        if(request.signal?.aborted) fail('cancelled');
+        const signal=request.signal?AbortSignal.any([request.signal,AbortSignal.timeout(remaining)]):AbortSignal.timeout(remaining);
+        const outgoing=headers(account);outgoing.set('content-type','application/json');outgoing.set('accept','text/event-stream');outgoing.set('x-grok-model-override',this.target.model);
+        providerStarted=true;
+        const response=await fetch(providerURL('grok','/v1/responses',this.env),{method:'POST',headers:outgoing,body:forwardBody,redirect:'manual',signal});
+        return {account,response,signal};
+      },{deadline_ms:deadline,signal:request.signal});
+    } catch(error) {
+      if(providerStarted) throw error;
+      throw preAdmissionError(error);
+    }
+    const {account,response,signal}=result;
     const bytes=redact(await readCapped(response,MAX_BYTES,signal),account);
     return {account_generation:account.ordinal,provider_generation:1,credential_revision:1,response:{status:response.status,headers:{'content-type':response.headers.get('content-type')??'application/json'},body:bytes}};
   }

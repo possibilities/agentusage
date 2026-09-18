@@ -6,10 +6,13 @@ import { join } from 'node:path';
 import { lockFile } from '../src/accounts/storage.ts';
 import { readPool } from '../src/accounts/store.ts';
 import { buildCodexObservation } from '../src/codex/observe.ts';
+import { buildGrokObservation } from '../src/grok/observe.ts';
+import { readFxBrokerState } from '../src/fx-broker/store.ts';
 import { readRoutingEvidence } from '../src/routing-evidence/index.ts';
 import { nextCodexSourceRevision, nextGrokSourceRevision, readCodexObservation, readGrokObservation } from '../src/observe.ts';
 import { writeSidecar } from '../src/sidecar.ts';
 import { fixtureState, managed, seed } from './managed-fixtures.ts';
+import { account, billing, seedGrok } from './grok-fixtures.ts';
 
 test('private bridge fences activation, refuses browser/auth input, bounds failure retry and releases the lease', async () => {
   const state=fixtureState();await seed(state,[managed()]);
@@ -279,5 +282,48 @@ test('lets the Grok execution deadline dominate normal tool-use turns while reta
     expect(forwards).toBe(256);
     child.stdin.end(JSON.stringify({action:'release'})+'\n');
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
+  } finally {child.kill('SIGKILL');await exit;server.stop(true);}
+},30_000);
+
+test('bridge preserves a known pre-admission refusal instead of reporting forward_unknown', async () => {
+  const state=fixtureState();await seed(state,[managed()]);
+  writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
+  (await lockFile(state.paths.codexRefreshLock,0))();
+  await seedObservedGrok(state.paths);
+  const evidence=await readRoutingEvidence(state.paths);
+  let forwards=0;
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request) {
+    const path=new URL(request.url).pathname;
+    if(path==='/v1/models')return Response.json({data:[{model:'grok-test',api_backend:'responses',supports_reasoning_effort:true,reasoning_efforts:[{value:'low'}],context_window:100000,max_completion_tokens:8192}]});
+    if(path==='/v1/language-models')return Response.json({models:[{id:'grok-test',input_modalities:['text'],output_modalities:['text']}]});
+    forwards++;return Response.json({id:'must-not-forward'});
+  }});
+  const child=spawn(process.execPath,['src/cli.ts','fx-bridge'],{cwd:join(import.meta.dir,'..'),env:{...process.env,...state.env,AGENTUSAGE_TEST_GROK_ORIGIN:`http://127.0.0.1:${server.port}`},stdio:['pipe','pipe','pipe']});
+  child.stderr.resume();
+  const lines=createInterface({input:child.stdout})[Symbol.asyncIterator]();
+  const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
+  const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
+  try {
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-known-refusal',attempt_id:'known-refusal',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    const prepared=await next();expect(prepared.type).toBe('prepared');
+    child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
+    expect((await next()).type).toBe('active');
+    const now=Date.now();
+    const exhausted=account(2,billing({included:{usedPercent:100,remainingPercent:0,periodType:'USAGE_PERIOD_TYPE_WEEKLY',periodStart:new Date(now-1000).toISOString(),resetsAt:new Date(now+86400_000).toISOString()}}),now);
+    await seedGrok(state.paths,[exhausted]);
+    const observation=buildGrokObservation([exhausted],now);
+    observation.source_revision=nextGrokSourceRevision(readGrokObservation(state.paths),now);
+    writeSidecar(state.paths.grokObservation,observation);
+    const response=await fetch(prepared.private_transport.chat_url,{method:'POST',body:JSON.stringify({model:'grok-test',store:false,reasoning:{effort:'low'}})});
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({error:{message:'Broker admission refused; do not retry'}});
+    expect(await next()).toMatchObject({type:'forward',http_status:409,receipt:{
+      request_id:'known-refusal:forward:1',code:'capacity_unavailable',stage:'pre_admission',
+      disposition:'refused',provider_delivery:'not_forwarded',
+    }});
+    expect(forwards).toBe(0);
+    child.stdin.end(JSON.stringify({action:'release'})+'\n');
+    expect((await next()).type).toBe('released');expect(await exit).toBe(0);
+    expect(readFxBrokerState(state.paths).operations.find(row=>row.request_id==='known-refusal:forward:1')).toBeUndefined();
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}
 },30_000);

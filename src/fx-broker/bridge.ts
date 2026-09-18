@@ -3,11 +3,12 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { AccountError, lockFile, record } from '../accounts/storage.ts';
 import type { StatePaths } from '../paths.ts';
-import { FxCredentialBroker } from './broker.ts';
+import { FxBrokerError, FxCredentialBroker } from './broker.ts';
 import { GrokFxAuthority } from './grok-authority.ts';
 import { CodexFxAuthority } from './codex-authority.ts';
-import { withRoutingEvidenceSnapshot } from '../routing-evidence/projection.ts';
+import { withRoutingEvidenceSnapshotForAdmission } from '../routing-evidence/projection.ts';
 import type { FxBrokerBindingReceipt, FxBrokerNativeBinding, FxBrokerOwner } from './types.ts';
+import { preAdmissionError } from './authority-error.ts';
 
 const MAX_LINE = 16 * 1024;
 const MAX_BODY = 1024 * 1024;
@@ -16,6 +17,10 @@ const MAX_GROK_ADMISSIONS = 256;
 const BROKER_PREPARE_REVISION = 'broker_prepare';
 function invalid(): never { throw new AccountError('invalid_request', 'Invalid broker bridge request', 400); }
 const id = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(v);
+function safeRefusal(error: FxBrokerError) {
+  const { schema_version, request_id, code, stage, disposition, retry, provider_delivery } = error.receipt;
+  return { schema_version, request_id, code, stage, disposition, retry, provider_delivery };
+}
 
 /** Private parent/child stdio, one execution and one owned loopback listener.
  * Endpoint capabilities are deliberately not durable or manager-facing.
@@ -29,6 +34,8 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
   });
   let close: (() => Promise<void>) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const executionAbort = new AbortController();
+  process.stdin.once('end', () => executionAbort.abort());
   const write = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
   try {
     const iterator = lines[Symbol.asyncIterator]();
@@ -47,13 +54,13 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
           (typeof selection.expected_source_revision === 'string' ? /^[1-9]\d{0,63}$/.test(selection.expected_source_revision) : Number.isSafeInteger(selection.expected_source_revision) && Number(selection.expected_source_revision) > 0))) invalid();
     // A second host cannot revoke the first host by opening a new broker incarnation.
     const releaseLock = await lockFile(join(paths.stateRoot, 'service', 'fx-bridge.lock'), 0);
-    close = async () => { releaseLock(); };
+    close = async () => { executionAbort.abort(); releaseLock(); };
     const commandOwner = owner as unknown as FxBrokerOwner;
     const prefix = commandOwner.attempt_id;
     const factory = selection.account_key.startsWith('grok-') ? GrokFxAuthority : CodexFxAuthority;
     // No publication can advance the exact routing revision after this gate
     // validates it and before the broker durably records the lease.
-    const { authority, broker, prepared, routingSourceRevision } = await withRoutingEvidenceSnapshot(paths, async evidence => {
+    const { authority, broker, prepared, routingSourceRevision } = await withRoutingEvidenceSnapshotForAdmission(paths, async evidence => {
       const expectedSourceRevision = selection.expected_source_revision === BROKER_PREPARE_REVISION
         ? evidence.source_revision
         : selection.expected_source_revision;
@@ -66,7 +73,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
         consumer_nonce: randomBytes(32).toString('base64url'), requested_ttl_ms: Math.max(1000, Number(input.deadline_ms) - Date.now()),
         execution_deadline_ms: Number(input.deadline_ms) }, authority.inspectionWithinSnapshot());
       return { authority, broker, prepared, routingSourceRevision: evidence.source_revision };
-    });
+    }, { deadline_ms: Number(input.deadline_ms), signal: executionAbort.signal });
     const fence = { schema_version: 1 as const, expected_broker_incarnation: broker.incarnation };
     if (!prepared.handoff) invalid();
     let receipt: FxBrokerBindingReceipt = prepared.receipt;
@@ -105,13 +112,22 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
           if (body.byteLength > MAX_BODY) return new Response(null, { status: 413 });
           const result = await broker.forward({ ...fence, request_id: requestId, lease_id: receipt.lease_id,
             capability_token: token, expected_lease_revision: receipt.lease_revision, owner: commandOwner,
-            native, target: authority.target, operation: 'inference', body, headers: {} });
+            native, target: authority.target, operation: 'inference', body, headers: {} }, {
+              signal: AbortSignal.any([executionAbort.signal, request.signal]),
+            });
           write({ type: 'forward', receipt: result.receipt, http_status: result.response?.status ?? null });
           if (!result.response) { closed = true; return new Response(null, { status: 409 }); }
           if (result.response.status !== 200) closed = true;
           return new Response(result.response.body, { status: result.response.status, headers: result.response.headers });
-        } catch {
-          write({ type: 'forward_unknown', request_id: requestId });
+        } catch (error) {
+          if (error instanceof FxBrokerError && error.receipt.stage === 'pre_admission' &&
+              error.receipt.provider_delivery === 'not_forwarded') {
+            write({ type: 'forward', receipt: safeRefusal(error), http_status: error.status });
+            closed = true;
+            return Response.json({ error: { message: 'Broker admission refused; do not retry' } }, { status: error.status });
+          }
+          write({ type: 'forward_unknown', request_id: requestId,
+            ...(error instanceof FxBrokerError ? { receipt: safeRefusal(error) } : {}) });
           // Never retry a lost or refused provider admission, including client retries.
           closed = true;
           return Response.json({ error: { message: 'Broker admission unavailable; do not retry' } }, { status: 409 });
@@ -119,6 +135,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
       },
     });
     close = async () => {
+      executionAbort.abort();
       closed = true;
       server.stop(true);
       try {
@@ -149,7 +166,8 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     }
     return 0;
   } catch (error) {
-    write({ type: 'error', code: error instanceof AccountError ? error.code : 'broker_unavailable' });
+    const normalized = preAdmissionError(error);
+    write({ type: 'error', code: normalized.code, stage: 'pre_admission', provider_delivery: 'not_forwarded' });
     return 1;
   } finally {
     if (timer) clearTimeout(timer);

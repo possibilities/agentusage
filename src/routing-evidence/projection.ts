@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { accountLock, readPool, type ManagedAccount } from '../accounts/store.ts';
-import { AccountError, withLock } from '../accounts/storage.ts';
+import { AccountError, tryLockFile } from '../accounts/storage.ts';
 import { buildCodexObservation } from '../codex/observe.ts';
 import type { CodexAccountView, CodexObservation } from '../codex/types.ts';
 import { buildGrokObservation } from '../grok/observe.ts';
@@ -293,6 +293,82 @@ export async function readRoutingEvidence(
   return withRoutingEvidenceSnapshot(paths, evidence => evidence, nowMs);
 }
 
+export const FX_ADMISSION_SNAPSHOT_WAIT_MS = 5_000;
+
+export interface RoutingEvidenceSnapshotWait {
+  deadline_ms: number;
+  signal?: AbortSignal;
+  max_wait_ms?: number;
+}
+
+function snapshotLockPaths(paths: StatePaths): string[] {
+  return [
+    paths.codexRefreshLock,
+    paths.grokRefreshLock,
+    accountLock(paths),
+    grokAccountLock(paths),
+  ];
+}
+
+function releaseLocks(releases: Array<() => void>): void {
+  for (const release of releases.reverse()) release();
+}
+
+async function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted)
+    throw new AccountError('cancelled', 'Snapshot acquisition was cancelled', 409);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(done, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      reject(new AccountError('cancelled', 'Snapshot acquisition was cancelled', 409));
+    };
+    function done() {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+async function acquireSnapshotLocks(
+  paths: StatePaths,
+  wait: RoutingEvidenceSnapshotWait | null,
+): Promise<Array<() => void>> {
+  const lockPaths = snapshotLockPaths(paths);
+  if (lockPaths.some(path => !existsSync(path)))
+    throw new RoutingEvidenceError('evidence_unavailable');
+  const startedAt = Date.now();
+  const waitDeadline = wait === null
+    ? startedAt
+    : Math.min(
+        wait.deadline_ms,
+        startedAt + (wait.max_wait_ms ?? FX_ADMISSION_SNAPSHOT_WAIT_MS),
+      );
+  for (;;) {
+    if (wait?.signal?.aborted)
+      throw new AccountError('cancelled', 'Snapshot acquisition was cancelled', 409);
+    if (wait !== null && Date.now() >= wait.deadline_ms)
+      throw new AccountError('expired', 'Execution deadline passed during snapshot acquisition', 409);
+    const releases: Array<() => void> = [];
+    try {
+      for (const path of lockPaths) releases.push(tryLockFile(path));
+      return releases;
+    } catch (error) {
+      releaseLocks(releases);
+      if (!(error instanceof AccountError) || error.code !== 'busy') {
+        if (error instanceof RoutingEvidenceError) throw error;
+        throw new RoutingEvidenceError('evidence_unavailable');
+      }
+      const now = Date.now();
+      if (wait === null || now >= waitDeadline)
+        throw new RoutingEvidenceError('snapshot_busy');
+      await waitForRetry(Math.min(20, waitDeadline - now), wait.signal);
+    }
+  }
+}
+
 /** Owner-internal callback runs while all observation/account locks are held. */
 export async function withRoutingEvidenceSnapshot<T>(
   paths: StatePaths,
@@ -301,32 +377,31 @@ export async function withRoutingEvidenceSnapshot<T>(
 ): Promise<T> {
   if (!Number.isSafeInteger(nowMs) || nowMs < 0)
     throw new RoutingEvidenceError('inconsistent_snapshot');
-  if (!existsSync(paths.codexRefreshLock) || !existsSync(paths.grokRefreshLock) ||
-      !existsSync(accountLock(paths)) || !existsSync(grokAccountLock(paths)))
-    throw new RoutingEvidenceError('evidence_unavailable');
-  let callbackError: unknown;
+  const releases = await acquireSnapshotLocks(paths, null);
   try {
-    return await withLock(
-      paths.codexRefreshLock,
-      () => withLock(
-        paths.grokRefreshLock,
-        () => withLock(
-          accountLock(paths),
-          () => withLock(grokAccountLock(paths), async () => {
-            const evidence = await lockedProjection(paths);
-            try { return await inspect(evidence); } catch (error) { callbackError = error; throw error; }
-          }, 0),
-          0,
-        ),
-        0,
-      ),
-      0,
-    );
-  } catch (error) {
-    if (error === callbackError) throw error;
-    if (error instanceof RoutingEvidenceError) throw error;
-    if (error instanceof AccountError && error.code === 'busy')
-      throw new RoutingEvidenceError('snapshot_busy');
-    throw new RoutingEvidenceError('evidence_unavailable');
+    return await inspect(await lockedProjection(paths));
+  } finally {
+    releaseLocks(releases);
+  }
+}
+
+/**
+ * Managed FX admission may wait briefly for the same fixed-order snapshot.
+ * Only lock acquisition is retried; the projection and callback run once.
+ */
+export async function withRoutingEvidenceSnapshotForAdmission<T>(
+  paths: StatePaths,
+  inspect: (evidence: RoutingEvidenceProjection) => T | Promise<T>,
+  wait: RoutingEvidenceSnapshotWait,
+): Promise<T> {
+  if (!Number.isSafeInteger(wait.deadline_ms) || wait.deadline_ms < 0 ||
+      (wait.max_wait_ms !== undefined &&
+        (!Number.isSafeInteger(wait.max_wait_ms) || wait.max_wait_ms < 0)))
+    throw new RoutingEvidenceError('inconsistent_snapshot');
+  const releases = await acquireSnapshotLocks(paths, wait);
+  try {
+    return await inspect(await lockedProjection(paths));
+  } finally {
+    releaseLocks(releases);
   }
 }

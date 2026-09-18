@@ -41,6 +41,11 @@ locked account state. It refuses with a sanitized `snapshot_busy`,
 `evidence_unavailable`, `inconsistent_snapshot` or `generation_unavailable`
 code instead of returning a partial join.
 
+This public read remains an immediate, zero-wait snapshot. The private managed
+FX broker may use a separate bounded acquisition policy for the same lock order;
+it releases partial acquisitions before retrying and never reuses evidence read
+before contention clears.
+
 Grok billing samples carry a private SHA-256 correlation to the access token
 that measured them. Rotation makes an old sample ineligible for selection and
 routing evidence until a provider refresh succeeds. The fingerprint never

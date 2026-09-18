@@ -134,25 +134,34 @@ export interface FxBrokerPrepareResult {
   replayed: boolean;
 }
 
+export type FxBrokerRefusalCode =
+  | 'identity_unavailable'
+  | 'generation_mismatch'
+  | 'generation_unavailable'
+  | 'auth_unavailable'
+  | 'refresh_outcome_unknown'
+  | 'capacity_unavailable'
+  | 'capability_stale'
+  | 'target_mismatch'
+  | 'adapter_unsupported'
+  | 'source_revision_conflict'
+  | 'snapshot_busy'
+  | 'evidence_unavailable'
+  | 'storage_unavailable'
+  | 'cancelled'
+  | 'stale_fence'
+  | 'expired'
+  | 'revoked'
+  | 'released'
+  | 'idempotency_conflict'
+  | 'broker_unavailable'
+  | 'invalid_request';
+
 export interface FxBrokerRefusal {
   schema_version: typeof FX_BROKER_SCHEMA_VERSION;
   request_id: string;
-  code:
-    | 'identity_unavailable'
-    | 'generation_mismatch'
-    | 'auth_unavailable'
-    | 'refresh_outcome_unknown'
-    | 'capacity_unavailable'
-    | 'capability_stale'
-    | 'target_mismatch'
-    | 'adapter_unsupported'
-    | 'stale_fence'
-    | 'expired'
-    | 'revoked'
-    | 'released'
-    | 'idempotency_conflict'
-    | 'broker_unavailable'
-    | 'invalid_request';
+  code: FxBrokerRefusalCode;
+  stage: 'pre_admission' | 'post_admission';
   disposition: 'refused' | 'outcome_unknown';
   retry: 'none' | 'same_command' | 'new_authorized_attempt';
   provider_delivery: 'not_forwarded' | 'may_have_forwarded';
@@ -206,6 +215,10 @@ export interface FxBrokerAuthority {
   inspect(
     provider: FxBrokerProvider,
     accountKey: string,
+    admission?: {
+      deadline_ms: number;
+      signal?: AbortSignal;
+    },
   ): Promise<FxBrokerAuthorityAccount>;
   forward(
     account: FxBrokerAuthorityAccount,
@@ -214,6 +227,8 @@ export interface FxBrokerAuthority {
       target: FxBrokerTarget;
       body: Uint8Array;
       headers: Record<string, string>;
+      execution_deadline_ms?: number;
+      signal?: AbortSignal;
     },
   ): Promise<FxBrokerAuthorityForwardResult>;
 }

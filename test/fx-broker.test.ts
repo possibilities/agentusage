@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
+import { AccountError } from '../src/accounts/storage.ts';
 import {
   FxBrokerError,
   FxCredentialBroker,
@@ -15,6 +16,8 @@ import {
   type FxBrokerTarget,
 } from '../src/fx-broker/index.ts';
 import { fxBrokerStateFile } from '../src/fx-broker/store.ts';
+import { FxAuthorityPreAdmissionError } from '../src/fx-broker/authority-error.ts';
+import { RoutingEvidenceError } from '../src/routing-evidence/types.ts';
 import { fixtureState } from './managed-fixtures.ts';
 
 const sha = (value: string) =>
@@ -56,6 +59,7 @@ class FakeAuthority implements FxBrokerAuthority {
   forwards = 0;
   refreshes = 0;
   failNext = false;
+  preAdmissionForwardError: FxAuthorityPreAdmissionError | null = null;
   inspectError: Error | null = null;
   inspectOverride: FxBrokerAuthorityAccount | null = null;
   inspectDelayMs = 0;
@@ -109,6 +113,7 @@ class FakeAuthority implements FxBrokerAuthority {
   ): Promise<FxBrokerAuthorityForwardResult> {
     const account = this.accounts.get(inspected.account_key);
     if (!account) throw new Error('missing fake account');
+    if (this.preAdmissionForwardError) throw this.preAdmissionForwardError;
     this.forwards += 1;
     this.activeForwards += 1;
     this.maxActiveForwards = Math.max(this.maxActiveForwards, this.activeForwards);
@@ -652,6 +657,25 @@ describe('Fx credential broker', () => {
       'identity_unavailable',
       (error) => expect(JSON.stringify(error.receipt)).not.toContain('SECRET'),
     );
+    authority.inspectError = new RoutingEvidenceError('snapshot_busy');
+    await expectRefusal(
+      broker.prepare(prepareCommand(broker, 'codex', 'codex-1', 'busy', now)),
+      'snapshot_busy',
+      (error) => expect(error.receipt).toMatchObject({
+        stage: 'pre_admission',
+        disposition: 'refused',
+        provider_delivery: 'not_forwarded',
+      }),
+    );
+    authority.inspectError = new AccountError('unsafe-state', 'PRIVATE_PATH_SECRET');
+    await expectRefusal(
+      broker.prepare(prepareCommand(broker, 'codex', 'codex-1', 'storage', now)),
+      'storage_unavailable',
+      (error) => {
+        expect(error.receipt).toMatchObject({ stage: 'pre_admission', provider_delivery: 'not_forwarded' });
+        expect(JSON.stringify(error.receipt)).not.toContain('PRIVATE_PATH_SECRET');
+      },
+    );
     authority.inspectError = null;
     authority.inspectOverride = {
       ...(await authority.inspect('codex', 'codex-2')),
@@ -665,6 +689,23 @@ describe('Fx credential broker', () => {
     );
     authority.inspectOverride = null;
     const active = await activeLease(broker, 'codex', 'codex-1', 'headers', now);
+    const knownRefusal = forwardCommand(broker, active, 'known-pre-admission');
+    authority.preAdmissionForwardError = new FxAuthorityPreAdmissionError('snapshot_busy');
+    await expectRefusal(
+      broker.forward(knownRefusal),
+      'snapshot_busy',
+      (error) => expect(error.receipt).toMatchObject({
+        stage: 'pre_admission',
+        disposition: 'refused',
+        provider_delivery: 'not_forwarded',
+      }),
+    );
+    await expectRefusal(broker.forward(knownRefusal), 'snapshot_busy');
+    expect(authority.forwards).toBe(0);
+    expect(JSON.parse(readFileSync(fxBrokerStateFile(fixture.paths), 'utf8')).operations
+      .find((entry: { request_id: string }) => entry.request_id === 'known-pre-admission'))
+      .toMatchObject({ status: 'refused', result: { stage: 'pre_admission', provider_delivery: 'not_forwarded' } });
+    authority.preAdmissionForwardError = null;
     const unsafe = forwardCommand(broker, active, 'unsafe-header');
     unsafe.headers.authorization = 'Bearer ACCESS_SECRET_CODEX_1';
     await expectRefusal(

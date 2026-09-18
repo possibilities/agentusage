@@ -26,6 +26,7 @@ import {
   type FxBrokerTarget,
   FX_BROKER_SCHEMA_VERSION,
 } from './types.ts';
+import { FxAuthorityPreAdmissionError, preAdmissionError } from './authority-error.ts';
 
 const MAX_COMMAND_BYTES = 16 * 1024;
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -157,14 +158,16 @@ function refusal(
   code: FxBrokerRefusal['code'],
   message: string,
   options: Partial<
-    Pick<FxBrokerRefusal, 'disposition' | 'retry' | 'provider_delivery'>
+    Pick<FxBrokerRefusal, 'stage' | 'disposition' | 'retry' | 'provider_delivery'>
   > = {},
 ): FxBrokerError {
+  const disposition = options.disposition ?? 'refused';
   return new FxBrokerError({
     schema_version: FX_BROKER_SCHEMA_VERSION,
     request_id: requestId,
     code,
-    disposition: options.disposition ?? 'refused',
+    stage: options.stage ?? (disposition === 'outcome_unknown' ? 'post_admission' : 'pre_admission'),
+    disposition,
     retry: options.retry ?? 'new_authorized_attempt',
     provider_delivery: options.provider_delivery ?? 'not_forwarded',
     message,
@@ -465,6 +468,7 @@ export class FxCredentialBroker {
         command.request_id,
         target.provider,
         command.account.account_key,
+        { deadline_ms: command.execution_deadline_ms },
       );
       if (
         account.account_generation !== command.account.expected_account_generation ||
@@ -561,6 +565,7 @@ export class FxCredentialBroker {
         snapshot.request_id,
         lease.account.provider,
         lease.account.account_key,
+        { deadline_ms: lease.execution_deadline_ms },
       );
       recheckExpiry();
       checkAccount(snapshot.request_id, account, lease);
@@ -585,6 +590,7 @@ export class FxCredentialBroker {
         snapshot.request_id,
         lease.account.provider,
         lease.account.account_key,
+        { deadline_ms: lease.execution_deadline_ms },
       );
       recheckExpiry();
       checkAccount(snapshot.request_id, account, lease);
@@ -678,7 +684,10 @@ export class FxCredentialBroker {
     });
   }
 
-  async forward(command: FxBrokerForwardCommand): Promise<FxBrokerForwardResult> {
+  async forward(
+    command: FxBrokerForwardCommand,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<FxBrokerForwardResult> {
     exactKeys(
       command,
       [
@@ -748,6 +757,8 @@ export class FxCredentialBroker {
       if (expire(state, this.clock())) persist();
       const existing = operation(state.operations, command.request_id, requestDigest);
       if (existing) {
+        if (existing.status === 'refused')
+          throw new FxBrokerError(existing.result as unknown as FxBrokerRefusal);
         return {
           receipt: existing.result as unknown as FxBrokerForwardResult['receipt'],
           response: null,
@@ -770,6 +781,7 @@ export class FxCredentialBroker {
         command.request_id,
         lease.account.provider,
         lease.account.account_key,
+        { deadline_ms: lease.execution_deadline_ms, signal: options.signal },
       );
       if (expire(state, this.clock())) persist();
       if ((lease as DurableFxBrokerLease).state === 'expired')
@@ -801,14 +813,34 @@ export class FxCredentialBroker {
           target,
           body: body.slice(),
           headers,
+          execution_deadline_ms: lease.execution_deadline_ms,
+          signal: options.signal,
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof FxAuthorityPreAdmissionError) {
+          const known = refusal(
+            command.request_id,
+            error.code,
+            'Broker refused provider admission',
+            {
+              stage: 'pre_admission',
+              disposition: 'refused',
+              retry: 'new_authorized_attempt',
+              provider_delivery: 'not_forwarded',
+            },
+          );
+          durable.status = 'refused';
+          durable.result = structuredClone(known.receipt) as unknown as Record<string, unknown>;
+          persist();
+          throw known;
+        }
         throw refusal(
           command.request_id,
           'refresh_outcome_unknown',
           'Broker request outcome is unknown',
           {
             disposition: 'outcome_unknown',
+            stage: 'post_admission',
             retry: 'same_command',
             provider_delivery: 'may_have_forwarded',
           },
@@ -997,9 +1029,10 @@ export class FxCredentialBroker {
     requestId: string,
     provider: FxBrokerProvider,
     accountKey: string,
+    admission?: { deadline_ms: number; signal?: AbortSignal },
   ): Promise<FxBrokerAuthorityAccount> {
     try {
-      const account = await this.authority.inspect(provider, accountKey);
+      const account = await this.authority.inspect(provider, accountKey, admission);
       exactKeys(
         account,
         [
@@ -1034,11 +1067,17 @@ export class FxCredentialBroker {
       if (target.provider !== provider)
         throw new Error('authority target mismatch');
       return { ...structuredClone(account), target };
-    } catch {
+    } catch (error) {
+      const normalized = preAdmissionError(error);
       throw refusal(
         requestId,
-        'identity_unavailable',
+        normalized.code,
         'Account authority is unavailable',
+        {
+          stage: 'pre_admission',
+          disposition: 'refused',
+          provider_delivery: 'not_forwarded',
+        },
       );
     }
   }

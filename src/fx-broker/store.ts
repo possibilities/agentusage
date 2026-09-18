@@ -49,7 +49,7 @@ export interface DurableFxBrokerOperation {
   request_digest: string;
   kind: 'prepare' | 'activate' | 'renew' | 'release' | 'revoke' | 'forward';
   lease_id: string;
-  status: 'applied' | 'outcome_unknown';
+  status: 'applied' | 'refused' | 'outcome_unknown';
   result: Record<string, unknown>;
 }
 
@@ -87,6 +87,30 @@ function bounded(value: unknown, maximum = 256): value is string {
     !/[\x00-\x1f\x7f]/u.test(value)
   );
 }
+
+const REFUSAL_CODES = new Set([
+  'identity_unavailable',
+  'generation_mismatch',
+  'generation_unavailable',
+  'auth_unavailable',
+  'refresh_outcome_unknown',
+  'capacity_unavailable',
+  'capability_stale',
+  'target_mismatch',
+  'adapter_unsupported',
+  'source_revision_conflict',
+  'snapshot_busy',
+  'evidence_unavailable',
+  'storage_unavailable',
+  'cancelled',
+  'stale_fence',
+  'expired',
+  'revoked',
+  'released',
+  'idempotency_conflict',
+  'broker_unavailable',
+  'invalid_request',
+]);
 
 function validOwner(value: unknown): boolean {
   const owner = record(value);
@@ -176,7 +200,21 @@ function validateForwardReceipt(
   leaseId: unknown,
 ): boolean {
   const receipt = record(value);
-  if (!receipt || Object.keys(receipt).length !== 7) return false;
+  if (!receipt) return false;
+  if (status === 'refused') {
+    return Boolean(
+      Object.keys(receipt).length === 8 &&
+      receipt.schema_version === 1 &&
+      receipt.request_id === requestId &&
+      REFUSAL_CODES.has(String(receipt.code)) &&
+      receipt.stage === 'pre_admission' &&
+      receipt.disposition === 'refused' &&
+      ['none', 'same_command', 'new_authorized_attempt'].includes(String(receipt.retry)) &&
+      receipt.provider_delivery === 'not_forwarded' &&
+      bounded(receipt.message, 256)
+    );
+  }
+  if (Object.keys(receipt).length !== 7) return false;
   const applied = status === 'applied';
   return Boolean(
     receipt.schema_version === 1 &&
@@ -259,7 +297,7 @@ function validate(value: unknown): FxBrokerState {
       ) ||
       !bounded(operation.lease_id) ||
       !leaseIds.has(operation.lease_id as string) ||
-      !['applied', 'outcome_unknown'].includes(String(operation.status)) ||
+      !['applied', 'refused', 'outcome_unknown'].includes(String(operation.status)) ||
       !record(operation.result)
     )
       throw new AccountError('invalid-state', 'Invalid Fx broker operation');

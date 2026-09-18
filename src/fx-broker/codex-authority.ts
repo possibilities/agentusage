@@ -5,9 +5,14 @@ import { AccountError, record } from '../accounts/storage.ts';
 import { readPool, type ManagedAccount } from '../accounts/store.ts';
 import { SUPPORTED_COLLECTOR_VERSION } from '../catalog/types.ts';
 import type { StatePaths } from '../paths.ts';
-import { withRoutingEvidenceSnapshot } from '../routing-evidence/projection.ts';
+import {
+  FX_ADMISSION_SNAPSHOT_WAIT_MS,
+  withRoutingEvidenceSnapshot,
+  withRoutingEvidenceSnapshotForAdmission,
+} from '../routing-evidence/projection.ts';
 import type { RoutingEvidenceProjection } from '../routing-evidence/types.ts';
 import type { FxBrokerAuthority, FxBrokerAuthorityAccount, FxBrokerTarget } from './types.ts';
+import { preAdmissionError } from './authority-error.ts';
 
 const MAX_BYTES = 1024 * 1024;
 const FRESH_MS = 300_000;
@@ -106,42 +111,61 @@ export class CodexFxAuthority implements FxBrokerAuthority {
       target: this.target, activation_supported: true };
   }
 
-  async inspect(provider: 'codex' | 'grok', key: string): Promise<FxBrokerAuthorityAccount> {
-    if (provider !== 'codex' || key !== this.accountKey) fail('adapter_unsupported');
-    if (Date.now() - this.capturedAt >= FRESH_MS) fail('capability_stale');
-    return withRoutingEvidenceSnapshot(this.paths, evidence => {
-      if (evidence.provider_source_revisions.codex < this.evidence.provider_source_revisions.codex) fail('source_revision_conflict');
-      requireCodexCapacity(evidence, key);
-      const account = readPool(this.paths).accounts.find(a => a.key === key);
-      if (!account || account.provider !== 'codex' || account.auth_error || !account.enabled) fail('auth_unavailable');
-      return { provider: 'codex' as const, account_key: key, account_generation: account.ordinal, provider_generation: 1,
-        credential_revision: account.credentials.generation, enabled: account.enabled, auth_available: true,
-        target: this.target, activation_supported: true };
-    });
+  async inspect(provider: 'codex' | 'grok', key: string, admission?: { deadline_ms: number; signal?: AbortSignal }): Promise<FxBrokerAuthorityAccount> {
+    try {
+      if (provider !== 'codex' || key !== this.accountKey) fail('adapter_unsupported');
+      if (Date.now() - this.capturedAt >= FRESH_MS) fail('capability_stale');
+      return await withRoutingEvidenceSnapshotForAdmission(this.paths, evidence => {
+        if (evidence.provider_source_revisions.codex < this.evidence.provider_source_revisions.codex) fail('source_revision_conflict');
+        requireCodexCapacity(evidence, key);
+        const account = readPool(this.paths).accounts.find(a => a.key === key);
+        if (!account || account.provider !== 'codex' || account.auth_error || !account.enabled) fail('auth_unavailable');
+        return { provider: 'codex' as const, account_key: key, account_generation: account.ordinal, provider_generation: 1,
+          credential_revision: account.credentials.generation, enabled: account.enabled, auth_available: true,
+          target: this.target, activation_supported: true };
+      }, admission ?? { deadline_ms: Date.now() + FX_ADMISSION_SNAPSHOT_WAIT_MS });
+    } catch (error) {
+      throw preAdmissionError(error);
+    }
   }
 
   async forward(binding: FxBrokerAuthorityAccount, request: Parameters<FxBrokerAuthority['forward']>[1]) {
-    await this.inspect(binding.provider, binding.account_key);
-    if (JSON.stringify(request.target) !== JSON.stringify(this.target)) fail('target_mismatch');
-    if (request.operation === 'catalog') return { account_generation: binding.account_generation,
-      provider_generation: 1, credential_revision: binding.credential_revision,
-      response: { status: 200, headers: { 'content-type': 'application/json' }, body: this.catalog } };
-    const body = record(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(request.body)));
-    const reasoning = record(body?.reasoning);
-    if (!body || body.model !== this.target.model || reasoning?.effort !== this.target.effort ||
-        (body.service_tier ?? null) !== this.target.service_tier || body.store !== false) fail('target_mismatch');
-    const signal = AbortSignal.timeout(120_000);
-    const {account,response} = await withRoutingEvidenceSnapshot(this.paths, async evidence => {
-      if(evidence.provider_source_revisions.codex < this.evidence.provider_source_revisions.codex) fail('source_revision_conflict');
-      requireCodexCapacity(evidence, binding.account_key);
-      const account=readPool(this.paths).accounts.find(row=>row.key===binding.account_key);
-      if(!account || !account.enabled || account.auth_error || account.credentials.generation !== binding.credential_revision) fail('credential_revision_conflict');
-      const response = await fetch(providerURL('codex', '/backend-api/codex/responses', this.env), {
-        method: 'POST', headers: providerHeaders(account, new Headers({ 'content-type': 'application/json', accept: 'text/event-stream' })),
-        body: request.body, redirect: 'manual', signal,
-      });
-      return {account,response};
-    });
+    let providerStarted = false;
+    const deadline = request.execution_deadline_ms ?? Date.now() + 120_000;
+    let result: { account: ManagedAccount; response: Response; signal: AbortSignal };
+    try {
+      if (binding.provider !== 'codex' || binding.account_key !== this.accountKey ||
+          JSON.stringify(request.target) !== JSON.stringify(this.target)) fail('target_mismatch');
+      if (request.operation === 'catalog') return { account_generation: binding.account_generation,
+        provider_generation: 1, credential_revision: binding.credential_revision,
+        response: { status: 200, headers: { 'content-type': 'application/json' }, body: this.catalog } };
+      const body = record(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(request.body)));
+      const reasoning = record(body?.reasoning);
+      if (!body || body.model !== this.target.model || reasoning?.effort !== this.target.effort ||
+          (body.service_tier ?? null) !== this.target.service_tier || body.store !== false) fail('target_mismatch');
+      result = await withRoutingEvidenceSnapshotForAdmission(this.paths, async evidence => {
+        if(evidence.provider_source_revisions.codex < this.evidence.provider_source_revisions.codex) fail('source_revision_conflict');
+        requireCodexCapacity(evidence, binding.account_key);
+        const account=readPool(this.paths).accounts.find(row=>row.key===binding.account_key);
+        if(!account || !account.enabled || account.auth_error || account.credentials.generation !== binding.credential_revision) fail('credential_revision_conflict');
+        const remaining = Math.min(120_000, deadline - Date.now());
+        if (remaining <= 0) fail('expired');
+        if (request.signal?.aborted) fail('cancelled');
+        const signal = request.signal
+          ? AbortSignal.any([request.signal, AbortSignal.timeout(remaining)])
+          : AbortSignal.timeout(remaining);
+        providerStarted = true;
+        const response = await fetch(providerURL('codex', '/backend-api/codex/responses', this.env), {
+          method: 'POST', headers: providerHeaders(account, new Headers({ 'content-type': 'application/json', accept: 'text/event-stream' })),
+          body: request.body, redirect: 'manual', signal,
+        });
+        return {account,response,signal};
+      }, { deadline_ms: deadline, signal: request.signal });
+    } catch (error) {
+      if (providerStarted) throw error;
+      throw preAdmissionError(error);
+    }
+    const {account,response,signal} = result;
     const bytes = redact(await readCapped(response, MAX_BYTES, signal), account);
     return { account_generation: account.ordinal, provider_generation: 1, credential_revision: account.credentials.generation,
       response: { status: response.status, headers: { 'content-type': response.headers.get('content-type') ?? 'application/json' }, body: bytes } };
