@@ -207,3 +207,39 @@ test('normalizes Fx Grok permission review inference to the pinned task target',
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}
 },30_000);
+
+test('allows bounded tool-use turns beyond eight admissions and reports the terminal limit', async () => {
+  const state=fixtureState();await seed(state,[managed()]);
+  writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
+  (await lockFile(state.paths.codexRefreshLock,0))();
+  await seedObservedGrok(state.paths);
+  const evidence=await readRoutingEvidence(state.paths);
+  let forwards=0;
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request) {
+    if(new URL(request.url).pathname.endsWith('/models')) return Response.json({models:[{slug:'gpt-test',visibility:'list',supported_in_api:true,supported_reasoning_levels:[{effort:'low'}]}]});
+    forwards++;return Response.json({id:`response-${forwards}`});
+  }});
+  const child=spawn(process.execPath,['src/cli.ts','fx-bridge'],{cwd:join(import.meta.dir,'..'),env:{...process.env,...state.env,AGENTUSAGE_TEST_CODEX_ORIGIN:`http://127.0.0.1:${server.port}`},stdio:['pipe','pipe','pipe']});
+  child.stderr.resume();
+  const lines=createInterface({input:child.stdout})[Symbol.asyncIterator]();
+  const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
+  const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
+  try {
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-admission-limit',attempt_id:'admission-limit',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    const prepared=await next();expect(prepared.type).toBe('prepared');
+    child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
+    expect((await next()).type).toBe('active');
+    const request={method:'POST',body:JSON.stringify({model:'gpt-test',store:false,reasoning:{effort:'low'}})};
+    for(let admission=1;admission<=32;admission++) {
+      expect((await fetch(prepared.private_transport.chat_url,request)).status).toBe(200);
+      expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`admission-limit:forward:${admission}`},http_status:200});
+    }
+    const refused=await fetch(prepared.private_transport.chat_url,request);
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toEqual({error:{message:'Admission limit exhausted; do not retry'}});
+    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:'admission-limit:forward:33'},http_status:429});
+    expect(forwards).toBe(32);
+    child.stdin.end(JSON.stringify({action:'release'})+'\n');
+    expect((await next()).type).toBe('released');expect(await exit).toBe(0);
+  } finally {child.kill('SIGKILL');await exit;server.stop(true);}
+},30_000);

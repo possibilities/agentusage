@@ -17,9 +17,13 @@ receipts and one private, random loopback endpoint. Catalog reads may precede
 activation; Responses forwarding requires the exact native process/build/session
 activation fence. Origin/auth/cookie-bearing requests are refused. Parent EOF,
 explicit release or a maximum five-minute deadline closes the owned listener.
-Each execution permits at most eight admissions. Any failed or uncertain admission
-closes further admission. Provider bodies/responses are bounded to one MiB and
-buffered; a lost response retains the broker's existing unknown-outcome contract.
+Each execution permits at most 32 admissions. The limit accommodates bounded
+tool-use turns while the four-minute lease and per-call authority checks retain
+the execution boundary. Exhausting it emits explicit non-success admission
+evidence before closing, so the controller cannot accept an HTTP error as a
+completed task. Any failed or uncertain admission closes further admission.
+Provider bodies/responses are bounded to one MiB and buffered; a lost response
+retains the broker's existing unknown-outcome contract.
 
 This first authority supports Codex only. It does not change the current native
 manager's account, spend reset credits, expose Grok as eligible without evidence,
