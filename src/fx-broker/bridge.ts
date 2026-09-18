@@ -14,6 +14,9 @@ const MAX_LINE = 16 * 1024;
 const MAX_BODY = 1024 * 1024;
 const MAX_CODEX_ADMISSIONS = 32;
 const MAX_GROK_ADMISSIONS = 256;
+const ROLLING_LEASE_MS = 5 * 60_000;
+const RENEW_BEFORE_EXPIRY_MS = 60_000;
+const MIN_FORWARD_BUDGET_MS = 125_000;
 const BROKER_PREPARE_REVISION = 'broker_prepare';
 function invalid(): never { throw new AccountError('invalid_request', 'Invalid broker bridge request', 400); }
 const id = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(v);
@@ -81,10 +84,47 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     const token = prepared.handoff.capability_token;
     const route = randomBytes(32).toString('hex');
     let count = 0;
+    let renewalCount = 0;
     const maxAdmissions = authority instanceof GrokFxAuthority ? MAX_GROK_ADMISSIONS : MAX_CODEX_ADMISSIONS;
     let busy = false;
     let closed = false;
-    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, maxRequestBodySize: MAX_BODY,
+    let renewal: Promise<void> | undefined;
+    let server: ReturnType<typeof Bun.serve>;
+    const scheduleRenewal = () => {
+      if (timer) clearTimeout(timer);
+      const remaining = receipt.expires_at_ms - Date.now();
+      const delay = Math.max(1_000, remaining - Math.min(RENEW_BEFORE_EXPIRY_MS, Math.floor(remaining / 2)));
+      timer = setTimeout(() => {
+        void renewLease(true).catch(error => {
+          const refusal = error instanceof FxBrokerError
+            ? safeRefusal(error)
+            : { request_id: `${prefix}:renew:${renewalCount}`, code: preAdmissionError(error).code,
+                stage: 'pre_admission', disposition: 'refused', retry: 'new_authorized_attempt', provider_delivery: 'not_forwarded' };
+          write({ type: 'lease_refused', receipt: refusal });
+          closed = true;
+          server.stop(true);
+          lines.close();
+          process.stdin.destroy();
+        });
+      }, delay);
+    };
+    const renewLease = (force = false): Promise<void> => {
+      if (!force && receipt.expires_at_ms - Date.now() >= MIN_FORWARD_BUDGET_MS)
+        return Promise.resolve();
+      if (renewal) return renewal;
+      renewal = (async () => {
+        if (executionAbort.signal.aborted) throw new AccountError('cancelled', 'Execution cancelled', 409);
+        const deadline = Date.now() + ROLLING_LEASE_MS;
+        receipt = await broker.renew({ ...fence, request_id: `${prefix}:renew:${++renewalCount}`,
+          lease_id: receipt.lease_id, capability_token: token, expected_lease_revision: receipt.lease_revision,
+          owner: commandOwner, requested_ttl_ms: ROLLING_LEASE_MS, execution_deadline_ms: deadline },
+        { signal: executionAbort.signal });
+        write({ type: 'renewed', receipt });
+        scheduleRenewal();
+      })().finally(() => { renewal = undefined; });
+      return renewal;
+    };
+    server = Bun.serve({ hostname: '127.0.0.1', port: 0, maxRequestBodySize: MAX_BODY,
       idleTimeout: 0,
       async fetch(request) {
         const url = new URL(request.url);
@@ -101,7 +141,9 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
         if (url.pathname !== `/${route}/responses` || request.method !== 'POST' || !native || busy) return new Response(null, { status: 409 });
         if (count >= maxAdmissions) {
           const requestId = `${prefix}:forward:${count + 1}`;
-          write({ type: 'forward', receipt: { request_id: requestId }, http_status: 429 });
+          write({ type: 'forward', receipt: { schema_version: 1, request_id: requestId,
+            code: 'capacity_unavailable', stage: 'pre_admission', disposition: 'refused',
+            retry: 'new_authorized_attempt', provider_delivery: 'not_forwarded' }, http_status: 429 });
           closed = true;
           return Response.json({ error: { message: 'Admission limit exhausted; do not retry' } }, { status: 429 });
         }
@@ -110,6 +152,18 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
         try {
           const body = new Uint8Array(await request.arrayBuffer());
           if (body.byteLength > MAX_BODY) return new Response(null, { status: 413 });
+          try {
+            await renewLease();
+          } catch (error) {
+            const normalized = error instanceof FxBrokerError
+              ? safeRefusal(error)
+              : { code: preAdmissionError(error).code, stage: 'pre_admission' as const,
+                  disposition: 'refused' as const, retry: 'new_authorized_attempt' as const,
+                  provider_delivery: 'not_forwarded' as const };
+            write({ type: 'forward', receipt: { ...normalized, request_id: requestId }, http_status: 409 });
+            closed = true;
+            return Response.json({ error: { message: 'Broker admission refused; do not retry' } }, { status: 409 });
+          }
           const result = await broker.forward({ ...fence, request_id: requestId, lease_id: receipt.lease_id,
             capability_token: token, expected_lease_revision: receipt.lease_revision, owner: commandOwner,
             native, target: authority.target, operation: 'inference', body, headers: {} }, {
@@ -138,14 +192,14 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
       executionAbort.abort();
       closed = true;
       server.stop(true);
+      if (timer) clearTimeout(timer);
+      await renewal?.catch(() => {});
       try {
         receipt = await broker.release({ ...fence, request_id: `${prefix}:release`, lease_id: receipt.lease_id,
           capability_token: token, expected_lease_revision: receipt.lease_revision, owner: commandOwner });
         write({ type: 'released', receipt });
       } finally { releaseLock(); }
     };
-    const expire = () => { void close?.().finally(() => { close = undefined; lines.close(); process.stdin.destroy(); }); };
-    timer = setTimeout(expire, Math.max(1, Number(input.deadline_ms) - Date.now()));
     write({ type: 'prepared', receipt, evidence: authority.evidence, routing_source_revision: routingSourceRevision,
       private_transport: { catalog_url: `http://127.0.0.1:${server.port}/${route}/models`, chat_url: `http://127.0.0.1:${server.port}/${route}/responses` } });
     for (;;) {
@@ -161,6 +215,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
         receipt = await broker.activate({ ...fence, request_id: `${prefix}:activate`, lease_id: receipt.lease_id,
           capability_token: token, expected_lease_revision: receipt.lease_revision, owner: commandOwner, native });
         write({ type: 'active', receipt });
+        scheduleRenewal();
       } else if (command?.action === 'release' && Object.keys(command).length === 1) break;
       else invalid();
     }

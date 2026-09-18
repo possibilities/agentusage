@@ -95,10 +95,15 @@ class FakeAuthority implements FxBrokerAuthority {
   async inspect(
     provider: FxBrokerProvider,
     accountKey: string,
+    admission?: { deadline_ms: number; signal?: AbortSignal },
   ): Promise<FxBrokerAuthorityAccount> {
+    if (admission?.signal?.aborted)
+      throw new FxAuthorityPreAdmissionError('cancelled');
     if (this.inspectError) throw this.inspectError;
     this.inspectHook?.();
     if (this.inspectDelayMs) await Bun.sleep(this.inspectDelayMs);
+    if (admission?.signal?.aborted)
+      throw new FxAuthorityPreAdmissionError('cancelled');
     if (this.inspectOverride) return structuredClone(this.inspectOverride);
     const account = this.accounts.get(accountKey);
     if (!account || account.provider !== provider) throw new Error('missing fake account');
@@ -192,8 +197,9 @@ async function activeLease(
   accountKey: string,
   requestId: string,
   now: number,
+  overrides: Partial<FxBrokerPrepareCommand> = {},
 ) {
-  const command = prepareCommand(broker, provider, accountKey, requestId, now);
+  const command = prepareCommand(broker, provider, accountKey, requestId, now, overrides);
   const prepared = await broker.prepare(command);
   const handoff = prepared.handoff!;
   const native = {
@@ -315,7 +321,7 @@ describe('Fx credential broker', () => {
   test('pins provider/account generations while AgentUsage alone rotates credentials', async () => {
     const fixture = fixtureState();
     const authority = new FakeAuthority();
-    const now = 1_800_000_100_000;
+    let now = 1_800_000_100_000;
     const broker = await FxCredentialBroker.open(fixture.paths, authority, {
       clock: () => now,
     });
@@ -339,6 +345,7 @@ describe('Fx credential broker', () => {
     authority.accounts.get('codex-1')!.credential_revision = 2;
 
     authority.accounts.get('codex-1')!.account_generation += 1;
+    now += 1;
     await expectRefusal(
       broker.renew({
         schema_version: 1,
@@ -349,6 +356,7 @@ describe('Fx credential broker', () => {
         expected_lease_revision: lease.activated.lease_revision,
         owner,
         requested_ttl_ms: 60_000,
+        execution_deadline_ms: now + 5 * 60_000,
       }),
       'generation_mismatch',
     );
@@ -360,6 +368,7 @@ describe('Fx credential broker', () => {
       capability_capture_id: 'grok-capture-2',
       capability_digest: sha('grok:grok-test:capabilities:r2'),
     };
+    now += 1;
     await expectRefusal(
       broker.renew({
         schema_version: 1,
@@ -370,6 +379,7 @@ describe('Fx credential broker', () => {
         expected_lease_revision: other.activated.lease_revision,
         owner,
         requested_ttl_ms: 60_000,
+        execution_deadline_ms: now + 5 * 60_000,
       }),
       'capability_stale',
     );
@@ -510,7 +520,7 @@ describe('Fx credential broker', () => {
   test('short renewal is valid and forwarding snapshots mutable request bytes', async () => {
     const fixture = fixtureState();
     const authority = new FakeAuthority();
-    const now = 1_800_000_350_000;
+    let now = 1_800_000_350_000;
     const broker = await FxCredentialBroker.open(fixture.paths, authority, {
       clock: () => now,
     });
@@ -518,6 +528,7 @@ describe('Fx credential broker', () => {
     const pending = await broker.prepare(
       prepareCommand(broker, 'codex', 'codex-2', 'short-pending', now),
     );
+    now += 1;
     const pendingRenewed = await broker.renew({
       schema_version: 1,
       request_id: 'short-pending-renewal',
@@ -527,6 +538,7 @@ describe('Fx credential broker', () => {
       expected_lease_revision: pending.receipt.lease_revision,
       owner,
       requested_ttl_ms: 1_000,
+      execution_deadline_ms: now + 5 * 60_000,
     });
     expect(pendingRenewed.expires_at_ms).toBe(now + 1_000);
     expect(pendingRenewed.activate_before_ms).toBe(now + 1_000);
@@ -560,6 +572,7 @@ describe('Fx credential broker', () => {
       expected_lease_revision: active.activated.lease_revision,
       owner,
       requested_ttl_ms: 1_000,
+      execution_deadline_ms: now + 5 * 60_000,
     } as const satisfies FxBrokerRenewCommand;
     const mutableRenewCommand: FxBrokerRenewCommand = { ...renewCommand };
     const renewal = broker.renew(mutableRenewCommand);
@@ -586,6 +599,57 @@ describe('Fx credential broker', () => {
     const replay = await broker.forward(command);
     expect(replay.replayed).toBe(true);
     expect(authority.forwards).toBe(1);
+  });
+
+  test('rolling renewal carries one exact binding beyond five minutes and still refuses expiry or cancellation', async () => {
+    const fixture = fixtureState();
+    const authority = new FakeAuthority();
+    let now = 1_800_000_375_000;
+    const broker = await FxCredentialBroker.open(fixture.paths, authority, { clock: () => now });
+    const lease = await activeLease(broker, 'grok', 'grok-1', 'rolling', now, {
+      requested_ttl_ms: 5 * 60_000,
+    });
+    const originalDeadline = lease.activated.execution_deadline_ms;
+    now += 4 * 60_000;
+    const renewed = await broker.renew({
+      schema_version: 1, request_id: 'rolling-renew-1', expected_broker_incarnation: broker.incarnation,
+      lease_id: lease.activated.lease_id, capability_token: lease.handoff.capability_token,
+      expected_lease_revision: lease.activated.lease_revision, owner, requested_ttl_ms: 5 * 60_000,
+      execution_deadline_ms: now + 5 * 60_000,
+    });
+    expect(renewed.binding_id).toBe(lease.activated.binding_id);
+    expect(renewed.target).toEqual(lease.activated.target);
+    expect(renewed.execution_deadline_ms).toBeGreaterThan(originalDeadline);
+
+    now = originalDeadline + 60_000;
+    const forward = forwardCommand(broker, lease, 'rolling-after-original-deadline');
+    forward.expected_lease_revision = renewed.lease_revision;
+    expect((await broker.forward(forward)).receipt.disposition).toBe('forwarded');
+
+    now = renewed.execution_deadline_ms + 1;
+    await expectRefusal(broker.renew({
+      schema_version: 1, request_id: 'rolling-after-expiry', expected_broker_incarnation: broker.incarnation,
+      lease_id: lease.activated.lease_id, capability_token: lease.handoff.capability_token,
+      expected_lease_revision: renewed.lease_revision, owner, requested_ttl_ms: 5 * 60_000,
+      execution_deadline_ms: now + 5 * 60_000,
+    }), 'expired');
+
+    const cancelledFixture = fixtureState();
+    const cancelledAuthority = new FakeAuthority();
+    let cancelledNow = 1_800_000_975_000;
+    const cancelledBroker = await FxCredentialBroker.open(cancelledFixture.paths, cancelledAuthority, { clock: () => cancelledNow });
+    const cancellable = await activeLease(cancelledBroker, 'codex', 'codex-1', 'cancelled-renewal', cancelledNow, {
+      requested_ttl_ms: 5 * 60_000,
+    });
+    cancelledNow += 1;
+    const abort = new AbortController();
+    abort.abort();
+    await expectRefusal(cancelledBroker.renew({
+      schema_version: 1, request_id: 'cancelled-renewal-renew', expected_broker_incarnation: cancelledBroker.incarnation,
+      lease_id: cancellable.activated.lease_id, capability_token: cancellable.handoff.capability_token,
+      expected_lease_revision: cancellable.activated.lease_revision, owner, requested_ttl_ms: 5 * 60_000,
+      execution_deadline_ms: cancelledNow + 5 * 60_000,
+    }, { signal: abort.signal }), 'cancelled');
   });
 
   test('restart fences capabilities and forwarding loss never repeats provider admission', async () => {

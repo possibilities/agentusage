@@ -46,3 +46,6 @@ accepted ownership rationale into another parallel specification.
 - [0011: Publish reviewed live Grok catalog evidence](0011-publish-reviewed-live-grok-catalog.md)
   captures authenticated Grok catalogs as a sanitized last-good projection and
   separates complete visibility, reviewed routability and structured drift.
+- [0012: Renew active Fx execution leases](0012-renew-active-fx-execution-leases.md)
+  replaces the fixed total-session deadline with a rolling five-minute
+  authorization horizon while preserving every provider-admission fence.

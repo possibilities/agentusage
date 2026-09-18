@@ -67,6 +67,7 @@ export interface FxBrokerRenewCommand extends BrokerCommand {
   expected_lease_revision: number;
   owner: FxBrokerOwner;
   requested_ttl_ms: number;
+  execution_deadline_ms: number;
 }
 
 export interface FxBrokerReleaseCommand extends BrokerCommand {

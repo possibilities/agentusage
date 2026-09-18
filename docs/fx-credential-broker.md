@@ -43,8 +43,9 @@ credential material.
    It records an uncertain admission receipt before calling the authority. The
    authority alone resolves and refreshes credentials. A lost response is never
    retried automatically.
-4. `renew` extends the lease only within its execution deadline. `release` is
-   the normal consumer terminal transition; AgentUsage may use the separate
+4. `renew` revalidates the exact binding and advances both the lease expiry and
+   execution deadline by at most five minutes from the current time. `release`
+   is the normal consumer terminal transition; AgentUsage may use the separate
    privileged `revoke` operation independently.
 5. Time expiry and terminal states are absorbing. Opening a new broker
    incarnation revokes all live leases and invalidates their capabilities.
@@ -76,9 +77,10 @@ are intentionally not durable.
 bounded Codex execution. It takes a schema-1 selection (account key, model,
 effort, service tier and either an exact routing source revision or the explicit
 `broker_prepare` mode), host/execution owner
-and deadline on stdin; returns a prepared receipt and **private** random loopback
-URLs; accepts exact native process/build/session activation; and releases on EOF,
-explicit release or deadline. This command is a host interface, not a manager
+and initial deadline on stdin; returns a prepared receipt and **private** random
+loopback URLs; accepts exact native process/build/session activation; renews the
+active exact binding before expiry and provider submission; and releases on EOF
+or explicit release. This command is a host interface, not a manager
 JSON diagnostic: never display or persist its raw stdout.
 
 The managed authority requires fresh atomic quota evidence, a complete binding

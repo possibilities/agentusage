@@ -576,28 +576,40 @@ export class FxCredentialBroker {
     });
   }
 
-  async renew(command: FxBrokerRenewCommand): Promise<FxBrokerBindingReceipt> {
+  async renew(
+    command: FxBrokerRenewCommand,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<FxBrokerBindingReceipt> {
     if (
       !Number.isSafeInteger(command.requested_ttl_ms) ||
       command.requested_ttl_ms < MIN_TTL_MS ||
       command.requested_ttl_ms > MAX_TTL_MS
     )
       throw refusal(command.request_id, 'invalid_request', 'Invalid lease TTL');
+    positiveInteger(command.execution_deadline_ms, 'execution deadline');
     return this.changeLease('renew', command, async (lease, recheckExpiry, snapshot) => {
       if (lease.state !== 'prepared' && lease.state !== 'active')
         throw refusal(snapshot.request_id, lease.state as 'expired' | 'revoked' | 'released', 'Lease is terminal');
+      const now = this.clock();
+      const deadline = (snapshot as FxBrokerRenewCommand).execution_deadline_ms;
+      if (
+        deadline <= lease.execution_deadline_ms ||
+        deadline > now + MAX_TTL_MS
+      )
+        throw refusal(snapshot.request_id, 'invalid_request', 'Invalid renewal deadline');
       const account = await this.inspectAuthority(
         snapshot.request_id,
         lease.account.provider,
         lease.account.account_key,
-        { deadline_ms: lease.execution_deadline_ms },
+        { deadline_ms: deadline, signal: options.signal },
       );
       recheckExpiry();
       checkAccount(snapshot.request_id, account, lease);
       lease.account.credential_revision = account.credential_revision;
+      lease.execution_deadline_ms = deadline;
       lease.expires_at_ms = Math.min(
         this.clock() + (snapshot as FxBrokerRenewCommand).requested_ttl_ms,
-        lease.execution_deadline_ms,
+        deadline,
       );
       if (lease.state === 'prepared')
         lease.activate_before_ms = Math.min(
@@ -939,6 +951,7 @@ export class FxCredentialBroker {
               'expected_lease_revision',
               'owner',
               'requested_ttl_ms',
+              'execution_deadline_ms',
             ]
           : [
               'schema_version',

@@ -75,7 +75,7 @@ export function validateGrokCapability(catalog: Uint8Array, modalities: Uint8Arr
 /** A bridge pins one fresh credential fingerprint. Refresh requires a new routing decision. */
 export class GrokFxAuthority implements FxBrokerAuthority {
   private constructor(readonly paths: StatePaths, readonly target: FxBrokerTarget, readonly accountKey:string,
-    readonly catalog:Uint8Array, readonly modalities:Uint8Array, readonly capturedAt:number,
+    readonly catalog:Uint8Array, readonly modalities:Uint8Array, private validatedAt:number,
     readonly evidence:RoutingEvidenceProjection, private readonly fingerprint:string, private readonly env:Env) {}
   static async create(paths:StatePaths, selection:{account_key:string;model:string;effort:string;service_tier:string|null;expected_source_revision:number|string},env:Env=process.env):Promise<GrokFxAuthority> {
     return withRoutingEvidenceSnapshot(paths,evidence =>
@@ -110,19 +110,33 @@ export class GrokFxAuthority implements FxBrokerAuthority {
     return {provider:'grok',account_key:this.accountKey,account_generation:Number(this.accountKey.split('-')[1]),provider_generation:1,credential_revision:1,
       enabled:true,auth_available:true,target:this.target,activation_supported:true};
   }
-  private async account(evidence:RoutingEvidenceProjection):Promise<StoredAccount> {
+  private async account(evidence:RoutingEvidenceProjection, deadline=Date.now()+FX_ADMISSION_SNAPSHOT_WAIT_MS, externalSignal?:AbortSignal):Promise<StoredAccount> {
     if(evidence.provider_source_revisions.grok<this.evidence.provider_source_revisions.grok) fail('source_revision_conflict');
-    if(Date.now()-this.capturedAt>=FRESH_MS) fail('capability_stale');
     requireGrokCapacity(evidence,this.accountKey);
     const account=(await readState(this.paths)).accounts.find(row=>row.accountKey===this.accountKey);
-    if(!account || !account.enabled || account.credentials.expiresAtMs<=Date.now() || credentialFingerprint(account.credentials.accessToken)!==this.fingerprint) fail('auth_unavailable');
+    if(!account || !account.enabled || account.credentials.expiresAtMs<=deadline || credentialFingerprint(account.credentials.accessToken)!==this.fingerprint) fail('auth_unavailable');
+    if(Date.now()-this.validatedAt>=FRESH_MS) {
+      const remaining=Math.min(20_000,deadline-Date.now());
+      if(remaining<=0) fail('expired');
+      const signal=externalSignal?AbortSignal.any([externalSignal,AbortSignal.timeout(remaining)]):AbortSignal.timeout(remaining);
+      const response=await fetch(providerURL('grok','/v1/models',this.env),{headers:headers(account),redirect:'manual',signal});
+      if(response.status!==200){await response.body?.cancel();fail(`catalog_http_${response.status}`);}
+      const catalog=redact(await readCapped(response,MAX_BYTES,signal),account);
+      const modalitiesURL=this.env.AGENTUSAGE_TEST_GROK_ORIGIN?providerURL('grok','/v1/language-models',this.env):'https://api.x.ai/v1/language-models';
+      const modalityResponse=await fetch(modalitiesURL,{headers:{authorization:`Bearer ${account.credentials.accessToken}`,accept:'application/json'},redirect:'manual',signal});
+      if(modalityResponse.status!==200){await modalityResponse.body?.cancel();fail(`catalog_http_${modalityResponse.status}`);}
+      const modalities=redact(await readCapped(modalityResponse,MAX_BYTES,signal),account);
+      validateGrokCapability(catalog,modalities,this.target.model,this.target.effort);
+      this.validatedAt=Date.now();
+    }
     return account;
   }
   async inspect(provider:'codex'|'grok',key:string,admission?:{deadline_ms:number;signal?:AbortSignal}):Promise<FxBrokerAuthorityAccount> {
     try {
       if(provider!=='grok' || key!==this.accountKey) fail('adapter_unsupported');
       return await withRoutingEvidenceSnapshotForAdmission(this.paths,async evidence=>{
-        const account=await this.account(evidence);
+        const deadline=admission?.deadline_ms??Date.now()+FX_ADMISSION_SNAPSHOT_WAIT_MS;
+        const account=await this.account(evidence,deadline,admission?.signal);
         return {provider:'grok',account_key:key,account_generation:account.ordinal,provider_generation:1,credential_revision:1,
           enabled:true,auth_available:true,target:this.target,activation_supported:true};
       },admission??{deadline_ms:Date.now()+FX_ADMISSION_SNAPSHOT_WAIT_MS});
@@ -140,7 +154,7 @@ export class GrokFxAuthority implements FxBrokerAuthority {
       if(request.operation!=='inference' || !body) fail('target_mismatch');
       const forwardBody=normalizeInferenceBody(body,this.target)??request.body;
       result=await withRoutingEvidenceSnapshotForAdmission(this.paths,async evidence=>{
-        const account=await this.account(evidence);
+        const account=await this.account(evidence,deadline,request.signal);
         const remaining=Math.min(120_000,deadline-Date.now());
         if(remaining<=0) fail('expired');
         if(request.signal?.aborted) fail('cancelled');

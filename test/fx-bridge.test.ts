@@ -32,7 +32,7 @@ test('private bridge fences activation, refuses browser/auth input, bounds failu
   const next=async () => {const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
   const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
   try {
-    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-exec',attempt_id:'test-attempt',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-exec',attempt_id:'test-attempt',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
     const prepared=await next();expect(prepared.type).toBe('prepared');
     const url=prepared.private_transport.chat_url;
     expect(JSON.stringify(prepared.receipt)).not.toContain('access-codex-1');
@@ -46,6 +46,37 @@ test('private bridge fences activation, refuses browser/auth input, bounds failu
     const result=await fetch(url,request);expect(result.status).toBe(429);expect(await result.text()).not.toContain('access-codex-1');
     expect((await next()).type).toBe('forward');
     expect((await fetch(url,request)).status).toBe(403);expect(forwards).toBe(1);
+    child.stdin.end(JSON.stringify({action:'release'})+'\n');
+    expect((await next()).type).toBe('released');expect(await exit).toBe(0);
+  } finally {child.kill('SIGKILL');await exit;server.stop(true);}
+},30_000);
+
+test('renews one exact binding before a slow forward crosses the initial deadline', async () => {
+  const state=fixtureState();await seed(state,[managed()]);
+  writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
+  (await lockFile(state.paths.codexRefreshLock,0))();
+  await seedObservedGrok(state.paths);
+  const evidence=await readRoutingEvidence(state.paths);
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
+    if(new URL(request.url).pathname.endsWith('/models'))return Response.json({models:[{slug:'gpt-test',visibility:'list',supported_in_api:true,supported_reasoning_levels:[{effort:'low'}]}]});
+    await Bun.sleep(1_200);return Response.json({id:'slow-success'});
+  }});
+  const child=spawn(process.execPath,['src/cli.ts','fx-bridge'],{cwd:join(import.meta.dir,'..'),env:{...process.env,...state.env,AGENTUSAGE_TEST_CODEX_ORIGIN:`http://127.0.0.1:${server.port}`},stdio:['pipe','pipe','pipe']});
+  child.stderr.resume();
+  const lines=createInterface({input:child.stdout})[Symbol.asyncIterator]();
+  const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
+  const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
+  try {
+    const initialDeadline=Date.now()+1_000;
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:initialDeadline,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-rolling-exec',attempt_id:'rolling-forward',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    const prepared=await next();expect(prepared.type).toBe('prepared');
+    child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
+    expect((await next()).type).toBe('active');
+    const response=await fetch(prepared.private_transport.chat_url,{method:'POST',body:JSON.stringify({model:'gpt-test',store:false,reasoning:{effort:'low'}})});
+    expect(response.status).toBe(200);expect(Date.now()).toBeGreaterThan(initialDeadline);
+    const renewed=await next();expect(renewed).toMatchObject({type:'renewed',receipt:{request_id:'rolling-forward:renew:1',binding_id:prepared.receipt.binding_id}});
+    expect(renewed.receipt.execution_deadline_ms).toBeGreaterThan(initialDeadline);
+    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:'rolling-forward:forward:1'},http_status:200});
     child.stdin.end(JSON.stringify({action:'release'})+'\n');
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}
@@ -85,7 +116,7 @@ test('prepares a lease before a queued routing-revision publication can advance'
   const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
   const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
   try {
-    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-exec',attempt_id:'revision-gate',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-exec',attempt_id:'revision-gate',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
     const prepared=await next();
     expect(prepared.type).toBe('prepared');
     await publication;await publishPromise;
@@ -115,7 +146,7 @@ test('resolves the current exact revision inside broker preparation after caller
     const child=start();child.stderr.resume();
     const lines=createInterface({input:child.stdout})[Symbol.asyncIterator]();
     const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
-    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:`test-${attempt_id}`,attempt_id,control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision}})+'\n');
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:`test-${attempt_id}`,attempt_id,control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision}})+'\n');
     const line=await lines.next();expect(line.done).toBe(false);
     const result=JSON.parse(line.value!);
     if(result.type==='prepared') child.stdin.end(JSON.stringify({action:'release'})+'\n');
@@ -150,7 +181,7 @@ test('keeps a prepared Grok lease usable across safe newer provider observations
   const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
   const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
   try {
-    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-grok-exec',attempt_id:'provider-scoped-forward',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-grok-exec',attempt_id:'provider-scoped-forward',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
     const prepared=await next();expect(prepared.type).toBe('prepared');
     child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
     expect((await next()).type).toBe('active');
@@ -197,7 +228,7 @@ test('normalizes Fx Grok permission review inference to the pinned task target',
   const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
   const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
   try {
-    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-grok-review',attempt_id:'permission-review',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-grok-review',attempt_id:'permission-review',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
     const prepared=await next();expect(prepared.type).toBe('prepared');
     child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
     expect((await next()).type).toBe('active');
@@ -228,7 +259,7 @@ test('allows bounded tool-use turns beyond eight admissions and reports the term
   const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
   const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
   try {
-    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-admission-limit',attempt_id:'admission-limit',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-admission-limit',attempt_id:'admission-limit',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
     const prepared=await next();expect(prepared.type).toBe('prepared');
     child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
     expect((await next()).type).toBe('active');
@@ -266,7 +297,7 @@ test('lets the Grok execution deadline dominate normal tool-use turns while reta
   const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
   const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
   try {
-    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-grok-admission-limit',attempt_id:'grok-admission-limit',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-grok-admission-limit',attempt_id:'grok-admission-limit',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
     const prepared=await next();expect(prepared.type).toBe('prepared');
     child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
     expect((await next()).type).toBe('active');
@@ -304,7 +335,7 @@ test('bridge preserves a known pre-admission refusal instead of reporting forwar
   const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
   const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
   try {
-    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+60_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-known-refusal',attempt_id:'known-refusal',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-known-refusal',attempt_id:'known-refusal',control_epoch:1},selection:{account_key:'grok-2',model:'grok-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
     const prepared=await next();expect(prepared.type).toBe('prepared');
     child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
     expect((await next()).type).toBe('active');

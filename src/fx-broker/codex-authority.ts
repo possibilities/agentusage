@@ -54,7 +54,7 @@ export function validateCodexCapability(bytes: Uint8Array, model: string, effort
 /** Credentials remain exclusively inside AgentUsage. No refresh or inference retry. */
 export class CodexFxAuthority implements FxBrokerAuthority {
   private constructor(readonly paths: StatePaths, readonly target: FxBrokerTarget,
-    readonly accountKey: string, readonly catalog: Uint8Array, readonly capturedAt: number,
+    readonly accountKey: string, readonly catalog: Uint8Array, private validatedAt: number,
     readonly evidence: RoutingEvidenceProjection, private readonly account: ManagedAccount,
     private readonly env: Env) {}
 
@@ -114,12 +114,27 @@ export class CodexFxAuthority implements FxBrokerAuthority {
   async inspect(provider: 'codex' | 'grok', key: string, admission?: { deadline_ms: number; signal?: AbortSignal }): Promise<FxBrokerAuthorityAccount> {
     try {
       if (provider !== 'codex' || key !== this.accountKey) fail('adapter_unsupported');
-      if (Date.now() - this.capturedAt >= FRESH_MS) fail('capability_stale');
-      return await withRoutingEvidenceSnapshotForAdmission(this.paths, evidence => {
+      const deadline = admission?.deadline_ms ?? Date.now() + FX_ADMISSION_SNAPSHOT_WAIT_MS;
+      return await withRoutingEvidenceSnapshotForAdmission(this.paths, async evidence => {
         if (evidence.provider_source_revisions.codex < this.evidence.provider_source_revisions.codex) fail('source_revision_conflict');
         requireCodexCapacity(evidence, key);
         const account = readPool(this.paths).accounts.find(a => a.key === key);
-        if (!account || account.provider !== 'codex' || account.auth_error || !account.enabled) fail('auth_unavailable');
+        if (!account || account.provider !== 'codex' || account.auth_error || !account.enabled ||
+            account.credentials.expires_at_ms <= deadline) fail('auth_unavailable');
+        if (Date.now() - this.validatedAt >= FRESH_MS) {
+          const remaining = Math.min(20_000, deadline - Date.now());
+          if (remaining <= 0) fail('expired');
+          const signal = admission?.signal
+            ? AbortSignal.any([admission.signal, AbortSignal.timeout(remaining)])
+            : AbortSignal.timeout(remaining);
+          const response = await fetch(providerURL('codex', `/backend-api/codex/models?client_version=${SUPPORTED_COLLECTOR_VERSION}`, this.env), {
+            headers: providerHeaders(account, new Headers({ accept: 'application/json' })), redirect: 'manual', signal,
+          });
+          if (response.status !== 200) { await response.body?.cancel(); fail(`catalog_http_${response.status}`); }
+          const catalog = redact(await readCapped(response, MAX_BYTES, signal), account);
+          validateCodexCapability(catalog, this.target.model, this.target.effort, this.target.service_tier);
+          this.validatedAt = Date.now();
+        }
         return { provider: 'codex' as const, account_key: key, account_generation: account.ordinal, provider_generation: 1,
           credential_revision: account.credentials.generation, enabled: account.enabled, auth_available: true,
           target: this.target, activation_supported: true };

@@ -2,6 +2,10 @@
 
 Status: Accepted
 
+The fixed total-execution deadline in this decision is superseded by
+[ADR 0012](0012-renew-active-fx-execution-leases.md). Five minutes remains the
+rolling authorization horizon.
+
 ## Decision
 
 Extend ADR 0004's broker with `agentusage fx-bridge`, a private stdio consumer
