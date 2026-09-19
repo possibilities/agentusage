@@ -10,6 +10,7 @@ import { withRoutingEvidenceSnapshotForAdmission } from '../routing-evidence/pro
 import type { FxBrokerBindingReceipt, FxBrokerNativeBinding, FxBrokerOwner } from './types.ts';
 import { preAdmissionError } from './authority-error.ts';
 import {
+  FX_MAX_PROVIDER_ADMISSIONS,
   FX_MIN_FORWARD_AUTHORITY_MS,
   FX_RENEW_BEFORE_EXPIRY_MS,
   FX_ROLLING_LEASE_MS,
@@ -17,8 +18,6 @@ import {
 
 const MAX_LINE = 16 * 1024;
 const MAX_BODY = 1024 * 1024;
-const MAX_CODEX_ADMISSIONS = 32;
-const MAX_GROK_ADMISSIONS = 256;
 const BROKER_PREPARE_REVISION = 'broker_prepare';
 function invalid(): never { throw new AccountError('invalid_request', 'Invalid broker bridge request', 400); }
 const id = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(v);
@@ -87,7 +86,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     const route = randomBytes(32).toString('hex');
     let count = 0;
     let renewalCount = 0;
-    const maxAdmissions = authority instanceof GrokFxAuthority ? MAX_GROK_ADMISSIONS : MAX_CODEX_ADMISSIONS;
+    const maxAdmissions = FX_MAX_PROVIDER_ADMISSIONS;
     let busy = false;
     let closed = false;
     let renewal: Promise<void> | undefined;

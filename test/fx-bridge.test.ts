@@ -8,6 +8,7 @@ import { readPool } from '../src/accounts/store.ts';
 import { buildCodexObservation } from '../src/codex/observe.ts';
 import { buildGrokObservation } from '../src/grok/observe.ts';
 import { readFxBrokerState } from '../src/fx-broker/store.ts';
+import { FX_MAX_PROVIDER_ADMISSIONS } from '../src/fx-broker/runtime-bounds.ts';
 import { readRoutingEvidence } from '../src/routing-evidence/index.ts';
 import { nextCodexSourceRevision, nextGrokSourceRevision, readCodexObservation, readGrokObservation } from '../src/observe.ts';
 import { writeSidecar } from '../src/sidecar.ts';
@@ -242,7 +243,7 @@ test('normalizes Fx Grok permission review inference to the pinned task target',
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}
 },30_000);
 
-test('allows bounded tool-use turns beyond eight admissions and reports the terminal limit', async () => {
+test('keeps the finite provider-admission ceiling above productive two-hour turns', async () => {
   const state=fixtureState();await seed(state,[managed()]);
   writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
   (await lockFile(state.paths.codexRefreshLock,0))();
@@ -264,21 +265,22 @@ test('allows bounded tool-use turns beyond eight admissions and reports the term
     child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
     expect((await next()).type).toBe('active');
     const request={method:'POST',body:JSON.stringify({model:'gpt-test',store:false,reasoning:{effort:'low'}})};
-    for(let admission=1;admission<=32;admission++) {
+    expect(FX_MAX_PROVIDER_ADMISSIONS).toBe(1024);
+    for(let admission=1;admission<=FX_MAX_PROVIDER_ADMISSIONS;admission++) {
       expect((await fetch(prepared.private_transport.chat_url,request)).status).toBe(200);
       expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`admission-limit:forward:${admission}`},http_status:200});
     }
     const refused=await fetch(prepared.private_transport.chat_url,request);
     expect(refused.status).toBe(429);
     expect(await refused.json()).toEqual({error:{message:'Admission limit exhausted; do not retry'}});
-    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:'admission-limit:forward:33'},http_status:429});
-    expect(forwards).toBe(32);
+    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`admission-limit:forward:${FX_MAX_PROVIDER_ADMISSIONS+1}`},http_status:429});
+    expect(forwards).toBe(FX_MAX_PROVIDER_ADMISSIONS);
     child.stdin.end(JSON.stringify({action:'release'})+'\n');
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}
-},30_000);
+},60_000);
 
-test('lets the Grok execution deadline dominate normal tool-use turns while retaining a high hard limit', async () => {
+test('applies the same generous finite admission ceiling to Grok', async () => {
   const state=fixtureState();await seed(state,[managed()]);
   writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
   (await lockFile(state.paths.codexRefreshLock,0))();
@@ -302,19 +304,19 @@ test('lets the Grok execution deadline dominate normal tool-use turns while reta
     child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
     expect((await next()).type).toBe('active');
     const request={method:'POST',body:JSON.stringify({model:'grok-test',store:false,reasoning:{effort:'low'}})};
-    for(let admission=1;admission<=256;admission++) {
+    for(let admission=1;admission<=FX_MAX_PROVIDER_ADMISSIONS;admission++) {
       expect((await fetch(prepared.private_transport.chat_url,request)).status).toBe(200);
       expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`grok-admission-limit:forward:${admission}`},http_status:200});
     }
     const refused=await fetch(prepared.private_transport.chat_url,request);
     expect(refused.status).toBe(429);
     expect(await refused.json()).toEqual({error:{message:'Admission limit exhausted; do not retry'}});
-    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:'grok-admission-limit:forward:257'},http_status:429});
-    expect(forwards).toBe(256);
+    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`grok-admission-limit:forward:${FX_MAX_PROVIDER_ADMISSIONS+1}`},http_status:429});
+    expect(forwards).toBe(FX_MAX_PROVIDER_ADMISSIONS);
     child.stdin.end(JSON.stringify({action:'release'})+'\n');
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}
-},30_000);
+},60_000);
 
 test('bridge preserves a known pre-admission refusal instead of reporting forward_unknown', async () => {
   const state=fixtureState();await seed(state,[managed()]);

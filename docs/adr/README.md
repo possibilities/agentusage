@@ -52,3 +52,6 @@ accepted ownership rationale into another parallel specification.
 - [0013: Align the Fx provider response budget](0013-align-fx-provider-response-budget.md)
   removes the hidden two-minute response ceiling while keeping each admission
   inside one rolling five-minute authorization window.
+- [0014: Align the Fx provider-admission ceiling](0014-align-fx-admission-ceiling.md)
+  raises the shared finite bridge cap so AgentFX's two-hour absolute prompt
+  ceiling dominates ordinary productive Codex and Grok turns.

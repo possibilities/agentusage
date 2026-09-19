@@ -1,6 +1,6 @@
 # 0009: Mediate bounded Fx Codex and Grok executions
 
-Status: Accepted
+Status: Superseded in part by [ADR 0014](0014-align-fx-admission-ceiling.md).
 
 The fixed total-execution deadline in this decision is superseded by
 [ADR 0012](0012-renew-active-fx-execution-leases.md). Five minutes remains the

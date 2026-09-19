@@ -79,8 +79,11 @@ effort, service tier and either an exact routing source revision or the explicit
 `broker_prepare` mode), host/execution owner
 and initial deadline on stdin; returns a prepared receipt and **private** random
 loopback URLs; accepts exact native process/build/session activation; renews the
-active exact binding before expiry and provider submission; and releases on EOF
-or explicit release. This command is a host interface, not a manager
+active exact binding before expiry and provider submission; permits at most
+1,024 provider admissions as a defense-in-depth ceiling; and releases on EOF or
+explicit release. The rolling five-minute lease and finite provider-response
+budget remain independent of AgentFX's twenty-minute idle and two-hour absolute
+prompt deadlines. This command is a host interface, not a manager
 JSON diagnostic: never display or persist its raw stdout.
 
 The managed authority requires fresh atomic quota evidence, a complete binding

@@ -21,6 +21,12 @@ export const FX_PROVIDER_REQUEST_BUDGET_MS =
 export const FX_MIN_FORWARD_AUTHORITY_MS =
   FX_PROVIDER_REQUEST_BUDGET_MS + FX_PROVIDER_RESPONSE_SAFETY_MS;
 
+/**
+ * Defense-in-depth cap for one bridge lifetime. AgentFX's two-hour absolute
+ * prompt ceiling should dominate ordinary productive turns before this does.
+ */
+export const FX_MAX_PROVIDER_ADMISSIONS = 1024;
+
 /** Bound a provider response by both policy and its admitted lease deadline. */
 export function fxProviderRequestBudgetMs(
   executionDeadlineMs: number,
