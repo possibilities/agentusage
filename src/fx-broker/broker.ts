@@ -27,6 +27,11 @@ import {
   FX_BROKER_SCHEMA_VERSION,
 } from './types.ts';
 import { FxAuthorityPreAdmissionError, preAdmissionError } from './authority-error.ts';
+import {
+  FxAuthorityResponseError,
+  validProviderErrorCode,
+  validProviderHttpStatus,
+} from './provider-failure.ts';
 
 const MAX_COMMAND_BYTES = 16 * 1024;
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -158,7 +163,15 @@ function refusal(
   code: FxBrokerRefusal['code'],
   message: string,
   options: Partial<
-    Pick<FxBrokerRefusal, 'stage' | 'disposition' | 'retry' | 'provider_delivery'>
+    Pick<
+      FxBrokerRefusal,
+      | 'stage'
+      | 'disposition'
+      | 'retry'
+      | 'provider_delivery'
+      | 'provider_http_status'
+      | 'provider_error_code'
+    >
   > = {},
 ): FxBrokerError {
   const disposition = options.disposition ?? 'refused';
@@ -170,6 +183,8 @@ function refusal(
     disposition,
     retry: options.retry ?? 'new_authorized_attempt',
     provider_delivery: options.provider_delivery ?? 'not_forwarded',
+    provider_http_status: options.provider_http_status ?? null,
+    provider_error_code: options.provider_error_code ?? null,
     message,
   });
 }
@@ -342,6 +357,12 @@ export class FxCredentialBroker {
         }
       }
       for (const pending of state.operations) {
+        if (pending.kind === 'forward') {
+          if (!Object.hasOwn(pending.result, 'provider_http_status'))
+            pending.result.provider_http_status = null;
+          if (!Object.hasOwn(pending.result, 'provider_error_code'))
+            pending.result.provider_error_code = null;
+        }
         if (pending.status === 'outcome_unknown' && pending.kind === 'forward') {
           pending.result = {
             ...pending.result,
@@ -807,6 +828,8 @@ export class FxCredentialBroker {
         lease_revision: lease.lease_revision,
         disposition: 'outcome_unknown',
         provider_delivery: 'may_have_forwarded',
+        provider_http_status: null,
+        provider_error_code: null,
       };
       const durable: DurableFxBrokerOperation = {
         request_id: command.request_id,
@@ -846,6 +869,18 @@ export class FxCredentialBroker {
           persist();
           throw known;
         }
+        const providerHttpStatus = error instanceof FxAuthorityResponseError
+          ? error.provider_http_status
+          : null;
+        const providerErrorCode = error instanceof FxAuthorityResponseError
+          ? error.provider_error_code
+          : null;
+        durable.result = structuredClone({
+          ...uncertainReceipt,
+          provider_http_status: providerHttpStatus,
+          provider_error_code: providerErrorCode,
+        }) as unknown as Record<string, unknown>;
+        persist();
         throw refusal(
           command.request_id,
           'refresh_outcome_unknown',
@@ -855,9 +890,24 @@ export class FxCredentialBroker {
             stage: 'post_admission',
             retry: 'same_command',
             provider_delivery: 'may_have_forwarded',
+            provider_http_status: providerHttpStatus,
+            provider_error_code: providerErrorCode,
           },
         );
       }
+      const providerHttpStatus = validProviderHttpStatus(forwarded.response?.status)
+        ? forwarded.response.status
+        : null;
+      const providerErrorCode = providerHttpStatus !== null && providerHttpStatus >= 400 &&
+        validProviderErrorCode(forwarded.provider_error_code)
+        ? forwarded.provider_error_code
+        : null;
+      durable.result = structuredClone({
+        ...uncertainReceipt,
+        provider_http_status: providerHttpStatus,
+        provider_error_code: providerErrorCode,
+      }) as unknown as Record<string, unknown>;
+      persist();
       if (
         forwarded.account_generation !== lease.account.account_generation ||
         forwarded.provider_generation !== lease.account.provider_generation
@@ -870,6 +920,8 @@ export class FxCredentialBroker {
             disposition: 'outcome_unknown',
             retry: 'none',
             provider_delivery: 'may_have_forwarded',
+            provider_http_status: providerHttpStatus,
+            provider_error_code: providerErrorCode,
           },
         );
       if (
@@ -884,17 +936,23 @@ export class FxCredentialBroker {
             disposition: 'outcome_unknown',
             retry: 'none',
             provider_delivery: 'may_have_forwarded',
+            provider_http_status: providerHttpStatus,
+            provider_error_code: providerErrorCode,
           },
         );
       const response = this.validateResponse(
         command.request_id,
         forwarded.response,
+        providerHttpStatus,
+        providerErrorCode,
       );
       lease.account.credential_revision = forwarded.credential_revision;
       const appliedReceipt: FxBrokerForwardResult['receipt'] = {
         ...uncertainReceipt,
         disposition: 'forwarded',
         provider_delivery: 'forwarded',
+        provider_http_status: response.status,
+        provider_error_code: providerErrorCode,
       };
       durable.status = 'applied';
       durable.result = structuredClone(appliedReceipt) as unknown as Record<string, unknown>;
@@ -1098,6 +1156,8 @@ export class FxCredentialBroker {
   private validateResponse(
     requestId: string,
     response: { status: number; headers: Record<string, string>; body: Uint8Array },
+    providerHttpStatus: number | null,
+    providerErrorCode: FxBrokerForwardResult['receipt']['provider_error_code'],
   ): { status: number; headers: Record<string, string>; body: Uint8Array } {
     if (
       !Number.isInteger(response.status) ||
@@ -1114,6 +1174,8 @@ export class FxCredentialBroker {
           disposition: 'outcome_unknown',
           retry: 'none',
           provider_delivery: 'may_have_forwarded',
+          provider_http_status: providerHttpStatus,
+          provider_error_code: providerErrorCode,
         },
       );
     const headers: Record<string, string> = {};

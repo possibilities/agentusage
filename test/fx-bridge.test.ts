@@ -25,7 +25,7 @@ test('private bridge fences activation, refuses browser/auth input, bounds failu
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
     if (new URL(request.url).pathname.endsWith('/models')) return Response.json({models:[{slug:'gpt-test',visibility:'list',supported_in_api:true,supported_reasoning_levels:[{effort:'low'}]}]});
     forwards++;expect(request.headers.get('authorization')).toBe('Bearer access-codex-1');
-    return new Response('access-codex-1',{status:429});
+    return Response.json({error:{code:'PermissionDenied',message:'access-codex-1 PRIVATE_PROVIDER_TEXT'}},{status:403});
   }});
   const child=spawn(process.execPath,['src/cli.ts','fx-bridge'],{cwd:join(import.meta.dir,'..'),env:{...process.env,...state.env,AGENTUSAGE_TEST_CODEX_ORIGIN:`http://127.0.0.1:${server.port}`},stdio:['pipe','pipe','pipe']});
   child.stderr.resume();
@@ -44,9 +44,51 @@ test('private bridge fences activation, refuses browser/auth input, bounds failu
     child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
     const active=await next();expect(active.type).toBe('active');
     const request={method:'POST',body:JSON.stringify({model:'gpt-test',store:false,reasoning:{effort:'low'}})};
-    const result=await fetch(url,request);expect(result.status).toBe(429);expect(await result.text()).not.toContain('access-codex-1');
-    expect((await next()).type).toBe('forward');
+    const result=await fetch(url,request);expect(result.status).toBe(403);expect(await result.text()).not.toContain('access-codex-1');
+    expect(await next()).toMatchObject({type:'forward',http_status:403,receipt:{
+      provider_http_status:403,provider_error_code:'permission_denied',
+    }});
     expect((await fetch(url,request)).status).toBe(403);expect(forwards).toBe(1);
+    child.stdin.end(JSON.stringify({action:'release'})+'\n');
+    expect((await next()).type).toBe('released');expect(await exit).toBe(0);
+    const operation=readFxBrokerState(state.paths).operations.find(row=>row.request_id==='test-attempt:forward:1');
+    expect(operation).toMatchObject({status:'applied',result:{provider_http_status:403,provider_error_code:'permission_denied'}});
+    expect(JSON.stringify(operation)).not.toContain('PRIVATE_PROVIDER_TEXT');
+  } finally {child.kill('SIGKILL');await exit;server.stop(true);}
+},30_000);
+
+test('bridge retains a 403 after malformed response-body handling without retaining the body', async () => {
+  const state=fixtureState();await seed(state,[managed()]);
+  writeSidecar(state.paths.codexObservation,buildCodexObservation(readPool(state.paths).accounts,Date.now()));
+  (await lockFile(state.paths.codexRefreshLock,0))();
+  await seedObservedGrok(state.paths);
+  const evidence=await readRoutingEvidence(state.paths);
+  const secret='PRIVATE_MALFORMED_PROVIDER_BODY';
+  const malformed=new Uint8Array([0xff,...new TextEncoder().encode(secret)]);
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request) {
+    if(new URL(request.url).pathname.endsWith('/models'))return Response.json({models:[{slug:'gpt-test',visibility:'list',supported_in_api:true,supported_reasoning_levels:[{effort:'low'}]}]});
+    return new Response(malformed,{status:403,headers:{'content-type':'application/json'}});
+  }});
+  const child=spawn(process.execPath,['src/cli.ts','fx-bridge'],{cwd:join(import.meta.dir,'..'),env:{...process.env,...state.env,AGENTUSAGE_TEST_CODEX_ORIGIN:`http://127.0.0.1:${server.port}`},stdio:['pipe','pipe','pipe']});
+  child.stderr.resume();
+  const lines=createInterface({input:child.stdout})[Symbol.asyncIterator]();
+  const next=async()=>{const line=await lines.next();expect(line.done).toBe(false);return JSON.parse(line.value!);};
+  const exit=new Promise<number|null>(resolve=>child.once('close',resolve));
+  try {
+    child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-malformed-exec',attempt_id:'malformed-response',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
+    const prepared=await next();expect(prepared.type).toBe('prepared');
+    child.stdin.write(JSON.stringify({action:'activate',native:{process_instance_id:'test-process',fx_build_revision:'test-build',session_id:'test-session'}})+'\n');
+    expect((await next()).type).toBe('active');
+    const response=await fetch(prepared.private_transport.chat_url,{method:'POST',body:JSON.stringify({model:'gpt-test',store:false,reasoning:{effort:'low'}})});
+    expect(response.status).toBe(409);
+    expect(await next()).toMatchObject({type:'forward_unknown',http_status:403,receipt:{
+      request_id:'malformed-response:forward:1',code:'refresh_outcome_unknown',stage:'post_admission',
+      disposition:'outcome_unknown',provider_delivery:'may_have_forwarded',provider_http_status:403,
+      provider_error_code:null,
+    }});
+    const operation=readFxBrokerState(state.paths).operations.find(row=>row.request_id==='malformed-response:forward:1');
+    expect(operation).toMatchObject({status:'outcome_unknown',result:{provider_http_status:403,provider_error_code:null}});
+    expect(JSON.stringify(operation)).not.toContain(secret);
     child.stdin.end(JSON.stringify({action:'release'})+'\n');
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
   } finally {child.kill('SIGKILL');await exit;server.stop(true);}

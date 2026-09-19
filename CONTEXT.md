@@ -67,6 +67,11 @@ owner and native-process fences, expiry, state and digests. The separate private
 handoff capability is never manager or HUD evidence. _Avoid_: credential lease,
 provider token.
 
+**Provider failure diagnostic** — The nullable HTTP status and finite normalized
+error category retained after an Fx provider admission. It never contains a
+response body, provider message, credential, provider account identifier,
+prompt or request content. _Avoid_: provider error text, response excerpt.
+
 **Routing context** — A monotonic, non-secret AgentUsage composition of explicit
 current model/effort/tier, reviewed task-fit and within-provider cost guidance,
 captured native capabilities, public quota, opaque Fx binding receipts and the

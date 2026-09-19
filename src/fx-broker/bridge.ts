@@ -22,8 +22,10 @@ const BROKER_PREPARE_REVISION = 'broker_prepare';
 function invalid(): never { throw new AccountError('invalid_request', 'Invalid broker bridge request', 400); }
 const id = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(v);
 function safeRefusal(error: FxBrokerError) {
-  const { schema_version, request_id, code, stage, disposition, retry, provider_delivery } = error.receipt;
-  return { schema_version, request_id, code, stage, disposition, retry, provider_delivery };
+  const { schema_version, request_id, code, stage, disposition, retry, provider_delivery,
+    provider_http_status, provider_error_code } = error.receipt;
+  return { schema_version, request_id, code, stage, disposition, retry, provider_delivery,
+    provider_http_status, provider_error_code };
 }
 
 /** Private parent/child stdio, one execution and one owned loopback listener.
@@ -100,7 +102,8 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
           const refusal = error instanceof FxBrokerError
             ? safeRefusal(error)
             : { request_id: `${prefix}:renew:${renewalCount}`, code: preAdmissionError(error).code,
-                stage: 'pre_admission', disposition: 'refused', retry: 'new_authorized_attempt', provider_delivery: 'not_forwarded' };
+                stage: 'pre_admission', disposition: 'refused', retry: 'new_authorized_attempt',
+                provider_delivery: 'not_forwarded', provider_http_status: null, provider_error_code: null };
           write({ type: 'lease_refused', receipt: refusal });
           closed = true;
           server.stop(true);
@@ -144,7 +147,8 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
           const requestId = `${prefix}:forward:${count + 1}`;
           write({ type: 'forward', receipt: { schema_version: 1, request_id: requestId,
             code: 'capacity_unavailable', stage: 'pre_admission', disposition: 'refused',
-            retry: 'new_authorized_attempt', provider_delivery: 'not_forwarded' }, http_status: 429 });
+            retry: 'new_authorized_attempt', provider_delivery: 'not_forwarded',
+            provider_http_status: null, provider_error_code: null }, http_status: 429 });
           closed = true;
           return Response.json({ error: { message: 'Admission limit exhausted; do not retry' } }, { status: 429 });
         }
@@ -160,7 +164,8 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
               ? safeRefusal(error)
               : { code: preAdmissionError(error).code, stage: 'pre_admission' as const,
                   disposition: 'refused' as const, retry: 'new_authorized_attempt' as const,
-                  provider_delivery: 'not_forwarded' as const };
+                  provider_delivery: 'not_forwarded' as const, provider_http_status: null,
+                  provider_error_code: null };
             write({ type: 'forward', receipt: { ...normalized, request_id: requestId }, http_status: 409 });
             closed = true;
             return Response.json({ error: { message: 'Broker admission refused; do not retry' } }, { status: 409 });
@@ -182,7 +187,8 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
             return Response.json({ error: { message: 'Broker admission refused; do not retry' } }, { status: error.status });
           }
           write({ type: 'forward_unknown', request_id: requestId,
-            ...(error instanceof FxBrokerError ? { receipt: safeRefusal(error) } : {}) });
+            ...(error instanceof FxBrokerError ? { receipt: safeRefusal(error),
+              http_status: error.receipt.provider_http_status } : {}) });
           // Never retry a lost or refused provider admission, including client retries.
           closed = true;
           return Response.json({ error: { message: 'Broker admission unavailable; do not retry' } }, { status: 409 });

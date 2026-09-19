@@ -56,7 +56,13 @@ partially acquired lock before retrying the fixed lock order. No authority
 callback or provider inference is retried. Known failures before provider
 admission cross the bridge only as a fixed receipt containing `stage`, `code`,
 `disposition`, `retry`, and `provider_delivery`; provider-started uncertainty
-retains `may_have_forwarded` and the existing fail-closed behavior.
+retains `may_have_forwarded` and the existing fail-closed behavior. New forward
+receipts also retain nullable `provider_http_status` and
+`provider_error_code`. The status is an integer from 100 through 599. The code
+is one of seven normalized categories from a finite allowlist; unknown,
+oversized or malformed values become null. Response bodies and arbitrary
+provider text are never durable evidence. Legacy schema-1 receipts without
+these additive fields are accepted and normalized to null when the broker opens.
 
 Every mutating command is bounded to 16 KiB and every request ID is bound to a
 canonical command digest. Provider bodies and responses are bounded to 1 MiB.

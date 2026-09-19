@@ -1,3 +1,5 @@
+import type { FxProviderErrorCode } from './provider-failure.ts';
+
 export const FX_BROKER_SCHEMA_VERSION = 1 as const;
 
 export type FxBrokerProvider = 'codex' | 'grok';
@@ -166,6 +168,8 @@ export interface FxBrokerRefusal {
   disposition: 'refused' | 'outcome_unknown';
   retry: 'none' | 'same_command' | 'new_authorized_attempt';
   provider_delivery: 'not_forwarded' | 'may_have_forwarded';
+  provider_http_status: number | null;
+  provider_error_code: FxProviderErrorCode | null;
   message: string;
 }
 
@@ -184,6 +188,8 @@ export interface FxBrokerForwardResult {
     lease_revision: number;
     disposition: 'forwarded' | 'outcome_unknown';
     provider_delivery: 'forwarded' | 'may_have_forwarded';
+    provider_http_status: number | null;
+    provider_error_code: FxProviderErrorCode | null;
   };
   response: FxBrokerProviderResponse | null;
   replayed: boolean;
@@ -205,6 +211,7 @@ export interface FxBrokerAuthorityForwardResult {
   account_generation: number;
   provider_generation: number;
   credential_revision: number;
+  provider_error_code: FxProviderErrorCode | null;
   response: FxBrokerProviderResponse;
 }
 

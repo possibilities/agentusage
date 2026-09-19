@@ -55,3 +55,6 @@ accepted ownership rationale into another parallel specification.
 - [0014: Align the Fx provider-admission ceiling](0014-align-fx-admission-ceiling.md)
   raises the shared finite bridge cap so AgentFX's two-hour absolute prompt
   ceiling dominates ordinary productive Codex and Grok turns.
+- [0015: Retain bounded Fx provider failure diagnostics](0015-retain-bounded-fx-provider-failure-diagnostics.md)
+  adds safe HTTP status and a finite normalized error category to durable
+  forward receipts without retaining provider bodies or text.

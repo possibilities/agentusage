@@ -13,6 +13,10 @@ import {
 import type { RoutingEvidenceProjection } from '../routing-evidence/types.ts';
 import type { FxBrokerAuthority, FxBrokerAuthorityAccount, FxBrokerTarget } from './types.ts';
 import { preAdmissionError } from './authority-error.ts';
+import {
+  FxAuthorityResponseError,
+  providerErrorCodeFromBody,
+} from './provider-failure.ts';
 import { FX_PROVIDER_REQUEST_BUDGET_MS, fxProviderRequestBudgetMs } from './runtime-bounds.ts';
 
 const MAX_BYTES = 1024 * 1024;
@@ -154,6 +158,7 @@ export class CodexFxAuthority implements FxBrokerAuthority {
           JSON.stringify(request.target) !== JSON.stringify(this.target)) fail('target_mismatch');
       if (request.operation === 'catalog') return { account_generation: binding.account_generation,
         provider_generation: 1, credential_revision: binding.credential_revision,
+        provider_error_code: null,
         response: { status: 200, headers: { 'content-type': 'application/json' }, body: this.catalog } };
       const body = record(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(request.body)));
       const reasoning = record(body?.reasoning);
@@ -182,8 +187,21 @@ export class CodexFxAuthority implements FxBrokerAuthority {
       throw preAdmissionError(error);
     }
     const {account,response,signal} = result;
-    const bytes = redact(await readCapped(response, MAX_BYTES, signal), account);
+    let raw: Uint8Array;
+    try {
+      raw = await readCapped(response, MAX_BYTES, signal);
+    } catch {
+      throw new FxAuthorityResponseError(response.status, null);
+    }
+    const providerErrorCode = response.status === 200 ? null : providerErrorCodeFromBody(raw);
+    let bytes: Uint8Array;
+    try {
+      bytes = redact(raw, account);
+    } catch {
+      throw new FxAuthorityResponseError(response.status, providerErrorCode);
+    }
     return { account_generation: account.ordinal, provider_generation: 1, credential_revision: account.credentials.generation,
+      provider_error_code: providerErrorCode,
       response: { status: response.status, headers: { 'content-type': response.headers.get('content-type') ?? 'application/json' }, body: bytes } };
   }
 }

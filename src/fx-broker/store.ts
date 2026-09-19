@@ -16,6 +16,10 @@ import type {
   FxBrokerOwner,
   FxBrokerTarget,
 } from './types.ts';
+import {
+  validProviderErrorCode,
+  validProviderHttpStatus,
+} from './provider-failure.ts';
 
 export interface DurableFxBrokerLease {
   lease_id: string;
@@ -202,8 +206,12 @@ function validateForwardReceipt(
   const receipt = record(value);
   if (!receipt) return false;
   if (status === 'refused') {
+    const legacy = Object.keys(receipt).length === 8;
+    const diagnostic = Object.keys(receipt).length === 10 &&
+      receipt.provider_http_status === null &&
+      receipt.provider_error_code === null;
     return Boolean(
-      Object.keys(receipt).length === 8 &&
+      (legacy || diagnostic) &&
       receipt.schema_version === 1 &&
       receipt.request_id === requestId &&
       REFUSAL_CODES.has(String(receipt.code)) &&
@@ -214,7 +222,16 @@ function validateForwardReceipt(
       bounded(receipt.message, 256)
     );
   }
-  if (Object.keys(receipt).length !== 7) return false;
+  const legacy = Object.keys(receipt).length === 7;
+  const diagnostic = Object.keys(receipt).length === 9 &&
+    (receipt.provider_http_status === null ||
+      validProviderHttpStatus(receipt.provider_http_status)) &&
+    (receipt.provider_error_code === null ||
+      validProviderErrorCode(receipt.provider_error_code)) &&
+    (receipt.provider_error_code === null ||
+      (validProviderHttpStatus(receipt.provider_http_status) &&
+        receipt.provider_http_status >= 400));
+  if (!legacy && !diagnostic) return false;
   const applied = status === 'applied';
   return Boolean(
     receipt.schema_version === 1 &&

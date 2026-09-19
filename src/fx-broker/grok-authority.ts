@@ -15,6 +15,10 @@ import type { RoutingEvidenceProjection } from '../routing-evidence/types.ts';
 import { sha256 } from './codex-authority.ts';
 import type { FxBrokerAuthority, FxBrokerAuthorityAccount, FxBrokerTarget } from './types.ts';
 import { preAdmissionError } from './authority-error.ts';
+import {
+  FxAuthorityResponseError,
+  providerErrorCodeFromBody,
+} from './provider-failure.ts';
 import { FX_PROVIDER_REQUEST_BUDGET_MS, fxProviderRequestBudgetMs } from './runtime-bounds.ts';
 const FRESH_MS = 300_000;
 const MAX_BYTES = 1024 * 1024;
@@ -170,7 +174,15 @@ export class GrokFxAuthority implements FxBrokerAuthority {
       throw preAdmissionError(error);
     }
     const {account,response,signal}=result;
-    const bytes=redact(await readCapped(response,MAX_BYTES,signal),account);
-    return {account_generation:account.ordinal,provider_generation:1,credential_revision:1,response:{status:response.status,headers:{'content-type':response.headers.get('content-type')??'application/json'},body:bytes}};
+    let raw:Uint8Array;
+    try { raw=await readCapped(response,MAX_BYTES,signal); }
+    catch { throw new FxAuthorityResponseError(response.status,null); }
+    const providerErrorCode=response.status===200?null:providerErrorCodeFromBody(raw);
+    let bytes:Uint8Array;
+    try { bytes=redact(raw,account); }
+    catch { throw new FxAuthorityResponseError(response.status,providerErrorCode); }
+    return {account_generation:account.ordinal,provider_generation:1,credential_revision:1,
+      provider_error_code:providerErrorCode,
+      response:{status:response.status,headers:{'content-type':response.headers.get('content-type')??'application/json'},body:bytes}};
   }
 }

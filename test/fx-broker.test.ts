@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { AccountError } from '../src/accounts/storage.ts';
 import {
@@ -143,6 +143,7 @@ class FakeAuthority implements FxBrokerAuthority {
         account_generation: account.account_generation,
         provider_generation: account.provider_generation,
         credential_revision: account.credential_revision,
+        provider_error_code: null,
         response: {
           status: 200,
           headers: structuredClone(this.responseHeaders),
@@ -674,9 +675,17 @@ describe('Fx credential broker', () => {
     expect(authority.forwards).toBe(1);
 
     const prepared = await broker.prepare(command);
+    const legacy = JSON.parse(readFileSync(fxBrokerStateFile(fixture.paths), 'utf8'));
+    const legacyForward = legacy.operations.find((entry: { request_id: string }) => entry.request_id === 'lost-forward');
+    delete legacyForward.result.provider_http_status;
+    delete legacyForward.result.provider_error_code;
+    writeFileSync(fxBrokerStateFile(fixture.paths), JSON.stringify(legacy));
     const replacement = await FxCredentialBroker.open(fixture.paths, authority, {
       clock: () => now,
     });
+    const migrated = JSON.parse(readFileSync(fxBrokerStateFile(fixture.paths), 'utf8')).operations
+      .find((entry: { request_id: string }) => entry.request_id === 'lost-forward');
+    expect(migrated.result).toMatchObject({provider_http_status:null,provider_error_code:null});
     await expectRefusal(
       broker.get(prepared.receipt.lease_id),
       'broker_unavailable',
