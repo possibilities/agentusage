@@ -9,15 +9,16 @@ import { CodexFxAuthority } from './codex-authority.ts';
 import { withRoutingEvidenceSnapshotForAdmission } from '../routing-evidence/projection.ts';
 import type { FxBrokerBindingReceipt, FxBrokerNativeBinding, FxBrokerOwner } from './types.ts';
 import { preAdmissionError } from './authority-error.ts';
+import { bridgeRuntimeEvidence } from './bridge-runtime.ts';
 import {
+  FX_BRIDGE_MAX_LINE_BYTES,
+  FX_BRIDGE_MAX_REQUEST_BODY_BYTES,
   FX_MAX_PROVIDER_ADMISSIONS,
   FX_MIN_FORWARD_AUTHORITY_MS,
   FX_RENEW_BEFORE_EXPIRY_MS,
   FX_ROLLING_LEASE_MS,
 } from './runtime-bounds.ts';
 
-const MAX_LINE = 16 * 1024;
-const MAX_BODY = 1024 * 1024;
 const BROKER_PREPARE_REVISION = 'broker_prepare';
 function invalid(): never { throw new AccountError('invalid_request', 'Invalid broker bridge request', 400); }
 const id = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(v);
@@ -46,7 +47,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
   try {
     const iterator = lines[Symbol.asyncIterator]();
     const first = await iterator.next();
-    if (first.done || Buffer.byteLength(first.value) > MAX_LINE) invalid();
+    if (first.done || Buffer.byteLength(first.value) > FX_BRIDGE_MAX_LINE_BYTES) invalid();
     const input = record(JSON.parse(first.value));
     const selection = record(input?.selection);
     const owner = record(input?.owner);
@@ -83,6 +84,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     const fence = { schema_version: 1 as const, expected_broker_incarnation: broker.incarnation };
     if (!prepared.handoff) invalid();
     let receipt: FxBrokerBindingReceipt = prepared.receipt;
+    const bridgeRuntime = bridgeRuntimeEvidence();
     let native: FxBrokerNativeBinding | null = null;
     const token = prepared.handoff.capability_token;
     const route = randomBytes(32).toString('hex');
@@ -128,7 +130,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
       })().finally(() => { renewal = undefined; });
       return renewal;
     };
-    server = Bun.serve({ hostname: '127.0.0.1', port: 0, maxRequestBodySize: MAX_BODY,
+    server = Bun.serve({ hostname: '127.0.0.1', port: 0, maxRequestBodySize: FX_BRIDGE_MAX_REQUEST_BODY_BYTES,
       idleTimeout: 0,
       async fetch(request) {
         const url = new URL(request.url);
@@ -148,7 +150,8 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
           write({ type: 'forward', receipt: { schema_version: 1, request_id: requestId,
             code: 'capacity_unavailable', stage: 'pre_admission', disposition: 'refused',
             retry: 'new_authorized_attempt', provider_delivery: 'not_forwarded',
-            provider_http_status: null, provider_error_code: null }, http_status: 429 });
+            provider_http_status: null, provider_error_code: null,
+            admission_count: count, admission_limit: maxAdmissions }, http_status: 429 });
           closed = true;
           return Response.json({ error: { message: 'Admission limit exhausted; do not retry' } }, { status: 429 });
         }
@@ -156,7 +159,7 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
         const requestId = `${prefix}:forward:${++count}`;
         try {
           const body = new Uint8Array(await request.arrayBuffer());
-          if (body.byteLength > MAX_BODY) return new Response(null, { status: 413 });
+          if (body.byteLength > FX_BRIDGE_MAX_REQUEST_BODY_BYTES) return new Response(null, { status: 413 });
           try {
             await renewLease();
           } catch (error) {
@@ -208,11 +211,12 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
       } finally { releaseLock(); }
     };
     write({ type: 'prepared', receipt, evidence: authority.evidence, routing_source_revision: routingSourceRevision,
+      bridge_runtime: bridgeRuntime,
       private_transport: { catalog_url: `http://127.0.0.1:${server.port}/${route}/models`, chat_url: `http://127.0.0.1:${server.port}/${route}/responses` } });
     for (;;) {
       const next = await iterator.next();
       if (next.done) break;
-      if (Buffer.byteLength(next.value) > MAX_LINE) invalid();
+      if (Buffer.byteLength(next.value) > FX_BRIDGE_MAX_LINE_BYTES) invalid();
       const command = record(JSON.parse(next.value));
       if (command?.action === 'activate' && !native && Object.keys(command).sort().join(',') === 'action,native') {
         const value = record(command.native);

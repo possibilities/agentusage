@@ -35,6 +35,15 @@ test('private bridge fences activation, refuses browser/auth input, bounds failu
   try {
     child.stdin.write(JSON.stringify({schema_version:1,deadline_ms:Date.now()+300_000,owner:{host_id:'test-host',host_incarnation:'test-instance',execution_id:'test-exec',attempt_id:'test-attempt',control_epoch:1},selection:{account_key:'codex-1',model:'gpt-test',effort:'low',service_tier:null,expected_source_revision:evidence.source_revision}})+'\n');
     const prepared=await next();expect(prepared.type).toBe('prepared');
+    expect(prepared.bridge_runtime).toMatchObject({schema_version:1,identity:{
+      product:'agentusage',version:'0.1.0',runtime:'bun',runtime_version:Bun.version,
+    },bounds:{max_provider_admissions:1024,max_stdio_line_bytes:16*1024,
+      max_http_request_body_bytes:1024*1024,rolling_lease_ms:5*60_000,
+      provider_request_budget_ms:235_000}});
+    for(const value of ['executable_identity_sha256','source_sha256','build_sha256'])
+      expect(prepared.bridge_runtime.identity[value]).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(prepared.bridge_runtime)).not.toContain(state.root);
+    expect(JSON.stringify(prepared.bridge_runtime)).not.toContain('access-codex-1');
     const url=prepared.private_transport.chat_url;
     expect(JSON.stringify(prepared.receipt)).not.toContain('access-codex-1');
     expect((await fetch(url,{method:'POST',body:'{}'})).status).toBe(409);
@@ -311,11 +320,13 @@ test('keeps the finite provider-admission ceiling above productive two-hour turn
     for(let admission=1;admission<=FX_MAX_PROVIDER_ADMISSIONS;admission++) {
       expect((await fetch(prepared.private_transport.chat_url,request)).status).toBe(200);
       expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`admission-limit:forward:${admission}`},http_status:200});
+      if(admission===35) expect(forwards).toBe(35);
     }
     const refused=await fetch(prepared.private_transport.chat_url,request);
     expect(refused.status).toBe(429);
     expect(await refused.json()).toEqual({error:{message:'Admission limit exhausted; do not retry'}});
-    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`admission-limit:forward:${FX_MAX_PROVIDER_ADMISSIONS+1}`},http_status:429});
+    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`admission-limit:forward:${FX_MAX_PROVIDER_ADMISSIONS+1}`,
+      admission_count:FX_MAX_PROVIDER_ADMISSIONS,admission_limit:FX_MAX_PROVIDER_ADMISSIONS},http_status:429});
     expect(forwards).toBe(FX_MAX_PROVIDER_ADMISSIONS);
     child.stdin.end(JSON.stringify({action:'release'})+'\n');
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);
@@ -353,7 +364,8 @@ test('applies the same generous finite admission ceiling to Grok', async () => {
     const refused=await fetch(prepared.private_transport.chat_url,request);
     expect(refused.status).toBe(429);
     expect(await refused.json()).toEqual({error:{message:'Admission limit exhausted; do not retry'}});
-    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`grok-admission-limit:forward:${FX_MAX_PROVIDER_ADMISSIONS+1}`},http_status:429});
+    expect(await next()).toMatchObject({type:'forward',receipt:{request_id:`grok-admission-limit:forward:${FX_MAX_PROVIDER_ADMISSIONS+1}`,
+      admission_count:FX_MAX_PROVIDER_ADMISSIONS,admission_limit:FX_MAX_PROVIDER_ADMISSIONS},http_status:429});
     expect(forwards).toBe(FX_MAX_PROVIDER_ADMISSIONS);
     child.stdin.end(JSON.stringify({action:'release'})+'\n');
     expect((await next()).type).toBe('released');expect(await exit).toBe(0);

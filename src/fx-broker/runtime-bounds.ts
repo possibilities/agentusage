@@ -1,6 +1,12 @@
 /** Maximum authority carried without revalidation. */
 export const FX_ROLLING_LEASE_MS = 5 * 60_000;
 
+/** Maximum one-line command accepted on the private bridge stdio. */
+export const FX_BRIDGE_MAX_LINE_BYTES = 16 * 1024;
+
+/** Maximum request body accepted by the private loopback bridge. */
+export const FX_BRIDGE_MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+
 /** Idle bridges start renewing before this much authority remains. */
 export const FX_RENEW_BEFORE_EXPIRY_MS = 60_000;
 

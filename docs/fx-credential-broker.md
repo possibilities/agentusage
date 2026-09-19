@@ -92,6 +92,14 @@ budget remain independent of AgentFX's twenty-minute idle and two-hour absolute
 prompt deadlines. This command is a host interface, not a manager
 JSON diagnostic: never display or persist its raw stdout.
 
+The prepared message includes required privacy-safe `bridge_runtime` evidence:
+SHA-256 executable-instance, source, and composed build identities; bounded
+product/runtime versions; and the effective admission, stdio, request-body,
+rolling-lease, and provider-response limits. No filesystem path, argv,
+environment, provider content, credential, or account identifier enters this
+block. A ceiling refusal adds the successful admission count and effective
+limit to its normalized receipt.
+
 The managed authority requires fresh atomic quota evidence, a complete binding
 lane with unpassed resets and a current provider catalog. It holds that exact
 snapshot through catalog validation and durable broker preparation, so an

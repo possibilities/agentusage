@@ -72,6 +72,12 @@ error category retained after an Fx provider admission. It never contains a
 response body, provider message, credential, provider account identifier,
 prompt or request content. _Avoid_: provider error text, response excerpt.
 
+**Fx bridge runtime evidence** — Privacy-safe exact digests for the running
+AgentUsage executable instance, relevant source bytes and composed build, plus
+bounded product/runtime versions and effective bridge limits. It contains no
+paths, argv, environment, provider content, credentials or account identifiers.
+_Avoid_: Git revision claim, raw bridge stdout, install path.
+
 **Routing context** — A monotonic, non-secret AgentUsage composition of explicit
 current model/effort/tier, reviewed task-fit and within-provider cost guidance,
 captured native capabilities, public quota, opaque Fx binding receipts and the
