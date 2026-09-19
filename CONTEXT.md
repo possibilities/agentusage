@@ -73,7 +73,7 @@ response body, provider message, credential, provider account identifier,
 prompt or request content. _Avoid_: provider error text, response excerpt.
 
 **Fx bridge runtime evidence** — Privacy-safe exact digests for the running
-AgentUsage executable instance, relevant source bytes and composed build, plus
+AgentUsage executable bytes, loaded bridge functions and composed build, plus
 bounded product/runtime versions and effective bridge limits. It contains no
 paths, argv, environment, provider content, credentials or account identifiers.
 _Avoid_: Git revision claim, raw bridge stdout, install path.

@@ -18,10 +18,21 @@ and arbitrary error text are not safe durable evidence.
 
 The schema-1 `prepared` bridge message carries required `bridge_runtime`
 evidence. It contains privacy-safe SHA-256 identities for the running Bun
-executable instance, the relevant AgentUsage source bytes, and their composed
-build; the bounded product/runtime versions; and the effective admission,
+executable bytes, the loaded bridge implementation, and their composed build;
+the bounded product/runtime versions; and the effective admission,
 stdio, request-body, rolling-lease, and provider-response limits. It contains
 no paths or private request/provider values.
+
+The executable content digest is captured during module initialization, before
+broker preparation can await external work. The source digest covers the
+immutable loaded function representations of the bridge entrypoint, its local
+ID/invalid-request/refusal helpers, and the runtime
+evidence encoder/hash helpers. Effective imported bounds are recorded as exact
+numbers instead of hashing their mutable source files. The build digest composes
+the product/runtime/platform identities, executable content digest, loaded
+source digest, and those effective bounds. It deliberately excludes transitive
+provider-authority modules, whose capability and broker receipts are separate
+evidence. No runtime identity reads mutable source files after module load.
 
 An admission-ceiling refusal additionally records the successful admission
 count and effective limit. The count is the number already forwarded, so a
@@ -35,7 +46,8 @@ Fx or provider admission. Deploy AgentUsage before AgentFX.
 
 ## Consequences
 
-Source/install drift and an obsolete admission ceiling are recoverable from one
+Loaded-code/install drift and an obsolete admission ceiling are recoverable from one
 execution without reading secrets or retrying the provider attempt. The
-identity digests prove exact observed executable and source bytes; they do not
-claim a Git commit, a clean checkout, or task success.
+identity digests prove exact observed executable bytes and loaded function
+representations; they do not claim a Git commit, a clean checkout, or task
+success.

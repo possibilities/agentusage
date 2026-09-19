@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { openSync, closeSync, readSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
 import { VERSION } from '../version.ts';
 import {
   FX_BRIDGE_MAX_LINE_BYTES,
@@ -29,22 +28,33 @@ function fileSha256(path: string): string {
   return hash.digest('hex');
 }
 
+// Capture the executable bytes during module initialization, before broker
+// preparation can await provider or state work.
+const LOADED_EXECUTABLE_SHA256 = fileSha256(realpathSync(process.execPath));
+
 /**
  * Exact, privacy-safe identity for the running bridge implementation. Paths,
  * argv, environment, credentials, and provider/account values are excluded.
  */
-export function bridgeRuntimeEvidence() {
-  const entrypoint = realpathSync(process.argv[1]!);
-  const bridgeSource = realpathSync(join(import.meta.dir, 'bridge.ts'));
-  const identitySource = realpathSync(join(import.meta.dir, 'bridge-runtime.ts'));
-  const boundsSource = realpathSync(join(import.meta.dir, 'runtime-bounds.ts'));
+export function bridgeRuntimeEvidence(
+  loadedBridgeSources: Readonly<Record<string, string>>,
+) {
+  const bounds = {
+    max_provider_admissions: FX_MAX_PROVIDER_ADMISSIONS,
+    max_stdio_line_bytes: FX_BRIDGE_MAX_LINE_BYTES,
+    max_http_request_body_bytes: FX_BRIDGE_MAX_REQUEST_BODY_BYTES,
+    rolling_lease_ms: FX_ROLLING_LEASE_MS,
+    provider_request_budget_ms: FX_PROVIDER_REQUEST_BUDGET_MS,
+  };
   const sourceSha256 = sha256(JSON.stringify({
-    entrypoint_sha256: fileSha256(entrypoint),
-    bridge_source_sha256: fileSha256(bridgeSource),
-    identity_source_sha256: fileSha256(identitySource),
-    runtime_bounds_source_sha256: fileSha256(boundsSource),
+    bridge_runtime_evidence: bridgeRuntimeEvidence.toString(),
+    file_sha256: fileSha256.toString(),
+    sha256: sha256.toString(),
+    ...Object.fromEntries(
+      Object.entries(loadedBridgeSources).sort(([left], [right]) =>
+        left.localeCompare(right)),
+    ),
   }));
-  const executableIdentitySha256 = fileSha256(realpathSync(process.execPath));
   const buildSha256 = sha256(JSON.stringify({
     product: 'agentusage',
     version: VERSION,
@@ -52,7 +62,9 @@ export function bridgeRuntimeEvidence() {
     runtime_version: Bun.version,
     platform: process.platform,
     arch: process.arch,
+    executable_identity_sha256: LOADED_EXECUTABLE_SHA256,
     source_sha256: sourceSha256,
+    bounds,
   }));
   return {
     schema_version: 1 as const,
@@ -61,16 +73,10 @@ export function bridgeRuntimeEvidence() {
       version: VERSION,
       runtime: 'bun' as const,
       runtime_version: Bun.version,
-      executable_identity_sha256: executableIdentitySha256,
+      executable_identity_sha256: LOADED_EXECUTABLE_SHA256,
       source_sha256: sourceSha256,
       build_sha256: buildSha256,
     },
-    bounds: {
-      max_provider_admissions: FX_MAX_PROVIDER_ADMISSIONS,
-      max_stdio_line_bytes: FX_BRIDGE_MAX_LINE_BYTES,
-      max_http_request_body_bytes: FX_BRIDGE_MAX_REQUEST_BODY_BYTES,
-      rolling_lease_ms: FX_ROLLING_LEASE_MS,
-      provider_request_budget_ms: FX_PROVIDER_REQUEST_BUDGET_MS,
-    },
+    bounds,
   };
 }

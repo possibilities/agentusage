@@ -1,4 +1,8 @@
 import { expect, test } from 'bun:test';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   FX_BRIDGE_MAX_LINE_BYTES,
   FX_BRIDGE_MAX_REQUEST_BODY_BYTES,
@@ -33,4 +37,34 @@ test('provider responses can outlive the legacy two-minute ceiling within one ro
   );
   expect(fxProviderRequestBudgetMs(100_000, 40_000)).toBe(60_000);
   expect(fxProviderRequestBudgetMs(40_000, 40_001)).toBe(-1);
+});
+
+test('bridge runtime identity stays bound to loaded code when source files change during preparation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'agentusage-loaded-bridge-'));
+  try {
+    const sourceRoot = join(root, 'src');
+    cpSync(join(import.meta.dir, '..', 'src'), sourceRoot, { recursive: true });
+    const bridgePath = join(sourceRoot, 'fx-broker', 'bridge.ts');
+    const boundsPath = join(sourceRoot, 'fx-broker', 'runtime-bounds.ts');
+    const bridgeUrl = `${pathToFileURL(bridgePath).href}?loaded=1`;
+    const runtimeUrl = pathToFileURL(join(sourceRoot, 'fx-broker', 'bridge-runtime.ts')).href;
+    const bridge = await import(bridgeUrl) as typeof import('../src/fx-broker/bridge.ts');
+    const runtime = await import(runtimeUrl) as typeof import('../src/fx-broker/bridge-runtime.ts');
+    const loadedSources = { run_fx_bridge: bridge.runFxBridge.toString() };
+    const before = runtime.bridgeRuntimeEvidence(loadedSources);
+
+    writeFileSync(bridgePath, `${readFileSync(bridgePath, 'utf8')}\n// replaced after module load\n`);
+    writeFileSync(boundsPath, readFileSync(boundsPath, 'utf8').replace(
+      'export const FX_MAX_PROVIDER_ADMISSIONS = 1024;',
+      'export const FX_MAX_PROVIDER_ADMISSIONS = 35;',
+    ));
+
+    const after = runtime.bridgeRuntimeEvidence(loadedSources);
+    expect(readFileSync(boundsPath, 'utf8')).toContain('FX_MAX_PROVIDER_ADMISSIONS = 35');
+    expect(after.identity.source_sha256).toBe(before.identity.source_sha256);
+    expect(after.identity.build_sha256).toBe(before.identity.build_sha256);
+    expect(after.bounds.max_provider_admissions).toBe(1024);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

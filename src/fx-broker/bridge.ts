@@ -84,7 +84,12 @@ export async function runFxBridge(paths: StatePaths): Promise<number> {
     const fence = { schema_version: 1 as const, expected_broker_incarnation: broker.incarnation };
     if (!prepared.handoff) invalid();
     let receipt: FxBrokerBindingReceipt = prepared.receipt;
-    const bridgeRuntime = bridgeRuntimeEvidence();
+    const bridgeRuntime = bridgeRuntimeEvidence({
+      id_validator: id.toString(),
+      invalid_request: invalid.toString(),
+      run_fx_bridge: runFxBridge.toString(),
+      safe_refusal: safeRefusal.toString(),
+    });
     let native: FxBrokerNativeBinding | null = null;
     const token = prepared.handoff.capability_token;
     const route = randomBytes(32).toString('hex');
