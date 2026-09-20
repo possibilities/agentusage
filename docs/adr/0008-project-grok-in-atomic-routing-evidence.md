@@ -1,6 +1,6 @@
 # 0008: Project Grok in atomic routing evidence
 
-Status: Accepted
+Status: Superseded by [ADR 0017](0017-retire-agentfx-routing-integration.md)
 
 ## Context
 

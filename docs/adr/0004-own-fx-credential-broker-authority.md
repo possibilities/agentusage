@@ -1,6 +1,6 @@
 # 0004: Own Fx credential-broker authority
 
-Status: Accepted
+Status: Superseded by [ADR 0017](0017-retire-agentfx-routing-integration.md)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # 0005: Compose versioned routing context from public evidence
 
-Status: Accepted for synthetic composition
+Status: Superseded by [ADR 0017](0017-retire-agentfx-routing-integration.md)
 
 ## Context
 

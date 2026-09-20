@@ -11,7 +11,6 @@ export interface StatePaths {
   codexObservation: string;
   codexRefreshLock: string;
   grokObservation: string;
-  grokCatalog: string;
   grokRefreshLock: string;
   reservations: string;
   reservationsLock: string;
@@ -40,7 +39,6 @@ export function statePaths(env: Record<string, string | undefined> = process.env
     codexObservation: join(codexDir, "observation.json"),
     codexRefreshLock: join(codexDir, "observation.json.refresh.lock"),
     grokObservation: join(grokDir, "observation.json"),
-    grokCatalog: join(grokDir, "catalog.json"),
     grokRefreshLock: join(grokDir, "observation.json.refresh.lock"),
     reservations: join(claudeDir, "reservations.json"),
     reservationsLock: join(claudeDir, "reservations.json.lock"),

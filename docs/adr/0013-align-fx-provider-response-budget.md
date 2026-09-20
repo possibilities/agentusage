@@ -1,6 +1,6 @@
 # 0013: Align the Fx provider response budget
 
-Status: Accepted
+Status: Superseded by [ADR 0017](0017-retire-agentfx-routing-integration.md)
 
 ## Context
 

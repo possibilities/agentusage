@@ -12,24 +12,10 @@
 - [0003: Collect versioned native catalogs](0003-collect-versioned-native-catalogs.md)
   adds an explicit owned stdio collector with fake-protocol validation and
   checked pagination receipts; it does not change the offline audit or routing.
-- [0004: Own Fx credential-broker authority](0004-own-fx-credential-broker-authority.md)
-  defines the generation-pinned lease, private capability handoff and mediated
-  provider-request boundary. Real account adapters remain disabled.
-- [0005: Compose versioned routing context](0005-compose-versioned-routing-context.md)
-  joins reviewed guidance, captured Codex capabilities, public quota, opaque
-  broker receipts and HUD host/control identity as a pure synthetic contract.
-  Scheduling, persistence and manager delivery remain disabled.
-- [0006: Project atomic public routing evidence](0006-project-atomic-routing-evidence.md)
-  joins the locked Codex sidecar and managed-account pool into the sanitized
-  usage and generation input required by the composer. It performs no provider
-  refresh, account mutation or selection.
 - [0007: Interpret an omitted Grok credits percentage as zero](0007-interpret-omitted-grok-credit-percent-as-zero.md)
   makes a complete modern unified-billing period with an omitted proto3 usage
   scalar decision-grade as 0% used, while ambiguous response shapes remain
   unknown.
-- [0008: Project Grok in atomic routing evidence](0008-project-grok-in-atomic-routing-evidence.md)
-  upgrades the public projection to an atomic Codex-plus-Grok snapshot with
-  credential-correlated samples and lossless combined revisions.
 - The sketch's viewer and focus-policy contracts remain applicable; its swap
   examples are historical wherever the documents above replace them.
 
@@ -38,26 +24,10 @@ lease terms, and [README.md](../../README.md) for the current operator/launcher
 contract. Add a new record when the choice changes rather than copying the
 accepted ownership rationale into another parallel specification.
 
-- [0009: Mediate bounded Fx Codex and Grok executions](0009-mediate-bounded-fx-executions.md)
-  supplies the owner-authenticated, source-fenced execution bridge.
-- [0010: Publish bounded manager economics](0010-publish-bounded-manager-economics.md)
-  adds official Codex API price guidance and a separate Grok quota-stewardship
-  preference without inventing cross-provider economics.
-- [0011: Publish reviewed live Grok catalog evidence](0011-publish-reviewed-live-grok-catalog.md)
-  captures authenticated Grok catalogs as a sanitized last-good projection and
-  separates complete visibility, reviewed routability and structured drift.
-- [0012: Renew active Fx execution leases](0012-renew-active-fx-execution-leases.md)
-  replaces the fixed total-session deadline with a rolling five-minute
-  authorization horizon while preserving every provider-admission fence.
-- [0013: Align the Fx provider response budget](0013-align-fx-provider-response-budget.md)
-  removes the hidden two-minute response ceiling while keeping each admission
-  inside one rolling five-minute authorization window.
-- [0014: Align the Fx provider-admission ceiling](0014-align-fx-admission-ceiling.md)
-  raises the shared finite bridge cap so AgentFX's two-hour absolute prompt
-  ceiling dominates ordinary productive Codex and Grok turns.
-- [0015: Retain bounded Fx provider failure diagnostics](0015-retain-bounded-fx-provider-failure-diagnostics.md)
-  adds safe HTTP status and a finite normalized error category to durable
-  forward receipts without retaining provider bodies or text.
-- [0016: Publish Fx bridge runtime identity and effective bounds](0016-publish-fx-bridge-runtime-identity.md)
-  makes the running bridge build/source identity, effective bounds and
-  admission-ceiling count visible without retaining paths or private content.
+- [0017: Retire AgentFX routing integration](0017-retire-agentfx-routing-integration.md)
+  removes the AgentFX bridge, manager routing projections, and Grok model-catalog
+  capture while preserving ordinary provider ownership and observation. It
+  supersedes ADRs 0004–0006, 0008, and 0009–0016.
+
+ADRs 0004–0006, 0008, and 0009–0016 remain as historical records of the retired
+integration. They are not current contracts.

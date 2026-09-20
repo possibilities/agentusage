@@ -1,6 +1,6 @@
 # 0015: Retain bounded Fx provider failure diagnostics
 
-Status: Accepted
+Status: Superseded by [ADR 0017](0017-retire-agentfx-routing-integration.md)
 
 ## Context
 

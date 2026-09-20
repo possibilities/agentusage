@@ -1,6 +1,6 @@
 # 0006: Project atomic public routing evidence
 
-Status: Accepted
+Status: Superseded by [ADR 0017](0017-retire-agentfx-routing-integration.md)
 
 The version-1 format and Codex-only limitation are superseded by ADR 0008.
 The Codex locking, sanitization and generation decisions below remain active.

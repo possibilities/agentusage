@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { changeGrokAccount, loginGrokAccount, recoverGrokAccount } from '../src/grok/accounts.ts';
 import { observeAccount, publicObservation } from '../src/grok/billing.ts';
@@ -12,8 +13,6 @@ import { fixtureState } from './managed-fixtures.ts';
 import { account, grokCli, seedGrok } from './grok-fixtures.ts';
 
 const billingReply = { config: { creditUsagePercent: 10, prepaidBalance: {}, onDemandCap: {}, currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-10-01T00:00:00Z' } } };
-const catalogReply = { data: [{ model: 'grok-4.6', api_backend: 'responses', supports_reasoning_effort: true, reasoning_efforts: [{ value: 'low' }, { value: 'medium' }], context_window: 256_000, max_completion_tokens: 16_384 }] };
-const modalitiesReply = { models: [{ id: 'grok-4.6', input_modalities: ['text'], output_modalities: ['text'] }] };
 function endpoint(fixture: ReturnType<typeof fixtureState>, fetch: (request: Request) => Response | Promise<Response>) {
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch });
   return { server, env: { ...fixture.env, AGENTUSAGE_TEST_GROK_ORIGIN: `http://127.0.0.1:${server.port}` } };
@@ -78,23 +77,37 @@ describe('owned Grok OAuth and billing', () => {
     } finally { server.stop(true); }
   });
 
-  test('a targeted refresh keeps every account in the sidecar and leaves the other account untouched', async () => {
+  test('a targeted billing refresh makes no model-catalog request, keeps every account in the sidecar, and leaves the other account untouched', async () => {
     const fixture = fixtureState();
     const rows = [account(1), account(2)];
     await seedGrok(fixture.paths, rows);
+    mkdirSync(fixture.paths.grokDir, { recursive: true, mode: 0o700 });
+    const historicalCatalog = join(fixture.paths.grokDir, 'catalog.json');
+    const historicalBroker = join(fixture.paths.stateRoot, 'service', 'fx-broker.json');
+    mkdirSync(join(fixture.paths.stateRoot, 'service'), { recursive: true, mode: 0o700 });
+    writeFileSync(historicalCatalog, '{"schema_version":1,"accounts":[]}\n', { mode: 0o600 });
+    writeFileSync(historicalBroker, '{"schema_version":1,"broker_epoch":7,"broker_incarnation":"archived","leases":[],"operations":[]}\n', { mode: 0o600 });
+    const historicalCatalogBytes = readFileSync(historicalCatalog);
+    const historicalBrokerBytes = readFileSync(historicalBroker);
     const requests: string[] = [];
     const { server, env } = endpoint(fixture, (request) => {
       const path = new URL(request.url).pathname;
       requests.push(`${path}:${request.headers.get('x-userid') ?? request.headers.get('x-grok-user-id') ?? 'catalog'}`);
-      return Response.json(path === '/v1/models' ? catalogReply : path === '/v1/language-models' ? modalitiesReply : billingReply);
+      return path === '/v1/billing'
+        ? Response.json(billingReply)
+        : new Response('unexpected model-catalog request', { status: 500 });
     });
     try {
       const result = await refreshGrokObservation(fixture.paths, { env, providerRefresh: true, account: 'grok-2', freshWithinMs: 0 });
       expect(result.value?.accounts).toHaveLength(2);
-      expect(requests).toEqual(['/v1/billing:acct_2', '/v1/models:acct_2', '/v1/language-models:catalog']);
+      expect(requests).toEqual(['/v1/billing:acct_2']);
       const stored = (await readState(fixture.paths)).accounts;
       expect(stored[0]).toEqual(rows[0]);
       expect(stored[1]!.observation.lastGood?.included.usedPercent).toBe(10);
+      expect(readFileSync(historicalCatalog)).toEqual(historicalCatalogBytes);
+      expect(readFileSync(historicalBroker)).toEqual(historicalBrokerBytes);
+      expect(JSON.parse(readFileSync(historicalCatalog, 'utf8'))).toEqual({ schema_version: 1, accounts: [] });
+      expect(JSON.parse(readFileSync(historicalBroker, 'utf8'))).toMatchObject({ schema_version: 1, broker_epoch: 7 });
     } finally { server.stop(true); }
   });
 
@@ -142,14 +155,13 @@ describe('owned Grok OAuth and billing', () => {
       const path = new URL(request.url).pathname;
       if (path === '/oauth2/token') { tokenCalls++; await Bun.sleep(100); return Response.json({ access_token: 'parallel-access', refresh_token: 'parallel-refresh', expires_in: 3600 }); }
       if (path === '/oauth2/userinfo') return Response.json({ sub: 'acct_1' });
-      if (path === '/v1/models') { catalogCalls++; return Response.json(catalogReply); }
-      if (path === '/v1/language-models') { catalogCalls++; return Response.json(modalitiesReply); }
+      if (path === '/v1/models' || path === '/v1/language-models') { catalogCalls++; return new Response('unexpected', { status: 500 }); }
       billingCalls++; return Response.json(billingReply);
     });
     try {
       const results = await Promise.all([1, 2].map(() => refreshGrokObservation(fixture.paths, { env, providerRefresh: true, freshWithinMs: 0 })));
       expect(results.map((r) => r.outcome).sort()).toEqual(['peer-published', 'refreshed']);
-      expect(tokenCalls).toBe(1); expect(billingCalls).toBe(1); expect(catalogCalls).toBe(2);
+      expect(tokenCalls).toBe(1); expect(billingCalls).toBe(1); expect(catalogCalls).toBe(0);
     } finally { server.stop(true); }
   });
 

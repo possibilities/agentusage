@@ -127,39 +127,16 @@ a stock executable path and expected version, includes hidden models and records
 pagination continuity. Its initial compatibility validation uses fake processes;
 it does not attach to AgentVoice or select an account.
 
-The [synthetic routing-context composer](docs/routing-context.md) is a pure
-TypeScript contract that joins reviewed guidance, captured Codex capabilities,
-public quota, opaque Fx broker receipts and AgentHUD host/control identity. It
-models five-minute freshness, monotonic revisions, latest-wins coalescing,
-full-snapshot recovery and consumed-revision receipts without timers, persistence,
-manager injection, account mutation or provider activity.
-
-The [routing-evidence projection](docs/routing-evidence.md) supplies that
-composer with one locked, sanitized Codex-and-Grok usage snapshot and opaque
-account/provider generations. It fails closed on identity, credential or
-generation drift and makes no provider request.
-
-Grok refresh also captures the two authenticated provider model catalogs through
-AgentUsage's credential-contained authority. Only an allowlisted capability
-projection is persisted: model IDs, efforts, modalities, response compatibility,
-context/output limits, timestamps and digests. `routing grok-catalog` joins that
-complete visibility to fresh included quota and reviewed 4.6/4.5 advice. Models
-absent from the subscription Responses catalog remain visible with an intentional
-incompatible disposition; a new compatible model without reviewed metadata emits
-structured drift and is not routable.
-
-The native manager context also carries reviewed Codex-only API text prices and
-an explicit least-expensive-adequate-model order. API pricing is a relative
-within-provider proxy, not subscription quota accounting. Its separate Grok
-preference applies only to a fresh eligible included-allowance account and a
-compatible AgentFX target; numeric cross-provider economics remain unavailable.
+AgentUsage no longer exposes the retired AgentFX credential bridge or manager
+routing projections. Grok observation performs only owned authentication and
+billing requests; it does not fetch provider model catalogs. Historical
+`grok-account-routing/catalog.json` and `service/fx-broker.json` files are left
+untouched for archival inspection and are not loaded, migrated, or pruned.
 
 ```sh
 agentusage                         # interactive usage viewer
 agentusage usage --snapshot         # one frame
 agentusage usage --json             # sidecars only
-agentusage routing evidence --json  # atomic non-secret Codex + Grok evidence
-agentusage routing grok-catalog --json # complete visibility + reviewed routability
 agentusage status --json
 agentusage refresh claude           # observe now, respecting provider backoff
 agentusage recover codex-1          # refresh an expired credential if recoverable
