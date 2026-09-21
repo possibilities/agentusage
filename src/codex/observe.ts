@@ -169,13 +169,13 @@ export function buildCodexObservation(accounts:readonly ManagedAccount[],nowMs:n
   const headroom=trusted&&main?laneHeadroomPercent(main):null;
   const exclusions:string[]=[];
   if(!a.enabled)exclusions.push('manually_disabled');if(a.auth_error)exclusions.push('relogin_required');if(!trusted)exclusions.push('usage_unknown');if(data.limitReached||headroom===0)exclusions.push('quota_exhausted');
-  return {accountKey:a.key,providerAccountId:a.account_id,email:a.email,label:a.label,ordinal:a.ordinal-1,enabled:a.enabled,present:true,authStatus:a.auth_error??'ok',reloginRequired:a.auth_error!==null,identityConflict:a.auth_error==='identity-mismatch',manuallyDisabled:!a.enabled,usageStatus:a.auth_error?'quarantined':a.usage_error?'error':!a.usage?'unknown':fresh?'ok':'stale',decisionGrade:trusted,...data,measurementSource:a.usage?(fresh&&a.usage_error===null?'current':'last-good'):null,measuredAtMs:a.usage?.measured_at_ms??null,eligible:healthy&&trusted&&headroom!==null&&headroom>0&&!data.limitReached,exclusions,headroomPercent:headroom,activeLeases:counts.get(a.key)??0,quotaBlockedUntilMs:a.quota_blocks,quotaBlockedAtMs:a.quota_blocked_at_ms,nextPollAt:new Date(a.next_poll_at_ms).toISOString(),lastError:a.usage_error?{code:a.usage_error.code,httpStatus:a.usage_error.status,summary:null}:null};
+  return {accountKey:a.key,providerAccountId:a.account_id,email:a.email,label:a.label,workspaceName:a.workspace_name??null,ordinal:a.ordinal-1,enabled:a.enabled,present:true,authStatus:a.auth_error??'ok',reloginRequired:a.auth_error!==null,identityConflict:a.auth_error==='identity-mismatch',manuallyDisabled:!a.enabled,usageStatus:a.auth_error?'quarantined':a.usage_error?'error':!a.usage?'unknown':fresh?'ok':'stale',decisionGrade:trusted,...data,measurementSource:a.usage?(fresh&&a.usage_error===null?'current':'last-good'):null,measuredAtMs:a.usage?.measured_at_ms??null,eligible:healthy&&trusted&&headroom!==null&&headroom>0&&!data.limitReached,exclusions,headroomPercent:headroom,activeLeases:counts.get(a.key)??0,quotaBlockedUntilMs:a.quota_blocks,quotaBlockedAtMs:a.quota_blocked_at_ms,nextPollAt:new Date(a.next_poll_at_ms).toISOString(),lastError:a.usage_error?{code:a.usage_error.code,httpStatus:a.usage_error.status,summary:null}:null};
  });
  return {schema_version:CODEX_OBSERVATION_SCHEMA_VERSION,source_revision:nowMs,observed_at_ms:nowMs,health:'ok',dependency:null,recommendation:null,accounts:views,notes:[]};
 }
-export interface ObserveCodexOptions{env?:Record<string,string|undefined>;noFetch?:boolean}
+export interface ObserveCodexOptions{env?:Record<string,string|undefined>;noFetch?:boolean;force?:boolean}
 export async function observeCodex(options:ObserveCodexOptions={}):Promise<CodexObservation>{
  const env=options.env??process.env,paths=statePaths(env);
- const accounts=options.noFetch?readPool(paths).accounts:await refreshUsage(paths,'codex',env);
+ const accounts=options.noFetch?readPool(paths).accounts:await refreshUsage(paths,'codex',env,options.force===true);
  return buildCodexObservation(accounts,Date.now(),activeCounts(readLeases(paths)));
 }

@@ -98,6 +98,19 @@ describe("account display names", () => {
     expect(model.codex?.cards.map((card) => card.name)).toEqual(["codex-1", "codex-2"]);
   });
 
+  test("codex cards prefer the observed workspace name over a frozen import label", () => {
+    const observation = codexObservation();
+    observation.accounts[0]!.label = "ArtHack (role:owner) [id:KMlvVZ]";
+    observation.accounts[0]!.workspaceName = "ArtHack Labs";
+    observation.accounts[0]!.planType = "pro";
+    observation.accounts[1]!.label = "work";
+    observation.accounts[1]!.email = "personal@example.test";
+
+    const model = build(null, observation);
+    expect(model.codex?.cards[0]?.detail).toBe("Pro · ArtHack Labs");
+    expect(model.codex?.cards[1]?.detail).toBe("work");
+  });
+
   test("codex cards show only positive reset-credit availability", () => {
     const observation = codexObservation();
     observation.accounts = [

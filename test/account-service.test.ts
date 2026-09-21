@@ -228,7 +228,11 @@ describe('owned credential lifecycle', () => {
     }));
     await seed(state, accounts);
     const source = upstream((request) => {
-      expect(new URL(request.url).pathname).toBe('/backend-api/wham/usage');
+      const path = new URL(request.url).pathname;
+      if (path === '/backend-api/wham/accounts/check') {
+        return Response.json({ accounts: [] });
+      }
+      expect(path).toBe('/backend-api/wham/usage');
       const second = request.headers.get('chatgpt-account-id') === accounts[1]!.account_id;
       return Response.json({
         plan_type: 'pro',
@@ -256,6 +260,79 @@ describe('owned credential lifecycle', () => {
       }, env)).toMatchObject({ account_key: account.key, lease: null });
     }
     expect(readLeases(state.paths).leases).toHaveLength(0);
+  });
+  test('Codex usage refresh replaces tracked workspace names without failing closed on a name-check error', async () => {
+    const state = fixtureState();
+    const tracked = managed('codex', 1, {
+      usage: null,
+      next_poll_at_ms: 0,
+      label: 'ArtHack (role:owner) [id:KMlvVZ]',
+    });
+    const aliased = managed('codex', 2, {
+      usage: null,
+      next_poll_at_ms: 0,
+      label: 'work',
+    });
+    await seed(state, [tracked, aliased]);
+    const seen: string[] = [];
+    const source = upstream((request) => {
+      const path = new URL(request.url).pathname;
+      seen.push(`${request.headers.get('chatgpt-account-id')}:${path}`);
+      if (path === '/backend-api/wham/usage') return Response.json(codexUsage());
+      if (path === '/backend-api/wham/accounts/check') {
+        const id = request.headers.get('chatgpt-account-id');
+        if (id === tracked.account_id) {
+          return Response.json({
+            accounts: {
+              team: { account: { account_id: tracked.account_id, name: 'ArtHack Labs' } },
+            },
+          });
+        }
+        return new Response('', { status: 500 });
+      }
+      return new Response('', { status: 404 });
+    });
+    const env = { ...state.env, AGENTUSAGE_TEST_CODEX_ORIGIN: source.url.origin };
+    const refreshed = await refreshUsage(state.paths, 'codex', env);
+    expect(refreshed.map((account) => account.usage_error)).toEqual([null, null]);
+    expect(refreshed[0]).toMatchObject({
+      label: 'ArtHack Labs',
+      workspace_name: 'ArtHack Labs',
+    });
+    expect(refreshed[1]).toMatchObject({
+      label: 'work',
+      workspace_name: null,
+    });
+    expect(buildCodexObservation(refreshed, Date.now()).accounts.map((account) => account.workspaceName)).toEqual([
+      'ArtHack Labs',
+      null,
+    ]);
+    expect(seen.some((entry) => entry.endsWith('/backend-api/wham/accounts/check'))).toBe(true);
+  });
+  test('Codex workspace names follow the native 404 fallback and later provider renames', async () => {
+    const state = fixtureState();
+    const account = managed('codex', 1, {
+      usage: null,
+      next_poll_at_ms: 0,
+      label: 'ArtHack',
+      workspace_name: 'ArtHack',
+    });
+    await seed(state, [account]);
+    const source = upstream((request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/backend-api/wham/usage') return Response.json(codexUsage());
+      if (path === '/backend-api/wham/accounts/check') return new Response('', { status: 404 });
+      expect(path).toBe('/api/codex/accounts/check');
+      return Response.json({
+        accounts: [{ id: account.account_id, name: 'ArtHack Studio' }],
+      });
+    });
+    const env = { ...state.env, AGENTUSAGE_TEST_CODEX_ORIGIN: source.url.origin };
+    const refreshed = await refreshUsage(state.paths, 'codex', env);
+    expect(refreshed[0]).toMatchObject({
+      label: 'ArtHack Studio',
+      workspace_name: 'ArtHack Studio',
+    });
   });
   test('usage publication refuses a credential generation changed during observation', async () => {
     const state = fixtureState();

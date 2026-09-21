@@ -15,10 +15,63 @@ import { jsonBody, providerURL, retryDelay, type Env } from './http.ts';
 import { parseClaudeUsage } from '../claude/observe.ts';
 import { hasCodexBindingWindows, parseCodexUsage } from '../codex/observe.ts';
 import {
+  isTrackedCodexLabel,
+  parseCodexWorkspaceName,
+  workspaceNameConflicts,
+} from '../codex/workspace.ts';
+import {
   laneHeadroomPercent,
   MAIN_LANE_ID,
   SPARK_LANE_ID,
 } from '../codex/types.ts';
+
+async function readCodexWorkspaceName(
+  request: (path: string) => Promise<Response>,
+  accountId: string,
+): Promise<string | null> {
+  const paths = [
+    '/backend-api/wham/accounts/check',
+    '/api/codex/accounts/check',
+  ];
+  for (const [index, path] of paths.entries()) {
+    let response: Response;
+    try {
+      response = await request(path);
+    } catch {
+      return null;
+    }
+    if (response.status === 404 && index === 0) {
+      await response.body?.cancel();
+      continue;
+    }
+    if (response.status !== 200) {
+      await response.body?.cancel();
+      return null;
+    }
+    try {
+      return parseCodexWorkspaceName(await jsonBody(response), accountId);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function applyCodexWorkspaceName(
+  pool: { accounts: ManagedAccount[] },
+  current: ManagedAccount,
+  workspaceName: string | null,
+): void {
+  if (workspaceName === null) return;
+  const previous = current.workspace_name ?? null;
+  current.workspace_name = workspaceName;
+  if (
+    isTrackedCodexLabel(current.label, previous) &&
+    !workspaceNameConflicts(pool.accounts, current.key, workspaceName)
+  ) {
+    current.label = workspaceName;
+  }
+}
 
 export async function refreshUsage(
   paths: StatePaths,
@@ -124,6 +177,17 @@ export async function refreshUsage(
       const measuredAtMs = Date.now();
       const codexUsage =
         provider === 'codex' ? parseCodexUsage(body, measuredAtMs) : null;
+      let workspaceName: string | null = null;
+      if (provider === 'codex') {
+        try {
+          workspaceName = await readCodexWorkspaceName(
+            authenticatedRequest,
+            a.account_id,
+          );
+        } catch {
+          workspaceName = null;
+        }
+      }
       await changePool(paths, (pool) => {
         const current = pool.accounts.find((x) => x.key === key);
         if (current) {
@@ -142,6 +206,7 @@ export async function refreshUsage(
           };
           current.usage_error = null;
           current.next_poll_at_ms = Date.now() + 180_000;
+          applyCodexWorkspaceName(pool, current, workspaceName);
           if (codexUsage !== null) {
             for (const laneId of [MAIN_LANE_ID, SPARK_LANE_ID]) {
               const lane = codexUsage.lanes.find(

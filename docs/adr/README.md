@@ -28,6 +28,9 @@ accepted ownership rationale into another parallel specification.
   removes the AgentFX bridge, manager routing projections, and Grok model-catalog
   capture while preserving ordinary provider ownership and observation. It
   supersedes ADRs 0004–0006, 0008, and 0009–0016.
+- [0018: Refresh Codex workspace names from accounts/check](0018-refresh-codex-workspace-names.md)
+  observes the current ChatGPT workspace name during Codex usage refresh so the
+  TUI follows provider-side renames instead of frozen import labels.
 
 ADRs 0004–0006, 0008, and 0009–0016 remain as historical records of the retired
 integration. They are not current contracts.

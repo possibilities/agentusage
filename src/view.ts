@@ -253,7 +253,7 @@ function buildCodexSection(
     if (account.planType !== null) {
       detailParts.push(account.planType.charAt(0).toUpperCase() + account.planType.slice(1));
     }
-    const identity = account.label ?? account.email;
+    const identity = account.workspaceName ?? account.label ?? account.email;
     if (identity !== null) detailParts.push(identity);
     const resetCreditExpiryText = describeResetCreditExpiry(
       account.resetCreditsAvailable ?? 0,

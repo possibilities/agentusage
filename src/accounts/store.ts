@@ -30,6 +30,8 @@ export interface ManagedAccount {
   ordinal: number;
   email: string | null;
   label: string | null;
+  /** Last observed ChatGPT/Codex workspace name; display-only. */
+  workspace_name?: string | null;
   account_id: string;
   enabled: boolean;
   auth_error: string | null;
@@ -106,11 +108,16 @@ function validatePool(value: unknown): AccountPool {
     const identity = `${x.provider}:${x.account_id}`;
     const usage = x.usage === null ? null : record(x.usage);
     const issue = x.usage_error === null ? null : record(x.usage_error);
+    if (x.workspace_name === undefined) x.workspace_name = null;
     if (
       identities.has(identity) ||
       Number(n[x.provider]) <= Number(x.ordinal) ||
       !nullableText(x.email) ||
       !nullableText(x.label) ||
+      !(
+        x.workspace_name === null ||
+        (nonempty(x.workspace_name) && x.workspace_name.length <= 256)
+      ) ||
       !nullableText(x.auth_error) ||
       !nullableText(x.subscription_type) ||
       ![null, 1, 5, 20].includes(x.rate_limit_multiplier as number | null) ||
@@ -206,6 +213,7 @@ export function publicAccount(a: ManagedAccount) {
     ordinal: a.ordinal,
     email: a.email,
     label: a.label,
+    workspace_name: a.workspace_name ?? null,
     enabled: a.enabled,
     auth_error: a.auth_error,
     expires_at_ms: a.credentials.expires_at_ms,
@@ -352,6 +360,7 @@ export async function importAccount(
       ordinal,
       key: `${provider}-${ordinal}`,
       label: options.label ?? null,
+      workspace_name: null,
       enabled: true,
       auth_error: null,
       usage: null,

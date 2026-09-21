@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildCodexObservation, groupLanes } from "../src/codex/observe.ts";
 import { laneHeadroomPercent, SPARK_LANE_ID, sparkLane, validateCodexObservation } from "../src/codex/types.ts";
+import { isTrackedCodexLabel, parseCodexWorkspaceName } from "../src/codex/workspace.ts";
 import { selectCodexSpark } from "../src/balance/codex.ts";
 
 import { managed } from "./managed-fixtures.ts";
@@ -53,9 +54,45 @@ describe("groupLanes", () => {
   });
 });
 
+describe("Codex workspace names", () => {
+  test("reads ChatGPT map and Codex list shapes for the matching account id", () => {
+    expect(
+      parseCodexWorkspaceName(
+        {
+          accounts: {
+            default: { account: { account_id: "acct-personal", name: "Personal" } },
+            team: { account: { account_id: "acct-work", name: "ArtHack" } },
+          },
+        },
+        "acct-work",
+      ),
+    ).toBe("ArtHack");
+    expect(
+      parseCodexWorkspaceName(
+        { accounts: [{ id: "acct-work", name: "ArtHack Labs" }, { id: "acct-personal", name: "Personal" }] },
+        "acct-work",
+      ),
+    ).toBe("ArtHack Labs");
+  });
+
+  test("ignores other accounts, empty names, and malformed payloads", () => {
+    expect(parseCodexWorkspaceName({ accounts: [{ id: "acct-work", name: "ArtHack" }] }, "acct-other")).toBeNull();
+    expect(parseCodexWorkspaceName({ accounts: [{ id: "acct-work", name: "   " }] }, "acct-work")).toBeNull();
+    expect(parseCodexWorkspaceName({ accounts: { default: { account: { name: "Personal" } } } }, "acct-work")).toBeNull();
+    expect(parseCodexWorkspaceName({ incomplete: true }, "acct-work")).toBeNull();
+  });
+
+  test("imported multi-auth labels and last-good names stay tracked", () => {
+    expect(isTrackedCodexLabel("ArtHack (role:owner) [id:KMlvVZ]", null)).toBe(true);
+    expect(isTrackedCodexLabel("ArtHack", "ArtHack")).toBe(true);
+    expect(isTrackedCodexLabel("work", "ArtHack")).toBe(false);
+  });
+});
+
 describe("owned Codex observations", () => {
   test("normalizes native usage, leases, stable identities and reset credits", () => {
     const a = managed();
+    a.workspace_name = "ArtHack";
     a.usage!.value.rate_limit_reset_credit_details = { available_count: 2, credits: [{ expires_at: "2026-10-08T12:00:00.000Z" }, { expires_at: null }] };
     const observation = buildCodexObservation([a], Date.now(), new Map([[a.key, 2]]));
     expect(validateCodexObservation(observation)).not.toBeNull();
@@ -64,7 +101,7 @@ describe("owned Codex observations", () => {
     expect(JSON.stringify(observation)).not.toContain('providerGeneration');
     expect(JSON.stringify(observation)).not.toContain('accountGeneration');
     const view = observation.accounts[0]!;
-    expect(view).toMatchObject({ accountKey: "codex-1", activeLeases: 2, decisionGrade: true, planType: "plus", resetCreditsAvailable: 2, resetCreditExpirations: ["2026-10-08T12:00:00.000Z", null] });
+    expect(view).toMatchObject({ accountKey: "codex-1", activeLeases: 2, decisionGrade: true, planType: "plus", workspaceName: "ArtHack", resetCreditsAvailable: 2, resetCreditExpirations: ["2026-10-08T12:00:00.000Z", null] });
     expect(sparkLane(view)?.windows).toHaveLength(2);
     expect(selectCodexSpark(observation).ok).toBe(true);
   });

@@ -39,6 +39,8 @@ export interface CodexAccountView {
   providerAccountId?: string;
   email: string | null;
   label: string | null;
+  /** Current ChatGPT/Codex workspace name when last observed. */
+  workspaceName?: string | null;
   ordinal: number | null;
   enabled: boolean;
   present: boolean;

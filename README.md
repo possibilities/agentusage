@@ -60,6 +60,8 @@ ordinal, email or label, and refuse ambiguous matches. `accounts list --json`
 includes the nonsecret `account_id` so workspaces sharing an email can be
 distinguished during enrollment. Codex observations expose the same identity as
 `providerAccountId`; `balance codex --account` accepts it too.
+Codex usage refresh also reads the current ChatGPT workspace name from
+`accounts/check` and the TUI follows that name when it changes.
 No command discovers an old swap store. Grok snapshot import is an explicit
 transfer described below.
 

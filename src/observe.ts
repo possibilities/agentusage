@@ -73,7 +73,11 @@ export async function refreshCodexObservation(
     read: () => readCodexObservation(paths),
     observedAtMs: (value) => value.observed_at_ms,
     freshWithinMs: overrides.freshWithinMs ?? OBSERVATION_FRESHNESS_CEILING_MS,
-    produce: () => observeCodex({ env: { ...(overrides.env ?? process.env), AGENTUSAGE_STATE_ROOT: paths.stateRoot }, noFetch: overrides.noFetch }),
+    produce: () => observeCodex({
+      env: { ...(overrides.env ?? process.env), AGENTUSAGE_STATE_ROOT: paths.stateRoot },
+      noFetch: overrides.noFetch,
+      force: (overrides.freshWithinMs ?? OBSERVATION_FRESHNESS_CEILING_MS) === 0,
+    }),
     write: (value) => {
       value.source_revision = nextCodexSourceRevision(
         readCodexObservation(paths),
