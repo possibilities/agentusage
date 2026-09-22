@@ -5,6 +5,8 @@ import { observeCodex } from "./codex/observe.ts";
 import { type CodexObservation, validateCodexObservation } from "./codex/types.ts";
 import { observeGrok } from "./grok/observe.ts";
 import { type GrokObservation, validateGrokObservation } from "./grok/types.ts";
+import { observeGrokBot } from "./grok-bot/observe.ts";
+import { type GrokBotObservation, validateGrokBotObservation } from "./grok-bot/types.ts";
 import type { StatePaths } from "./paths.ts";
 import { providerSafeRefresh, type RefreshResult } from "./refresh.ts";
 import { readSidecar, writeSidecar } from "./sidecar.ts";
@@ -21,6 +23,10 @@ export function readGrokObservation(paths: StatePaths): GrokObservation | null {
   return readSidecar(paths.grokObservation, validateGrokObservation).value;
 }
 
+export function readGrokBotObservation(paths: StatePaths): GrokBotObservation | null {
+  return readSidecar(paths.grokBotObservation, validateGrokBotObservation).value;
+}
+
 export function nextCodexSourceRevision(
   previous: CodexObservation | null,
   observedAtMs: number,
@@ -29,6 +35,17 @@ export function nextCodexSourceRevision(
   const revision = Math.max(observedAtMs, prior + 1);
   if (!Number.isSafeInteger(revision) || revision < 1)
     throw new Error('Codex observation source revision exhausted');
+  return revision;
+}
+
+export function nextGrokBotSourceRevision(
+  previous: GrokBotObservation | null,
+  observedAtMs: number,
+): number {
+  const prior = previous?.source_revision ?? previous?.observed_at_ms ?? 0;
+  const revision = Math.max(observedAtMs, prior + 1);
+  if (!Number.isSafeInteger(revision) || revision < 1)
+    throw new Error("Grok Bot observation source revision exhausted");
   return revision;
 }
 
@@ -112,5 +129,30 @@ export async function refreshGrokObservation(
       writeSidecar(paths.grokObservation, value);
     },
     waitMs: 61_000,
+  });
+}
+
+export async function refreshGrokBotObservation(
+  paths: StatePaths,
+  overrides: RefreshOverrides = {},
+): Promise<RefreshResult<GrokBotObservation>> {
+  return providerSafeRefresh<GrokBotObservation>({
+    lockPath: paths.grokBotRefreshLock,
+    read: () => readGrokBotObservation(paths),
+    observedAtMs: (value) => value.observed_at_ms,
+    freshWithinMs: overrides.freshWithinMs ?? OBSERVATION_FRESHNESS_CEILING_MS,
+    produce: () =>
+      observeGrokBot({
+        env: overrides.env ?? process.env,
+        previous: readGrokBotObservation(paths),
+      }),
+    write: (value) => {
+      value.source_revision = nextGrokBotSourceRevision(
+        readGrokBotObservation(paths),
+        value.observed_at_ms,
+      );
+      writeSidecar(paths.grokBotObservation, value);
+    },
+    waitMs: SUBPROCESS_TIMEOUT_MS + 1_000,
   });
 }

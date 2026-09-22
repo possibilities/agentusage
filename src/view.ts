@@ -14,6 +14,7 @@ import {
 } from "./claude/types.ts";
 import { type CodexObservation, isSparkLane } from "./codex/types.ts";
 import type { GrokObservation } from "./grok/types.ts";
+import type { GrokBotObservation } from "./grok-bot/types.ts";
 import type {
   AccountFocusEffectiveState,
   FableFocusEffectiveState,
@@ -43,7 +44,7 @@ export interface FactRow {
 }
 
 export interface AccountCard {
-  provider: "claude" | "codex" | "grok";
+  provider: "claude" | "codex" | "grok" | "grok-bot";
   name: string;
   detail: string | null;
   resetCreditsAvailable: number | null;
@@ -57,7 +58,7 @@ export interface AccountCard {
 }
 
 export interface ProviderSection {
-  provider: "claude" | "codex" | "grok";
+  provider: "claude" | "codex" | "grok" | "grok-bot";
   health: string;
   ageText: string;
   fresh: boolean;
@@ -77,6 +78,7 @@ export interface UsageViewModel {
   claude: ProviderSection | null;
   codex: ProviderSection | null;
   grok: ProviderSection | null;
+  grokBot: ProviderSection | null;
   focus: FocusLine[];
 }
 
@@ -391,6 +393,61 @@ function buildGrokSection(
   };
 }
 
+function buildGrokBotSection(observation: GrokBotObservation, nowMs: number): ProviderSection {
+  const ageMs = nowMs - observation.observed_at_ms;
+  const fresh = observation.health === "ok" && !observation.stale && ageMs <= GROK_OBSERVATION_FRESHNESS_CEILING_MS;
+  const usage = observation.usage;
+  const dimmed = !fresh || observation.stale || observation.health !== "ok";
+  const spent = usage?.hasAvailableUsage === false || observation.error?.code === "usage_exhausted";
+  const meters: MeterRow[] = [];
+  if (usage !== null) {
+    meters.push({
+      label: "weekly included",
+      usedPercent: usage.usedPercent,
+      resetText: countdownTo(usage.resetsAt, nowMs),
+      tone: dimmed ? "muted" : toneForUtilization(usage.usedPercent / 100),
+      spark: false,
+    });
+  }
+  const facts: FactRow[] = [];
+  if (usage?.onDemandEnabled === true) {
+    facts.push({ label: "on demand", value: "on", tone: dimmed ? "muted" : "plain" });
+  } else if (usage?.onDemandEligible === true) {
+    facts.push({ label: "on demand", value: "off", tone: dimmed ? "muted" : "plain" });
+  }
+  if (usage?.trial === true) facts.push({ label: "trial", value: "yes", tone: dimmed ? "muted" : "plain" });
+  if (usage?.teamSeat === true) facts.push({ label: "team seat", value: "yes", tone: dimmed ? "muted" : "plain" });
+  const status = observation.health === "unsupported"
+    ? "unsupported"
+    : observation.health === "error" || observation.health === "malformed"
+      ? "unavailable"
+      : observation.stale
+        ? "stale"
+        : spent
+          ? "spent"
+          : null;
+  const detail = usage?.planLabel ?? usage?.fundingPlan ?? null;
+  return {
+    provider: "grok-bot",
+    health: observation.health,
+    ageText: sectionAgeText(observation.health, fresh, ageMs),
+    fresh,
+    cards: [{
+      provider: "grok-bot",
+      name: "Grok Bot",
+      detail,
+      resetCreditsAvailable: null,
+      status,
+      dimmed,
+      measuredAgo: formatDurationMs(ageMs),
+      meters,
+      facts,
+      focus: [],
+    }],
+    notes: observation.notes,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Focus chapter
 
@@ -416,6 +473,7 @@ export interface BuildViewModelInput {
   claudeFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
   codexFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
   grokFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
+  grokBot?: GrokBotObservation | null;
   nowMs: number;
 }
 
@@ -494,6 +552,7 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
     claude: input.claude === null ? null : buildClaudeSection(input.claude, input.nowMs, claudeBadges),
     codex: input.codex === null ? null : buildCodexSection(input.codex, input.nowMs, codexBadges),
     grok: input.grok === null ? null : buildGrokSection(input.grok, input.nowMs, grokBadges),
+    grokBot: input.grokBot == null ? null : buildGrokBotSection(input.grokBot, input.nowMs),
     focus,
   };
 }

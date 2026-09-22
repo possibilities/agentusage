@@ -20,9 +20,11 @@ import { selectGrokAccount } from './balance/grok.ts';
 import {
   readClaudeObservation,
   readCodexObservation,
+  readGrokBotObservation,
   readGrokObservation,
   refreshClaudeObservation,
   refreshCodexObservation,
+  refreshGrokBotObservation,
   refreshGrokObservation,
 } from './observe.ts';
 import { statePaths, type StatePaths } from './paths.ts';
@@ -258,6 +260,7 @@ async function usageCommand(args: string[]): Promise<number> {
       readClaudeObservation(paths) === null &&
       readCodexObservation(paths) === null &&
       readGrokObservation(paths) === null &&
+      readGrokBotObservation(paths) === null &&
       Date.now() < deadline
     ) {
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -271,6 +274,7 @@ async function usageCommand(args: string[]): Promise<number> {
       claude: readClaudeObservation(paths),
       codex: readCodexObservation(paths),
       grok: readGrokObservation(paths),
+      grok_bot: readGrokBotObservation(paths),
     });
     return 0;
   }
@@ -292,11 +296,13 @@ async function usageCommand(args: string[]): Promise<number> {
   const claude = readClaudeObservation(paths);
   const codex = readCodexObservation(paths);
   const grok = readGrokObservation(paths);
+  const grokBot = readGrokBotObservation(paths);
   const focus = readFocusStates(paths, claude, codex, grok, nowMs);
   const vm = buildViewModel({
     claude,
     codex,
     grok,
+    grokBot,
     fable: focus.fable,
     nonFable: focus.nonFable,
     claudeFull: focus.claudeFull,
@@ -334,6 +340,14 @@ async function usageCommand(args: string[]): Promise<number> {
             age_s: Math.round((nowMs - grok.observed_at_ms) / 1000),
             accounts: grok.accounts.length,
           },
+    grok_bot:
+      grokBot === null
+        ? null
+        : {
+            health: grokBot.health,
+            age_s: Math.round((nowMs - grokBot.observed_at_ms) / 1000),
+            used_percent: grokBot.usage?.usedPercent ?? null,
+          },
   };
   process.stdout.write(`agentusage-meta: ${JSON.stringify(meta)}\n`);
   return 0;
@@ -350,6 +364,7 @@ async function statusCommand(args: string[]): Promise<number> {
   const claude = readClaudeObservation(paths);
   const codex = readCodexObservation(paths);
   const grok = readGrokObservation(paths);
+  const grokBot = readGrokBotObservation(paths);
   const focus = readFocusStates(paths, claude, codex, grok, nowMs);
   const codexFocusTarget =
     focus.codexFull.state === 'active' && focus.codexFull.policy !== null
@@ -411,6 +426,14 @@ async function statusCommand(args: string[]): Promise<number> {
               health: grok.health,
               age_s: Math.round((nowMs - grok.observed_at_ms) / 1000),
               accounts: grok.accounts.length,
+            },
+      grok_bot:
+        grokBot === null
+          ? null
+          : {
+              health: grokBot.health,
+              age_s: Math.round((nowMs - grokBot.observed_at_ms) / 1000),
+              used_percent: grokBot.usage?.usedPercent ?? null,
             },
       claude_focus: focus.claudeFull,
       codex_focus: focus.codexFull,
@@ -1367,9 +1390,10 @@ async function refreshCommand(args: string[]): Promise<number> {
     scope !== 'claude' &&
     scope !== 'codex' &&
     scope !== 'grok' &&
+    scope !== 'grok-bot' &&
     scope !== 'all'
   ) {
-    console.error('agentusage refresh: expected claude|codex|grok|all');
+    console.error('agentusage refresh: expected claude|codex|grok|grok-bot|all');
     return 2;
   }
   if (flags.positionals.length > 1 || (flags.strings.has('account') && scope !== 'grok')) {
@@ -1399,6 +1423,13 @@ async function refreshCommand(args: string[]): Promise<number> {
       account: flags.strings.get('account'),
     });
     outcomes.grok = {
+      outcome: result.outcome,
+      health: result.value?.health ?? null,
+    };
+  }
+  if (scope === 'grok-bot' || scope === 'all') {
+    const result = await refreshGrokBotObservation(paths, { freshWithinMs: 0 });
+    outcomes['grok-bot'] = {
       outcome: result.outcome,
       health: result.value?.health ?? null,
     };

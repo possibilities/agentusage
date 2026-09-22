@@ -106,6 +106,10 @@ keeping every account in the public observation. `recover grok-1` forces a
 credential/billing recovery attempt; use `accounts login grok --account grok-1`
 when fresh human authorization is needed.
 
+Grok Bot usage is a separate card. The observer runs `agentgrok usage --json`
+and stores only the weekly percent, period, and plan flags. It follows the
+grok CLI login, not the owned Grok inventory, and it never affects selection.
+
 Grok selection retains its existing priority: included allowance, prepaid
 balance, then enabled pay-as-you-go. It requires valid credentials and billing
 no older than 24 hours; a billing authentication rejection blocks selection

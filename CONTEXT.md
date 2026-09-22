@@ -16,7 +16,9 @@
 
 **Grok inventory** — the private `accounts/grok.json` leaf containing Grok identities, credentials, last-good billing, backoff, selection cursor and reservations. AgentUsage is its sole owner. _Avoid_: Grok subprocess, swap adapter.
 
-**Observation** — one normalized provider reading in a sidecar. Claude schema 8, Codex schema 2, and Grok schema 1 are independent envelopes.
+**Observation** — one normalized provider reading in a sidecar. Claude schema 8, Codex schema 2, and Grok schema 1 are independent envelopes. Grok Bot usage is a separate schema 1 sidecar, not a Grok observation.
+
+**Grok Bot usage** — the account-level weekly allowance reported by `agentgrok usage` for the grok CLI login. It is display-only: not a managed account, not the Grok inventory, and not decision-grade for selection. _Avoid_: included allowance, Grok billing.
 
 **Catalog audit** — an offline comparison of supplied reviewed model metadata,
 captured native Codex capabilities and optional public quota evidence. It does

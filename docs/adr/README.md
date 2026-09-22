@@ -31,6 +31,9 @@ accepted ownership rationale into another parallel specification.
 - [0018: Refresh Codex workspace names from accounts/check](0018-refresh-codex-workspace-names.md)
   observes the current ChatGPT workspace name during Codex usage refresh so the
   TUI follows provider-side renames instead of frozen import labels.
+- [0019: Observe Grok Bot usage separately from Grok billing](0019-observe-grok-bot-usage.md)
+  shows the Computer Hub weekly allowance as its own card. It does not enter
+  the Grok inventory or change selection.
 
 ADRs 0004–0006, 0008, and 0009–0016 remain as historical records of the retired
 integration. They are not current contracts.

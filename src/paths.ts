@@ -12,6 +12,9 @@ export interface StatePaths {
   codexRefreshLock: string;
   grokObservation: string;
   grokRefreshLock: string;
+  grokBotDir: string;
+  grokBotObservation: string;
+  grokBotRefreshLock: string;
   reservations: string;
   reservationsLock: string;
   fableFocusLeaf: string;
@@ -40,6 +43,9 @@ export function statePaths(env: Record<string, string | undefined> = process.env
     codexRefreshLock: join(codexDir, "observation.json.refresh.lock"),
     grokObservation: join(grokDir, "observation.json"),
     grokRefreshLock: join(grokDir, "observation.json.refresh.lock"),
+    grokBotDir: join(stateRoot, "grok-bot"),
+    grokBotObservation: join(stateRoot, "grok-bot", "observation.json"),
+    grokBotRefreshLock: join(stateRoot, "grok-bot", "observation.json.refresh.lock"),
     reservations: join(claudeDir, "reservations.json"),
     reservationsLock: join(claudeDir, "reservations.json.lock"),
     fableFocusLeaf: join(claudeDir, "fable-focus-policy.json"),

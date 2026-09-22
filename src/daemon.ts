@@ -15,6 +15,7 @@ import {
   readGrokObservation,
   refreshClaudeObservation,
   refreshCodexObservation,
+  refreshGrokBotObservation,
   refreshGrokObservation,
 } from './observe.ts';
 import { statePaths, type StatePaths } from './paths.ts';
@@ -185,6 +186,37 @@ async function grokLoop(
   }
 }
 
+async function grokBotLoop(
+  paths: StatePaths,
+  signal: AbortSignal,
+  env: Record<string, string | undefined>,
+): Promise<void> {
+  while (!signal.aborted) {
+    try {
+      const started = Date.now();
+      const result = await refreshGrokBotObservation(paths, {
+        freshWithinMs: 60_000,
+        env,
+      });
+      const observation = result.value;
+      const used = observation?.usage?.usedPercent;
+      log(
+        'grok-bot',
+        `${result.outcome} health=${observation?.health ?? 'none'}${
+          typeof used === 'number' ? ` used=${used.toFixed(1)}` : ''
+        } (${Date.now() - started}ms)`,
+      );
+    } catch (error) {
+      log('grok-bot', `cycle threw (non-fatal): ${error instanceof Error ? error.name : 'error'}`);
+    }
+    if (signal.aborted) return;
+    await sleep(
+      OBSERVE_INTERVAL_MS + Math.random() * OBSERVE_JITTER_MS,
+      signal,
+    );
+  }
+}
+
 export async function daemonRun(
   env: Record<string, string | undefined> = process.env,
 ): Promise<void> {
@@ -212,6 +244,7 @@ export async function daemonRun(
       claudeLoop(paths, controller.signal, env),
       codexLoop(paths, controller.signal, env),
       grokLoop(paths, controller.signal, env),
+      grokBotLoop(paths, controller.signal, env),
     ]);
   } finally {
     await proxy.stop();
