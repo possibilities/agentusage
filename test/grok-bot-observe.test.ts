@@ -97,12 +97,12 @@ describe("Grok Bot usage", () => {
       nowMs: NOW,
     });
     const card = view.grokBot!.cards[0]!;
-    expect(card.name).toBe("Grok Bot");
+    expect(card.name).toBe("grok-bot-1");
     expect(card.detail).toBe("SuperGrok Plus");
     expect(card.meters[0]).toMatchObject({ label: "weekly included", usedPercent: 17.691913 });
     expect(card.facts).toEqual([{ label: "on demand", value: "off", tone: "plain" }]);
     const text = linesToText(renderFrameLines(view, 80, { title: false }), false);
-    expect(text).toContain("Grok Bot");
+    expect(text).toContain("grok-bot-1");
     expect(text).toContain("weekly included");
     expect(text).not.toContain("http");
   });

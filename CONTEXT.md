@@ -10,7 +10,7 @@
 
 **Slot** — the positive ordinal carried in a Claude route for selection bookkeeping. It no longer names a provider command.
 
-**Display name** — the stable managed key. Account selectors can also use an unambiguous provider identity, email, label, or ordinal.
+**Display name** — the stable managed key. Account selectors can also use an unambiguous provider identity, email, label, or ordinal. The usage viewer instead names current Grok cards `grok-1` onward, and the Grok Bot card `grok-bot-1`, by position in the list that is actually shown. Those card names are not selectors, and a removed Grok key is never reused.
 
 **Workspace name** — the current Codex ChatGPT workspace/account name observed from `accounts/check`. The TUI prefers it over a frozen import label. Operator aliases remain selectors. _Avoid_: display name.
 

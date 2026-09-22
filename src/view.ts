@@ -318,7 +318,7 @@ function buildGrokSection(
 ): ProviderSection {
   const ageMs = nowMs - observation.observed_at_ms;
   const fresh = observation.health === "ok" && ageMs <= GROK_OBSERVATION_FRESHNESS_CEILING_MS;
-  const cards: AccountCard[] = observation.accounts.map((account) => {
+  const cards: AccountCard[] = observation.accounts.map((account, index) => {
     const dimmed =
       !fresh || !account.enabled || account.authStatus !== "valid" || account.billingStatus !== "fresh" || account.stale;
     const status = !account.enabled
@@ -372,7 +372,9 @@ function buildGrokSection(
     const measuredAtMs = account.stale ? account.lastGoodAtMs : account.observedAtMs ?? account.lastGoodAtMs;
     return {
       provider: "grok",
-      name: account.displayName,
+      // Card names are positions in the current ordinal order. Retired keys
+      // such as a removed grok-1 must not leave a gap in what the viewer shows.
+      name: `grok-${index + 1}`,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
       resetCreditsAvailable: null,
       status,
@@ -434,7 +436,7 @@ function buildGrokBotSection(observation: GrokBotObservation, nowMs: number): Pr
     fresh,
     cards: [{
       provider: "grok-bot",
-      name: "Grok Bot",
+      name: "grok-bot-1",
       detail,
       resetCreditsAvailable: null,
       status,
@@ -509,10 +511,12 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
     if (index < 0) return accountKey;
     return `codex-${(input.codex?.accounts[index]?.ordinal ?? index) + 1}`;
   };
-  const grokName = (accountRef: string): string =>
-    input.grok?.accounts.find(
+  const grokName = (accountRef: string): string => {
+    const index = input.grok?.accounts.findIndex(
       (account) => account.accountKey === accountRef || account.displayName === accountRef,
-    )?.displayName ?? accountRef;
+    ) ?? -1;
+    return index < 0 ? accountRef : `grok-${index + 1}`;
+  };
 
   const focus: FocusLine[] = [
     {

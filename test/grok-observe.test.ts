@@ -58,6 +58,30 @@ describe("owned Grok observations", () => {
     expect(JSON.stringify(buildGrokObservation([row], NOW))).not.toContain("reflected-access-secret");
   });
 
+  test("names cards by current position so a retired ordinal leaves no gap", () => {
+    const older = stored();
+    older.ordinal = 2;
+    older.accountKey = "grok-2";
+    older.displayName = "grok-2";
+    const newer = stored();
+    newer.ordinal = 5;
+    newer.accountKey = "grok-5";
+    newer.displayName = "grok-5";
+    const grok = buildGrokObservation([newer, older], NOW);
+    const off = { state: "off", policy: null, diagnostic: "none" } as never;
+    const view = buildViewModel({
+      claude: null, codex: null, grok, fable: off, nonFable: off,
+      claudeFull: off, codexFull: off, grokFull: {
+        state: "active",
+        policy: { target: "grok-5", lifetime: { kind: "permanent" } },
+        diagnostic: "none",
+      } as never,
+      nowMs: NOW,
+    });
+    expect(view.grok!.cards.map((card) => card.name)).toEqual(["grok-1", "grok-2"]);
+    expect(view.focus.find((line) => line.kind === "grok")?.target).toBe("grok-2");
+  });
+
   test("requires positive immutable ordinals in sidecars", () => {
     const observation = buildGrokObservation([stored()], NOW);
     observation.accounts[0]!.ordinal = 0;
