@@ -22,6 +22,7 @@ import {
 } from "../focus.ts";
 import { buildViewModel } from "../view.ts";
 import { renderFrameLines, TONE_HEX, type Line } from "../render.ts";
+import { ensureWorkingDirectory } from "./cwd.ts";
 import { createCommandPalette } from "./palette.ts";
 import { SIGNAL_GLYPHS, SIGNAL_ROOM } from "./theme.ts";
 
@@ -37,6 +38,7 @@ import { SIGNAL_GLYPHS, SIGNAL_ROOM } from "./theme.ts";
  * top-level-awaits and races under parallel test isolation (AGENTS.md).
  */
 export async function runUsageTui(paths: StatePaths): Promise<void> {
+  ensureWorkingDirectory();
   const core = await import("@opentui/core");
   const renderer = await core.createCliRenderer({
     exitOnCtrlC: false,
