@@ -119,7 +119,7 @@ export async function loginAccount(
         );
       mayCleanKeychain = true;
     }
-    const childEnv = { ...env, AGENTLAUNCH_LAUNCH: '1' };
+    const childEnv = { ...env, AGENTSTART_SHIM_BYPASS: '1' };
     for (const key of [
       'ANTHROPIC_API_KEY',
       'ANTHROPIC_AUTH_TOKEN',

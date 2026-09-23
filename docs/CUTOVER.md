@@ -1,5 +1,8 @@
 # Coordinated account cutover
 
+Historical runbook. AgentLaunch was retired to `~/archive/agentlaunch` on
+2026-09-23; bare Claude/Codex now use AgentStart's permission-only shims.
+
 This is a runbook for the landing coordinator, not a completed migration.
 Source-linked CLIs execute canonical source immediately: moving main is already
 runtime deployment. The tested bundle alone does not enroll production accounts.

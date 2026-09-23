@@ -10,8 +10,8 @@ or selection.
 
 The existing `agentusage daemon run` process owns the loopback listener and
 observation loops. Native sessions receive opaque session credentials; refresh
-tokens remain in AgentUsage. AgentLaunch starts the native CLIs and renews leases
-in its existing parent process. Native `CODEX_HOME` and `CLAUDE_CONFIG_DIR` remain
+tokens remain in AgentUsage. Bare AgentStart shims do not prepare accounts or
+renew leases; explicit consumers may still use the prepare contract. Native `CODEX_HOME` and `CLAUDE_CONFIG_DIR` remain
 unchanged, so account changes preserve shared history, trust, skills and config.
 
 ## Install and onboard
@@ -29,7 +29,7 @@ agentusage daemon run
 ```
 
 AgentStart owns the single `io.arthack.agentusage.observe` LaunchAgent. Its full
-installer installs AgentUsage before AgentLaunch and converges that existing
+installer installs AgentUsage and converges that existing
 service. Do not create another daemon per provider or native session. The binary
 installer does not install providers or modify credentials.
 
@@ -68,9 +68,8 @@ transfer described below.
 
 ## Claude/Codex cutover
 
-Follow the [coordinated cutover runbook](docs/CUTOVER.md). Land and validate
-the AgentUsage, AgentLaunch, and AgentStart bundle together,
-then converge installation last. Stop legacy sessions that own the credentials
+The [coordinated cutover runbook](docs/CUTOVER.md) records the previous
+AgentUsage, AgentLaunch, and AgentStart migration. Stop legacy sessions that own the credentials
 being transferred before importing them, or use fresh native login. A copied
 refresh token must never keep rotating in both an old process and AgentUsage.
 Existing native session files can be resumed after onboarding without moving

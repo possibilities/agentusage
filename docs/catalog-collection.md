@@ -42,7 +42,7 @@ agentusage catalog audit --file captured-bundle.json --json
 ```
 
 The executable must be selected explicitly. Choose the stock executable, not an
-AgentLaunch shim or account-selection wrapper. An absolute path alone cannot
+AgentStart permission shim or account-selection wrapper. An absolute path alone cannot
 prove executable identity. The command checks its bounded `--version` output
 against the supported expected version before launching app-server. It does not
 accept extra native arguments, remote endpoints or arbitrary RPC methods.

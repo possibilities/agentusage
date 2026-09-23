@@ -1,5 +1,9 @@
 # Account ownership in AgentUsage
 
+Historical design: AgentLaunch was retired to `~/archive/agentlaunch` on
+2026-09-23. Its launcher and lease-renewal integration below is no longer the
+bare Claude/Codex path; AgentStart now installs permission-only shims.
+
 Approved by the operator's 2026-09-07 instruction to build a confident sketch
 inside AgentUsage. This supersedes the Claude/Codex provider ownership and
 launcher sections of SKETCH.md. Grok's adapter was outside that original scope;

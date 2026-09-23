@@ -22,7 +22,7 @@ freshness vocabulary, balance policy and focus contract retained in
 the account-ownership replacement does not erase it.
 
 The shared daemon, private prepare envelope, opaque lease transport, refresh
-ownership, bounded quota reassignment and AgentLaunch integration are maintained
+ownership, and bounded quota reassignment are maintained
 in this fleet. Native Codex CLI `0.153.4` acceptance is test evidence, distinct
 from the source revision credited above.
 

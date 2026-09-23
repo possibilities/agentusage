@@ -65,4 +65,4 @@ runtime attachment, account activation.
 
 **Quota cooldown** — a lane-specific exclusion recorded from an explicit Codex usage-limit rejection. It is separate from transient request throttling and survives daemon restart; a newer trusted positive measurement for that lane confirms recovery and clears it.
 
-**Launcher** — the process owner, such as AgentLaunch, that applies prepare arguments and environment, starts the native CLI, and maintains its lease. Native homes, trust, configuration and history remain native.
+**Launcher** — an explicit process owner that applies prepare arguments and environment, starts the native CLI, and maintains its lease. Bare AgentStart shims are not launchers in this sense. Native homes, trust, configuration and history remain native.

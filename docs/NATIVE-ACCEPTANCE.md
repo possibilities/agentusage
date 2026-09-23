@@ -1,12 +1,15 @@
 # Native account transport acceptance
 
+Historical AgentLaunch acceptance only. The checkout now lives at
+`~/archive/agentlaunch`; bare AgentStart shims no longer use this transport.
+
 The regular tests use fake harness executables and no network. This optional
 acceptance uses stock Codex and Claude with fake accounts, temporary native
 homes and local mock upstreams. It does not enroll or change production
 accounts. Use the candidate checkouts together before the coordinated cutover:
 
 ```sh
-AGENTUSAGE_ACCEPTANCE_AGENTLAUNCH=/path/to/agentlaunch \
+AGENTUSAGE_ACCEPTANCE_AGENTLAUNCH=~/archive/agentlaunch \
   AGENTUSAGE_ACCEPTANCE_CODEX=/path/to/native/codex \
   AGENTUSAGE_ACCEPTANCE_CLAUDE=/path/to/native/claude \
   bun scripts/native-acceptance.ts
