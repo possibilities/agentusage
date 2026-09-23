@@ -1,5 +1,6 @@
 import {
   CODEX_OBSERVATION_FRESHNESS_CEILING_MS,
+  DEVIN_OBSERVATION_FRESHNESS_CEILING_MS,
   GROK_OBSERVATION_FRESHNESS_CEILING_MS,
   OBSERVATION_FRESHNESS_CEILING_MS,
 } from "./constants.ts";
@@ -15,6 +16,7 @@ import {
 import { type CodexObservation, isSparkLane } from "./codex/types.ts";
 import type { GrokObservation } from "./grok/types.ts";
 import type { GrokBotObservation } from "./grok-bot/types.ts";
+import type { DevinObservation } from "./devin/types.ts";
 import type {
   AccountFocusEffectiveState,
   FableFocusEffectiveState,
@@ -44,7 +46,7 @@ export interface FactRow {
 }
 
 export interface AccountCard {
-  provider: "claude" | "codex" | "grok" | "grok-bot";
+  provider: "claude" | "codex" | "grok" | "grok-bot" | "devin";
   name: string;
   detail: string | null;
   resetCreditsAvailable: number | null;
@@ -58,7 +60,7 @@ export interface AccountCard {
 }
 
 export interface ProviderSection {
-  provider: "claude" | "codex" | "grok" | "grok-bot";
+  provider: "claude" | "codex" | "grok" | "grok-bot" | "devin";
   health: string;
   ageText: string;
   fresh: boolean;
@@ -79,6 +81,7 @@ export interface UsageViewModel {
   codex: ProviderSection | null;
   grok: ProviderSection | null;
   grokBot: ProviderSection | null;
+  devin: ProviderSection | null;
   focus: FocusLine[];
 }
 
@@ -451,6 +454,95 @@ function buildGrokBotSection(observation: GrokBotObservation, nowMs: number): Pr
 }
 
 // ---------------------------------------------------------------------------
+// Devin (display-only quota card, follows the native CLI login)
+
+function buildDevinSection(observation: DevinObservation, nowMs: number): ProviderSection {
+  const ageMs = nowMs - observation.observed_at_ms;
+  const fresh = observation.health === "ok" && !observation.stale && ageMs <= DEVIN_OBSERVATION_FRESHNESS_CEILING_MS;
+  const usage = observation.usage;
+  const dimmed = !fresh || observation.stale || observation.health !== "ok";
+  const meters: MeterRow[] = [];
+  if (usage !== null) {
+    const quotaMeter = (label: string, remainingPercent: number, resetsAt: string | null): MeterRow => {
+      const usedPercent = Math.min(100, Math.max(0, 100 - remainingPercent));
+      return {
+        label,
+        usedPercent,
+        resetText: countdownTo(resetsAt, nowMs),
+        tone: dimmed ? "muted" : toneForUtilization(usedPercent / 100),
+        spark: false,
+      };
+    };
+    if (usage.dailyRemainingPercent !== null) {
+      meters.push(quotaMeter("daily quota", usage.dailyRemainingPercent, usage.dailyResetsAt));
+    }
+    if (usage.weeklyRemainingPercent !== null && usage.weeklyQuotaHidden !== true) {
+      meters.push(quotaMeter("weekly quota", usage.weeklyRemainingPercent, usage.weeklyResetsAt));
+    }
+  }
+  const facts: FactRow[] = [];
+  if (
+    usage !== null &&
+    usage.promptCreditsMonthly !== null &&
+    usage.promptCreditsMonthly > 0
+  ) {
+    facts.push({
+      label: "credits",
+      value:
+        usage.promptCreditsAvailable === null || usage.promptCreditsAvailable < 0
+          ? `${usage.promptCreditsMonthly} per month`
+          : `${usage.promptCreditsAvailable} of ${usage.promptCreditsMonthly} left`,
+      tone: dimmed ? "muted" : "plain",
+    });
+  }
+  if (usage?.periodEnd != null) {
+    facts.push({
+      label: "plan cycle",
+      value: `ends in ${countdownTo(usage.periodEnd, nowMs) ?? "?"}`,
+      tone: dimmed ? "muted" : "plain",
+    });
+  }
+  const spent =
+    usage !== null &&
+    [usage.dailyRemainingPercent, usage.weeklyQuotaHidden === true ? null : usage.weeklyRemainingPercent].some(
+      (remaining) => remaining !== null && remaining <= 0,
+    );
+  const status = observation.health === "absent"
+    ? "no login"
+    : observation.health === "unsupported"
+      ? "unsupported"
+      : observation.health === "error" || observation.health === "malformed"
+        ? "unavailable"
+        : observation.stale
+          ? "stale"
+          : spent
+            ? "spent"
+            : null;
+  const detailParts: string[] = [];
+  if (usage?.planLabel != null) detailParts.push(usage.planLabel);
+  if (usage?.displayName != null) detailParts.push(usage.displayName);
+  return {
+    provider: "devin",
+    health: observation.health,
+    ageText: sectionAgeText(observation.health, fresh, ageMs),
+    fresh,
+    cards: [{
+      provider: "devin",
+      name: "devin-1",
+      detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
+      resetCreditsAvailable: null,
+      status,
+      dimmed,
+      measuredAgo: formatDurationMs(ageMs),
+      meters,
+      facts,
+      focus: [],
+    }],
+    notes: observation.notes,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Focus chapter
 
 function lifetimeText(policy: FableFocusPolicy | NonFableFocusPolicy | FullFocusPolicy, nowMs: number): string {
@@ -476,6 +568,7 @@ export interface BuildViewModelInput {
   codexFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
   grokFull: FocusStatus<FullFocusPolicy, FullFocusEffectiveState>;
   grokBot?: GrokBotObservation | null;
+  devin?: DevinObservation | null;
   nowMs: number;
 }
 
@@ -557,6 +650,7 @@ export function buildViewModel(input: BuildViewModelInput): UsageViewModel {
     codex: input.codex === null ? null : buildCodexSection(input.codex, input.nowMs, codexBadges),
     grok: input.grok === null ? null : buildGrokSection(input.grok, input.nowMs, grokBadges),
     grokBot: input.grokBot == null ? null : buildGrokBotSection(input.grokBot, input.nowMs),
+    devin: input.devin == null ? null : buildDevinSection(input.devin, input.nowMs),
     focus,
   };
 }

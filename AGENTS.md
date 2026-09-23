@@ -26,7 +26,12 @@ remain current; use it before changing provider or launcher ownership.
   inside the TUI entry. The platform-native package top-level-awaits and races
   under parallel `bun test`; TUI-loading tests must stay serial.
 - Every provider uses bounded HTTP against fixed origins and owned credentials.
-  Grok's private `accounts/grok.json` preserves its billing, cursor and short
+  The display-only Devin card is the exception: it reads the native
+  `credentials.toml` in place (never copied, logged, or in argv) and calls the
+  login's own seat-management server; tests pin a loopback origin with
+  `AGENTUSAGE_TEST_DEVIN_ORIGIN` and a fixture login with
+  `AGENTUSAGE_DEVIN_CREDENTIALS`. Grok's private `accounts/grok.json`
+  preserves its billing, cursor and short
   reservations separately from the Claude/Codex proxy pool. Never discover
   legacy stores; the operator may explicitly restore a private Grok snapshot
   into an empty inventory after stopping the previous refresh-token owner.

@@ -208,11 +208,11 @@ export function renderFrameLines(
     lines.push([]);
   }
 
-  for (const section of [vm.claude, vm.codex, vm.grok, vm.grokBot]) {
+  for (const section of [vm.claude, vm.codex, vm.grok, vm.grokBot, vm.devin]) {
     if (section === null) continue;
     lines.push(...sectionLines(section, frameWidth, comfortable));
   }
-  if (vm.claude === null && vm.codex === null && vm.grok === null && vm.grokBot === null) {
+  if (vm.claude === null && vm.codex === null && vm.grok === null && vm.grokBot === null && vm.devin === null) {
     lines.push([{ text: "  no observations yet — run `agentusage refresh` or install the daemon", tone: "muted" }]);
     lines.push([]);
   }

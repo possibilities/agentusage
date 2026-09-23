@@ -34,6 +34,10 @@ accepted ownership rationale into another parallel specification.
 - [0019: Observe Grok Bot usage separately from Grok billing](0019-observe-grok-bot-usage.md)
   shows the Computer Hub weekly allowance as its own card. It does not enter
   the Grok inventory or change selection.
+- [0020: Observe Devin usage from the native CLI login](0020-observe-devin-usage.md)
+  shows the seat-management daily/weekly quota as its own card, read with the
+  native credential in place. It does not create a managed account or change
+  selection.
 
 ADRs 0004–0006, 0008, and 0009–0016 remain as historical records of the retired
 integration. They are not current contracts.

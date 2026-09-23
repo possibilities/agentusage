@@ -20,10 +20,12 @@ import { selectGrokAccount } from './balance/grok.ts';
 import {
   readClaudeObservation,
   readCodexObservation,
+  readDevinObservation,
   readGrokBotObservation,
   readGrokObservation,
   refreshClaudeObservation,
   refreshCodexObservation,
+  refreshDevinObservation,
   refreshGrokBotObservation,
   refreshGrokObservation,
 } from './observe.ts';
@@ -261,6 +263,7 @@ async function usageCommand(args: string[]): Promise<number> {
       readCodexObservation(paths) === null &&
       readGrokObservation(paths) === null &&
       readGrokBotObservation(paths) === null &&
+      readDevinObservation(paths) === null &&
       Date.now() < deadline
     ) {
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -275,6 +278,7 @@ async function usageCommand(args: string[]): Promise<number> {
       codex: readCodexObservation(paths),
       grok: readGrokObservation(paths),
       grok_bot: readGrokBotObservation(paths),
+      devin: readDevinObservation(paths),
     });
     return 0;
   }
@@ -297,12 +301,14 @@ async function usageCommand(args: string[]): Promise<number> {
   const codex = readCodexObservation(paths);
   const grok = readGrokObservation(paths);
   const grokBot = readGrokBotObservation(paths);
+  const devin = readDevinObservation(paths);
   const focus = readFocusStates(paths, claude, codex, grok, nowMs);
   const vm = buildViewModel({
     claude,
     codex,
     grok,
     grokBot,
+    devin,
     fable: focus.fable,
     nonFable: focus.nonFable,
     claudeFull: focus.claudeFull,
@@ -348,6 +354,15 @@ async function usageCommand(args: string[]): Promise<number> {
             age_s: Math.round((nowMs - grokBot.observed_at_ms) / 1000),
             used_percent: grokBot.usage?.usedPercent ?? null,
           },
+    devin:
+      devin === null
+        ? null
+        : {
+            health: devin.health,
+            age_s: Math.round((nowMs - devin.observed_at_ms) / 1000),
+            daily_remaining_percent: devin.usage?.dailyRemainingPercent ?? null,
+            weekly_remaining_percent: devin.usage?.weeklyRemainingPercent ?? null,
+          },
   };
   process.stdout.write(`agentusage-meta: ${JSON.stringify(meta)}\n`);
   return 0;
@@ -365,6 +380,7 @@ async function statusCommand(args: string[]): Promise<number> {
   const codex = readCodexObservation(paths);
   const grok = readGrokObservation(paths);
   const grokBot = readGrokBotObservation(paths);
+  const devin = readDevinObservation(paths);
   const focus = readFocusStates(paths, claude, codex, grok, nowMs);
   const codexFocusTarget =
     focus.codexFull.state === 'active' && focus.codexFull.policy !== null
@@ -435,6 +451,16 @@ async function statusCommand(args: string[]): Promise<number> {
               age_s: Math.round((nowMs - grokBot.observed_at_ms) / 1000),
               used_percent: grokBot.usage?.usedPercent ?? null,
             },
+      devin:
+        devin === null
+          ? null
+          : {
+              health: devin.health,
+              age_s: Math.round((nowMs - devin.observed_at_ms) / 1000),
+              plan: devin.usage?.planLabel ?? null,
+              daily_remaining_percent: devin.usage?.dailyRemainingPercent ?? null,
+              weekly_remaining_percent: devin.usage?.weeklyRemainingPercent ?? null,
+            },
       claude_focus: focus.claudeFull,
       codex_focus: focus.codexFull,
       grok_focus: focus.grokFull,
@@ -470,6 +496,14 @@ async function statusCommand(args: string[]): Promise<number> {
     grok === null
       ? 'no observation'
       : `${grok.health} · ${Math.round((nowMs - grok.observed_at_ms) / 1000)}s old · ${grok.accounts.length} accounts`,
+  );
+  describe(
+    'devin',
+    devin === null
+      ? 'no observation'
+      : `${devin.health} · ${Math.round((nowMs - devin.observed_at_ms) / 1000)}s old${
+          devin.usage?.planLabel != null ? ` · ${devin.usage.planLabel}` : ''
+        }`,
   );
   describe(
     'claude focus',
@@ -1391,9 +1425,10 @@ async function refreshCommand(args: string[]): Promise<number> {
     scope !== 'codex' &&
     scope !== 'grok' &&
     scope !== 'grok-bot' &&
+    scope !== 'devin' &&
     scope !== 'all'
   ) {
-    console.error('agentusage refresh: expected claude|codex|grok|grok-bot|all');
+    console.error('agentusage refresh: expected claude|codex|grok|grok-bot|devin|all');
     return 2;
   }
   if (flags.positionals.length > 1 || (flags.strings.has('account') && scope !== 'grok')) {
@@ -1430,6 +1465,13 @@ async function refreshCommand(args: string[]): Promise<number> {
   if (scope === 'grok-bot' || scope === 'all') {
     const result = await refreshGrokBotObservation(paths, { freshWithinMs: 0 });
     outcomes['grok-bot'] = {
+      outcome: result.outcome,
+      health: result.value?.health ?? null,
+    };
+  }
+  if (scope === 'devin' || scope === 'all') {
+    const result = await refreshDevinObservation(paths, { freshWithinMs: 0 });
+    outcomes.devin = {
       outcome: result.outcome,
       health: result.value?.health ?? null,
     };

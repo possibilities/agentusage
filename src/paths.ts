@@ -15,6 +15,9 @@ export interface StatePaths {
   grokBotDir: string;
   grokBotObservation: string;
   grokBotRefreshLock: string;
+  devinDir: string;
+  devinObservation: string;
+  devinRefreshLock: string;
   reservations: string;
   reservationsLock: string;
   fableFocusLeaf: string;
@@ -46,6 +49,9 @@ export function statePaths(env: Record<string, string | undefined> = process.env
     grokBotDir: join(stateRoot, "grok-bot"),
     grokBotObservation: join(stateRoot, "grok-bot", "observation.json"),
     grokBotRefreshLock: join(stateRoot, "grok-bot", "observation.json.refresh.lock"),
+    devinDir: join(stateRoot, "devin"),
+    devinObservation: join(stateRoot, "devin", "observation.json"),
+    devinRefreshLock: join(stateRoot, "devin", "observation.json.refresh.lock"),
     reservations: join(claudeDir, "reservations.json"),
     reservationsLock: join(claudeDir, "reservations.json.lock"),
     fableFocusLeaf: join(claudeDir, "fable-focus-policy.json"),

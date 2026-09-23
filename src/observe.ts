@@ -1,4 +1,4 @@
-import { OBSERVATION_FRESHNESS_CEILING_MS, SUBPROCESS_TIMEOUT_MS } from "./constants.ts";
+import { DEVIN_OBSERVATION_FRESHNESS_CEILING_MS, OBSERVATION_FRESHNESS_CEILING_MS, SUBPROCESS_TIMEOUT_MS } from "./constants.ts";
 import { observeClaude } from "./claude/observe.ts";
 import { type Observation, validateObservation } from "./claude/types.ts";
 import { observeCodex } from "./codex/observe.ts";
@@ -7,6 +7,8 @@ import { observeGrok } from "./grok/observe.ts";
 import { type GrokObservation, validateGrokObservation } from "./grok/types.ts";
 import { observeGrokBot } from "./grok-bot/observe.ts";
 import { type GrokBotObservation, validateGrokBotObservation } from "./grok-bot/types.ts";
+import { observeDevin } from "./devin/observe.ts";
+import { type DevinObservation, validateDevinObservation } from "./devin/types.ts";
 import type { StatePaths } from "./paths.ts";
 import { providerSafeRefresh, type RefreshResult } from "./refresh.ts";
 import { readSidecar, writeSidecar } from "./sidecar.ts";
@@ -25,6 +27,10 @@ export function readGrokObservation(paths: StatePaths): GrokObservation | null {
 
 export function readGrokBotObservation(paths: StatePaths): GrokBotObservation | null {
   return readSidecar(paths.grokBotObservation, validateGrokBotObservation).value;
+}
+
+export function readDevinObservation(paths: StatePaths): DevinObservation | null {
+  return readSidecar(paths.devinObservation, validateDevinObservation).value;
 }
 
 export function nextCodexSourceRevision(
@@ -46,6 +52,17 @@ export function nextGrokBotSourceRevision(
   const revision = Math.max(observedAtMs, prior + 1);
   if (!Number.isSafeInteger(revision) || revision < 1)
     throw new Error("Grok Bot observation source revision exhausted");
+  return revision;
+}
+
+export function nextDevinSourceRevision(
+  previous: DevinObservation | null,
+  observedAtMs: number,
+): number {
+  const prior = previous?.source_revision ?? previous?.observed_at_ms ?? 0;
+  const revision = Math.max(observedAtMs, prior + 1);
+  if (!Number.isSafeInteger(revision) || revision < 1)
+    throw new Error("Devin observation source revision exhausted");
   return revision;
 }
 
@@ -154,5 +171,30 @@ export async function refreshGrokBotObservation(
       writeSidecar(paths.grokBotObservation, value);
     },
     waitMs: SUBPROCESS_TIMEOUT_MS + 1_000,
+  });
+}
+
+export async function refreshDevinObservation(
+  paths: StatePaths,
+  overrides: RefreshOverrides = {},
+): Promise<RefreshResult<DevinObservation>> {
+  return providerSafeRefresh<DevinObservation>({
+    lockPath: paths.devinRefreshLock,
+    read: () => readDevinObservation(paths),
+    observedAtMs: (value) => value.observed_at_ms,
+    freshWithinMs: overrides.freshWithinMs ?? DEVIN_OBSERVATION_FRESHNESS_CEILING_MS,
+    produce: () =>
+      observeDevin({
+        env: overrides.env ?? process.env,
+        previous: readDevinObservation(paths),
+      }),
+    write: (value) => {
+      value.source_revision = nextDevinSourceRevision(
+        readDevinObservation(paths),
+        value.observed_at_ms,
+      );
+      writeSidecar(paths.devinObservation, value);
+    },
+    waitMs: 16_000,
   });
 }

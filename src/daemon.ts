@@ -15,6 +15,7 @@ import {
   readGrokObservation,
   refreshClaudeObservation,
   refreshCodexObservation,
+  refreshDevinObservation,
   refreshGrokBotObservation,
   refreshGrokObservation,
 } from './observe.ts';
@@ -217,6 +218,37 @@ async function grokBotLoop(
   }
 }
 
+async function devinLoop(
+  paths: StatePaths,
+  signal: AbortSignal,
+  env: Record<string, string | undefined>,
+): Promise<void> {
+  while (!signal.aborted) {
+    try {
+      const started = Date.now();
+      const result = await refreshDevinObservation(paths, {
+        freshWithinMs: 60_000,
+        env,
+      });
+      const observation = result.value;
+      const daily = observation?.usage?.dailyRemainingPercent;
+      log(
+        'devin',
+        `${result.outcome} health=${observation?.health ?? 'none'}${
+          typeof daily === 'number' ? ` daily=${(100 - daily).toFixed(1)}% used` : ''
+        } (${Date.now() - started}ms)`,
+      );
+    } catch (error) {
+      log('devin', `cycle threw (non-fatal): ${error instanceof Error ? error.name : 'error'}`);
+    }
+    if (signal.aborted) return;
+    await sleep(
+      OBSERVE_INTERVAL_MS + Math.random() * OBSERVE_JITTER_MS,
+      signal,
+    );
+  }
+}
+
 export async function daemonRun(
   env: Record<string, string | undefined> = process.env,
 ): Promise<void> {
@@ -245,6 +277,7 @@ export async function daemonRun(
       codexLoop(paths, controller.signal, env),
       grokLoop(paths, controller.signal, env),
       grokBotLoop(paths, controller.signal, env),
+      devinLoop(paths, controller.signal, env),
     ]);
   } finally {
     await proxy.stop();

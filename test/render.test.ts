@@ -30,6 +30,7 @@ const vm: UsageViewModel = {
   codex: null,
   grok: null,
   grokBot: null,
+  devin: null,
   focus: [
     { kind: "claude", state: "off", target: null, lifetime: null },
     { kind: "non-fable", state: "active", target: "claude-1", lifetime: "permanent" },

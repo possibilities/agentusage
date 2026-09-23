@@ -94,7 +94,7 @@ export const CONTRACT: Contract = {
     name: 'agentusage',
     version: VERSION,
     purpose:
-      'Claude, Codex, and Grok account ownership, OAuth refresh, usage observations, balancing, and focus policy. Claude/Codex launches use shared proxy leases. Native process ownership stays with the launcher.',
+      'Claude, Codex, and Grok account ownership, OAuth refresh, usage observations, balancing, and focus policy, plus display-only Grok Bot and Devin usage cards. Claude/Codex launches use shared proxy leases. Native process ownership stays with the launcher.',
     audience: 'operator',
   },
   commands: [
@@ -587,7 +587,7 @@ export const CONTRACT: Contract = {
           type: 'string',
           description: 'Which provider to refresh.',
           positional: true,
-          choices: ['claude', 'codex', 'grok', 'all'],
+          choices: ['claude', 'codex', 'grok', 'grok-bot', 'devin', 'all'],
           default: 'all',
         },
         {

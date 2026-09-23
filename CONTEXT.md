@@ -10,15 +10,17 @@
 
 **Slot** — the positive ordinal carried in a Claude route for selection bookkeeping. It no longer names a provider command.
 
-**Display name** — the stable managed key. Account selectors can also use an unambiguous provider identity, email, label, or ordinal. The usage viewer instead names current Grok cards `grok-1` onward, and the Grok Bot card `grok-bot-1`, by position in the list that is actually shown. Those card names are not selectors, and a removed Grok key is never reused.
+**Display name** — the stable managed key. Account selectors can also use an unambiguous provider identity, email, label, or ordinal. The usage viewer instead names current Grok cards `grok-1` onward, the Grok Bot card `grok-bot-1`, and the Devin card `devin-1`, by position in the list that is actually shown. Those card names are not selectors, and a removed Grok key is never reused.
 
 **Workspace name** — the current Codex ChatGPT workspace/account name observed from `accounts/check`. The TUI prefers it over a frozen import label. Operator aliases remain selectors. _Avoid_: display name.
 
 **Grok inventory** — the private `accounts/grok.json` leaf containing Grok identities, credentials, last-good billing, backoff, selection cursor and reservations. AgentUsage is its sole owner. _Avoid_: Grok subprocess, swap adapter.
 
-**Observation** — one normalized provider reading in a sidecar. Claude schema 8, Codex schema 2, and Grok schema 1 are independent envelopes. Grok Bot usage is a separate schema 1 sidecar, not a Grok observation.
+**Observation** — one normalized provider reading in a sidecar. Claude schema 8, Codex schema 2, and Grok schema 1 are independent envelopes. Grok Bot usage is a separate schema 1 sidecar, not a Grok observation; Devin usage is likewise a separate schema 1 sidecar.
 
 **Grok Bot usage** — the account-level weekly allowance reported by `agentgrok usage` for the grok CLI login. It is display-only: not a managed account, not the Grok inventory, and not decision-grade for selection. _Avoid_: included allowance, Grok billing.
+
+**Devin usage** — the account-level plan and daily/weekly quota reported by the Devin CLI login's seat-management endpoint, read with the native `credentials.toml` key in place. It is display-only: not a managed account, and no balance, focus, or prepare applies. _Avoid_: Devin account, ACU.
 
 **Catalog audit** — an offline comparison of supplied reviewed model metadata,
 captured native Codex capabilities and optional public quota evidence. It does

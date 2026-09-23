@@ -2,10 +2,12 @@ import type { StatePaths } from "../paths.ts";
 import {
   readClaudeObservation,
   readCodexObservation,
+  readDevinObservation,
   readGrokBotObservation,
   readGrokObservation,
   refreshClaudeObservation,
   refreshCodexObservation,
+  refreshDevinObservation,
   refreshGrokBotObservation,
   refreshGrokObservation,
 } from "../observe.ts";
@@ -139,12 +141,14 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
     const codex = readCodexObservation(paths);
     const grok = readGrokObservation(paths);
     const grokBot = readGrokBotObservation(paths);
+    const devin = readDevinObservation(paths);
     const fableDelivery = readFocusLeaf(paths.fableFocusLeaf, true) as FocusDelivery<FableFocusPolicy>;
     const vm = buildViewModel({
       claude,
       codex,
       grok,
       grokBot,
+      devin,
       fable: effectiveFableFocus(fableDelivery, claude, nowMs),
       nonFable: effectiveNonFableFocus(readFocusLeaf(paths.nonFableFocusLeaf, false), nowMs),
       claudeFull: effectiveClaudeFullFocus(readFullFocusLeaf(paths.claudeFullFocusLeaf, "claude"), claude, nowMs),
@@ -202,6 +206,7 @@ export async function runUsageTui(paths: StatePaths): Promise<void> {
       refreshCodexObservation(paths, { freshWithinMs: 0 }),
       refreshGrokObservation(paths, { freshWithinMs: 0, providerRefresh: true }),
       refreshGrokBotObservation(paths, { freshWithinMs: 0 }),
+      refreshDevinObservation(paths, { freshWithinMs: 0 }),
     ]);
     refreshing = false;
     paint();

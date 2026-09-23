@@ -4,8 +4,9 @@
 
 AgentUsage owns Claude, Codex, and Grok accounts, OAuth refresh, usage
 observations, account selection, and focus policies. One shared proxy serves
-native Claude/Codex requests; the usage TUI shows all three providers. No swap
-CLI is required for observation or selection.
+native Claude/Codex requests; the usage TUI shows all three providers plus the
+display-only Grok Bot and Devin cards. No swap CLI is required for observation
+or selection.
 
 The existing `agentusage daemon run` process owns the loopback listener and
 observation loops. Native sessions receive opaque session credentials; refresh
@@ -110,6 +111,14 @@ Grok Bot usage is a separate card. The observer runs `agentgrok usage --json`
 and stores only the weekly percent, period, and plan flags. It follows the
 grok CLI login, not the owned Grok inventory, and it never affects selection.
 
+Devin usage is likewise a display-only card. The observer reads the Devin
+CLI's own `credentials.toml` and calls its seat-management endpoint for the
+login's plan, daily and weekly quota, reset times, and billing cycle. The card
+follows whichever login the `devin` CLI uses; the credential is read in place
+and never copied into AgentUsage state, logged, or put in argv. It is not a
+managed account: no balance, focus, or prepare applies.
+[ADR 0020](docs/adr/0020-observe-devin-usage.md) records the decision.
+
 Grok selection retains its existing priority: included allowance, prepaid
 balance, then enabled pay-as-you-go. It requires valid credentials and billing
 no older than 24 hours; a billing authentication rejection blocks selection
@@ -147,6 +156,7 @@ agentusage status --json
 agentusage refresh claude           # observe now, respecting provider backoff
 agentusage recover codex-1          # refresh an expired credential if recoverable
 agentusage refresh grok --account grok-1
+agentusage refresh devin            # display-only card, no selection
 agentusage balance grok --claim --reserve-seconds 30 --json
 agentusage balance claude --model fable --dry-run --json
 agentusage balance codex --model gpt-5.3-codex-spark --dry-run --json
