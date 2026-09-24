@@ -163,6 +163,12 @@ function percent(value: unknown): number | null {
   return Math.min(100, Math.max(0, value));
 }
 
+function quotaRemainingPercent(value: unknown, resetAt: string | null): number | null {
+  // Proto3 JSON omits a zero-valued scalar. A reset time identifies an actual
+  // quota window; without it, an absent percentage may mean unavailable data.
+  return value === undefined && resetAt !== null ? 0 : percent(value);
+}
+
 function integer(value: unknown): number | null {
   if (typeof value === "number" && Number.isSafeInteger(value)) return value;
   if (typeof value === "string" && /^-?\d+$/u.test(value)) {
@@ -192,13 +198,15 @@ export function usageFromStatus(value: unknown): DevinUsage | null {
   const planInfo = record(planStatus.planInfo);
   const devinInfo = record(planInfo?.devinInfo);
   const strategy = planInfo?.billingStrategy;
+  const dailyResetsAt = epochIso(planStatus.dailyQuotaResetAtUnix);
+  const weeklyResetsAt = epochIso(planStatus.weeklyQuotaResetAtUnix);
   return {
     planLabel: label(planInfo?.planName),
     billing: typeof strategy === "string" ? (BILLING[strategy] ?? null) : null,
-    dailyRemainingPercent: percent(planStatus.dailyQuotaRemainingPercent),
-    weeklyRemainingPercent: percent(planStatus.weeklyQuotaRemainingPercent),
-    dailyResetsAt: epochIso(planStatus.dailyQuotaResetAtUnix),
-    weeklyResetsAt: epochIso(planStatus.weeklyQuotaResetAtUnix),
+    dailyRemainingPercent: quotaRemainingPercent(planStatus.dailyQuotaRemainingPercent, dailyResetsAt),
+    weeklyRemainingPercent: quotaRemainingPercent(planStatus.weeklyQuotaRemainingPercent, weeklyResetsAt),
+    dailyResetsAt,
+    weeklyResetsAt,
     periodStart: iso(planStatus.planStart),
     periodEnd: iso(planStatus.planEnd),
     promptCreditsMonthly: integer(planInfo?.monthlyPromptCredits),

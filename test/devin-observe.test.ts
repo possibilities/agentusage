@@ -93,6 +93,37 @@ describe("Devin usage", () => {
     expect(usageFromStatus(null)).toBeNull();
   });
 
+  test("retains depleted quota meters when proto3 omits zero percentages", () => {
+    const reply = statusReply();
+    const planStatus = reply.userStatus.planStatus;
+    const { dailyQuotaRemainingPercent: _daily, weeklyQuotaRemainingPercent: _weekly, ...depleted } = planStatus;
+    const usage = usageFromStatus({ userStatus: { planStatus: depleted } });
+    expect(usage).toMatchObject({ dailyRemainingPercent: 0, weeklyRemainingPercent: 0 });
+    const observation = validateDevinObservation({
+      schema_version: 1, observed_at_ms: NOW, health: "ok", stale: false, error: null, notes: [], usage,
+    });
+    expect(observation).not.toBeNull();
+    const view = buildViewModel({
+      claude: null, codex: null, grok: null, grokBot: null, devin: observation,
+      fable: off, nonFable: off, claudeFull: off, codexFull: off, grokFull: off, nowMs: NOW,
+    });
+    const card = view.devin!.cards[0]!;
+    expect(card.status).toBe("spent");
+    expect(card.meters.map((meter) => meter.usedPercent)).toEqual([100, 100]);
+    const text = linesToText(renderFrameLines(view, 80, { title: false }), false);
+    for (const label of ["daily quota", "weekly quota"]) {
+      expect(text.split("\n").find((line) => line.includes(label))).toMatch(/▕█+▏\s+100%/);
+    }
+
+    // Missing or malformed window evidence must not turn unknown quota into spent.
+    expect(usageFromStatus({ userStatus: { planStatus: { planInfo: {}, dailyQuotaResetAtUnix: "bad" } } }))
+      .toMatchObject({ dailyRemainingPercent: null, weeklyRemainingPercent: null });
+    expect(usageFromStatus({ userStatus: { planStatus: { planInfo: {}, dailyQuotaResetAtUnix: "1790150400", dailyQuotaRemainingPercent: null } } }))
+      .toMatchObject({ dailyRemainingPercent: null });
+    expect(usageFromStatus({ userStatus: { planStatus: { planInfo: {}, dailyQuotaRemainingPercent: 0 } } }))
+      .toMatchObject({ dailyRemainingPercent: 0, weeklyRemainingPercent: null });
+  });
+
   test("reports absent when no Devin login is installed", async () => {
     const fixture = fixtureState();
     const observation = await observeDevin({

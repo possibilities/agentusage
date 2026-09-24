@@ -96,6 +96,26 @@ describe("Signal Room frame", () => {
     expect(bar.length).toBe(36);
   });
 
+  test("keeps meter tracks visible at both quota extremes for every provider", () => {
+    for (const provider of ["claude", "codex", "grok", "grok-bot", "devin"] as const) {
+      const card = {
+        ...vm.claude!.cards[0]!, provider, name: `${provider}-1`, focus: [],
+        meters: [
+          { label: "depleted", usedPercent: 100, resetText: null, tone: "over" as const, spark: false },
+          { label: "available", usedPercent: 0, resetText: null, tone: "good" as const, spark: false },
+        ],
+      };
+      const section = { ...vm.claude!, provider, cards: [card] };
+      for (const width of [40, 80, 120]) {
+        const lines = renderFrameLines({ ...vm, claude: null, [provider === "grok-bot" ? "grokBot" : provider]: section }, width, { title: false });
+        const depleted = lines.find((line) => line.some((span) => span.text.includes("depleted")))!;
+        const available = lines.find((line) => line.some((span) => span.text.includes("available")))!;
+        expect(depleted.map((span) => span.text).join("")).toMatch(/▕█+▏\s+100%/);
+        expect(available.map((span) => span.text).join("")).toMatch(/▕░+▏\s+0%/);
+      }
+    }
+  });
+
   test("formats elapsed time across minute and hour boundaries", () => {
     expect(formatClock(-1)).toBe("00:00");
     expect(formatClock(61_000)).toBe("01:01");
