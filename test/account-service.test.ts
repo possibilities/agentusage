@@ -35,7 +35,7 @@ import {
   renewLease,
 } from '../src/service/leases.ts';
 import { prepareLaunch } from '../src/service/prepare.ts';
-import { fixtureState, managed, seed, codexUsage } from './managed-fixtures.ts';
+import { fixtureState, managed, seed, claudeUsage, codexUsage } from './managed-fixtures.ts';
 
 const servers: Array<{ stop(close?: boolean): unknown }> = [];
 afterEach(async () => {
@@ -220,6 +220,32 @@ describe('owned credential lifecycle', () => {
     expect(readPool(state.paths).accounts[0]!.auth_error).toBe(
       'relogin-required',
     );
+  });
+  test('Claude refresh accepts weekly breakdown metadata and replaces a failed last-good reading', async () => {
+    const state = fixtureState();
+    const account = managed('claude', 1, {
+      next_poll_at_ms: 0,
+      usage_error: { code: 'invalid-response', status: null },
+    });
+    account.usage!.measured_at_ms -= 13 * 60_000;
+    await seed(state, [account]);
+    const usage = { ...claudeUsage(17), seven_day_breakdown: {} };
+    const server = upstream((request) => {
+      expect(new URL(request.url).pathname).toBe('/api/oauth/usage');
+      return Response.json(usage);
+    });
+    const before = Date.now();
+    const refreshed = await refreshUsage(state.paths, 'claude', {
+      ...state.env,
+      AGENTUSAGE_TEST_CLAUDE_ORIGIN: server.url.origin,
+    });
+    expect(refreshed[0]!.usage_error).toBeNull();
+    expect(refreshed[0]!.usage!.measured_at_ms).toBeGreaterThanOrEqual(before);
+    expect(refreshed[0]!.usage!.value).toEqual(usage);
+    const observation = buildObservation(refreshed, Date.now());
+    expect(observation.account_issues).toEqual({});
+    expect(observation.routes).toHaveLength(1);
+    expect(observation.routes[0]!.windows.map(w => w.key)).toEqual(['session', 'week', 'model:fable']);
   });
   test('weekly-only usage refreshes both native variants and permits pinned dry runs without leases', async () => {
     const state = fixtureState();

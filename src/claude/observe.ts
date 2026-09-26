@@ -8,6 +8,8 @@ export function parseClaudeUsage(value:unknown):{windows:NormalizedWindow[];malf
  const raw=record(value);if(!raw)return {windows:[],malformedScoped:false};
  const windows:NormalizedWindow[]=[];let malformedScoped=false;
  for(const [name,value]of Object.entries(raw)){
+  // Weekly breakdown metadata is not an independent model quota window.
+  if(name==='seven_day_breakdown')continue;
   const key=name==='five_hour'?'session':name==='seven_day'?'week':name.startsWith('seven_day_')?`model:${name.slice(10).toLowerCase()}`:name==='extra_usage'?'spend':null;
   if(!key||value===null)continue;
   const w=record(value);

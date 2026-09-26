@@ -23,6 +23,17 @@ describe('owned Claude observations', () => {
     expect(observed.routes).toHaveLength(0);
     expect(observed.account_issues).toEqual({ 'claude-1': 'malformed-scoped-windows', 'claude-2': 'missing-windows' });
   });
+  test('weekly breakdown metadata is not a scoped quota window', () => {
+    const usage = { ...claudeUsage(), seven_day_breakdown: {} };
+    const parsed = parseClaudeUsage(usage);
+    expect(parsed.malformedScoped).toBe(false);
+    expect(parsed.windows.map(w => w.key)).toEqual(['session', 'week', 'model:fable']);
+
+    // Only the known metadata field is exempt: new malformed scoped windows
+    // must still prevent an account from becoming launchable.
+    const malformed = parseClaudeUsage({ ...usage, seven_day_new_model: {} });
+    expect(malformed.malformedScoped).toBe(true);
+  });
   test('stale, failed and disabled readings remain displayable, never launchable', () => {
     const a = managed('claude', 1); a.usage!.measured_at_ms -= 600_000;
     const b = managed('claude', 2, { usage_error: { code: 'http-429', status: 429 } });
