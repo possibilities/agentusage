@@ -3,7 +3,7 @@
 Claude, Codex, and Grok account ownership, OAuth refresh, observations,
 balancing, and a usage TUI. One existing daemon proxies Claude/Codex native
 sessions and observes every provider. `docs/ACCOUNT-OWNERSHIP.md` supersedes the Claude/Codex
-ownership sections of `docs/SKETCH.md`; `CONTEXT.md` is the glossary and
+ownership sections of `docs/SKETCH.md`; `GLOSSARY.md` is the glossary and
 `README.md` the operator and launcher contract. Grok ownership and its explicit
 snapshot transfer are recorded in `docs/adr/0001-own-grok-account-lifecycle.md`.
 The [decision navigation](docs/adr/README.md) identifies which sketch sections

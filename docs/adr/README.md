@@ -19,7 +19,7 @@
 - The sketch's viewer and focus-policy contracts remain applicable; its swap
   examples are historical wherever the documents above replace them.
 
-Read [CONTEXT.md](../../CONTEXT.md) for provider observations, selection and
+Read [GLOSSARY.md](../../GLOSSARY.md) for provider observations, selection and
 lease terms, and [README.md](../../README.md) for the current operator/launcher
 contract. Add a new record when the choice changes rather than copying the
 accepted ownership rationale into another parallel specification.
